@@ -47,8 +47,9 @@ _antidote_load() {
         zsh_plugins=${XDG_CONFIG_HOME:-${HOME}/.config}/antidote/zsh_plugins
 
         zstyle ':antidote:bundle' file ${zsh_plugins}.conf
+        zstyle ':antidote:static' file ${zsh_plugins}.zsh
 
-        antidote load ${zsh_plugins}.conf ${zsh_plugins}.zsh
+        antidote load
     else
         # oh-my-zsh init fallback
         export ZSH="${HOME}/.oh-my-zsh"
