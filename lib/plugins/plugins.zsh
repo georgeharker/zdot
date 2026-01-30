@@ -18,6 +18,7 @@ _plugins_init() {
         zstyle ':omz:plugins:nvm' lazy no
     fi
     zstyle ':omz:plugins:nvm' autoload no
+    zstyle ':omz:plugins:nvm' lazy-cmd opencode mcp-hub copilot prettierd claude-code
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
 
     # Fast-syntax-highlighting
