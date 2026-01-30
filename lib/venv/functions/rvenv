@@ -1,0 +1,31 @@
+#!/usr/bin/env zsh
+# Recreate virtual environment (preserving packages)
+
+rvenv() {
+    local python_version=${1:-$DEFAULT_PYTHON_VERSION}
+    local venv=${2:-.venv}
+    if [[ -d ${venv} ]]; then
+        local datestring=`date "+%Y-%m-%d.%H.%M"`
+        avenv ${venv}
+        local requirements="/tmp/requirements.${datestring}.txt"
+        pip3 freeze > ${requirements}
+        echo "Recreating virtualenv ${venv} with python=${python_version}"
+        echo "requirements in ${requirements}"
+        if is-macos; then
+            sed -i -e 's/==.*$//g' ${requirements}
+        else
+            sed -i '' -e 's/==.*$//g' ${requirements}
+        fi
+        deactivate 2> /dev/null
+        local backup="${venv}.backup.${datestring}"
+        echo "Moving old ${venv} to ${backup}."
+        mv ${venv} ${backup}
+        nvenv ${python_version} ${venv}
+        avenv ${venv}
+        echo "Installing packages from ${requirements}"
+        uv pip install -r ${requirements}
+    else
+        echo "Venv ${venv} does not exist, creating..."
+        nvenv ${python} ${venv}
+    fi
+}

@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+# Activate virtual environment
+
+avenv() {
+    local venv=${1:-.venv}
+    if [[ -d .venv ]] ; then
+        source ${venv}/bin/activate
+    else
+        echo "No venv (${venv}) found"
+        exit 1
+    fi
+}

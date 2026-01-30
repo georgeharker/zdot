@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+# ZLE widget for ripgrep
+
+zle_fzf_rg() {
+    local selected
+    selected=$(fzf_rg 'enter:accept' "${*:-}")
+    if [[ $? -eq 0 && -n "$selected" ]]; then
+        zle reset-prompt
+        zle -U "${selected##*:}"
+    fi
+}

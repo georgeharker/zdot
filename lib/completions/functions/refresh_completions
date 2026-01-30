@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+# Autoloadable function: Generate shell completions for various tools
+# Uses registered completions from zdot_completion_register_file
+
+refresh_completions() {
+    # Process all registered completions in order
+    for cmd in "${_ZDOT_COMPLETION_CMDS[@]}"; do
+        local gen_cmd="${_ZDOT_COMPLETION_GEN[$cmd]}"
+        local dest_dir="${_ZDOT_COMPLETION_DEST[$cmd]}"
+
+        # Ensure destination directory exists
+        mkdir -p "$dest_dir"
+
+        local comp_file="$dest_dir/_${cmd}"
+
+        # Generate if command exists and completion doesn't
+        if command -v "$cmd" &> /dev/null && [[ ! -f "$comp_file" ]]; then
+            eval "$gen_cmd" > "$comp_file"
+        fi
+    done
+}

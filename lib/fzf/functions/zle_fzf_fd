@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+# ZLE widget for fd
+
+zle_fzf_fd() {
+    local selected
+    selected=$(fzf_fd 'enter:accept' "${*:-}")
+    if [[ $? -eq 0 && -n "$selected" ]]; then
+        zle reset-prompt
+        zle -U "${selected##*:}"
+    fi
+}

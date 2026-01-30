@@ -1,0 +1,13 @@
+#!/usr/bin/env zsh
+# Create new virtual environment
+
+nvenv() {
+    local python_version=${1:-$DEFAULT_PYTHON_VERSION}
+    local venv=${2:-.venv}
+    if [[ ! -d ${venv} ]];  then
+        echo "Creating virtualenv ${venv} with python=${python_version}"
+        uv venv -p ${python_version} --system-site-packages --seed ${venv}
+    else
+        echo "Venv ${venv} already exists"
+    fi
+}

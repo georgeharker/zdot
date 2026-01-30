@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# Open result in editor
+
+vim_fzf_rg() {
+    fzf_rg 'enter:become('${EDITOR}' {1} +{2})' "${*:-}"
+}

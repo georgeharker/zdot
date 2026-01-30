@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# Open file in editor
+
+vim_fzf_fd() {
+    fzf_fd 'enter:become('${EDITOR}' {1} +{2})' "${*:-}"
+}

@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+# File finder with fzf
+
+fzf_fd() {
+    local enter_bind=${1:-"enter:accept"}
+    fd . --type file | fzf --multi --no-sort --cycle \
+        --preview='echo {}' \
+        --preview-window down:10% \
+        --layout='reverse-list' \
+        --color bg:#222222,preview-bg:#333333\
+        --bind "${enter_bind}"
+}

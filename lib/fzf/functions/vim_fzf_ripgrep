@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# Open ripgrep result in editor
+
+vim_fzf_ripgrep() {
+    fzf_ripgrep 'enter:become('${EDITOR}' {1} +{2})' "${*:-}"
+}
