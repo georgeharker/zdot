@@ -1,0 +1,119 @@
+#!/usr/bin/env zsh
+# List all registered phases with detailed information
+# Usage: zdot_phase_list [--verbose|-v] [--all|-a|all]
+# Options:
+#   --verbose, -v    Show whether functions are defined
+#   --all, -a, all   Show all contexts (default: only show current shell context)
+
+local verbose=0
+local show_all=0
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --verbose|-v)
+            verbose=1
+            ;;
+        --all|-a|all)
+            show_all=1
+            ;;
+    esac
+done
+
+echo "Registered Phase Hooks:"
+echo ""
+
+# Show current shell context
+local interactive_ctx="noninteractive"
+[[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && interactive_ctx="interactive"
+local login_ctx="nonlogin"
+[[ $_ZDOT_IS_LOGIN -eq 1 ]] && login_ctx="login"
+echo "Current shell context: ${interactive_ctx}, ${login_ctx}"
+
+if [[ $show_all -eq 1 ]]; then
+    echo "Showing: all contexts"
+else
+    echo "Showing: active contexts only (use --all to see all)"
+fi
+echo ""
+
+# Determine which contexts to show
+local -a contexts_to_show
+if [[ $show_all -eq 1 ]]; then
+    contexts_to_show=(interactive noninteractive login nonlogin)
+else
+    contexts_to_show=("$interactive_ctx" "$login_ctx")
+fi
+
+# Use execution order if available, otherwise show all registered phases
+local -a phase_list
+if [[ ${#_ZDOT_PHASE_EXECUTION_ORDER[@]} -gt 0 ]]; then
+    echo "Phases (in execution order):"
+    phase_list=("${_ZDOT_PHASE_EXECUTION_ORDER[@]}")
+else
+    echo "Phases (not yet executed, showing all registered):"
+    # Extract unique phase names from phase@context keys
+    local -A unique_phases
+    for phase_ctx in ${(k)_ZDOT_PHASES}; do
+        local phase="${phase_ctx%%@*}"
+        unique_phases[$phase]=1
+    done
+    phase_list=("${(k)unique_phases[@]}")
+fi
+echo ""
+
+for phase in "${phase_list[@]}"; do
+    # Collect hooks from relevant contexts for this phase
+    local -A phase_hooks_by_context=()
+    local found_any=0
+
+    for ctx in "${contexts_to_show[@]}"; do
+        local phase_ctx="${phase}@${ctx}"
+        local hooks="${_ZDOT_PHASES[${phase_ctx}]}"
+        if [[ -n "$hooks" ]]; then
+            phase_hooks_by_context[$ctx]="$hooks"
+            found_any=1
+        fi
+    done
+
+    if [[ $found_any -eq 1 ]]; then
+        echo "Phase: $phase"
+
+        # Show hooks organized by context
+        for ctx in "${contexts_to_show[@]}"; do
+            local hooks="${phase_hooks_by_context[$ctx]}"
+            if [[ -n "$hooks" ]]; then
+                echo "  Context: $ctx"
+                for hook in ${=hooks}; do
+                    local module="${_ZDOT_HOOK_MODULES[$hook]:-unknown}"
+                    if [[ $verbose -eq 1 ]]; then
+                        if typeset -f "$hook" > /dev/null 2>&1; then
+                            echo "    ✓ $hook [$module] (defined)"
+                        else
+                            echo "    ✗ $hook [$module] (NOT defined)"
+                        fi
+                    else
+                        echo "    • $hook [$module]"
+                    fi
+                done
+            fi
+        done
+        echo ""
+    fi
+done
+
+# Summary
+if [[ $show_all -eq 1 ]]; then
+    local total_phase_contexts=${#_ZDOT_PHASES[@]}
+    echo "Total: $total_phase_contexts phase@context registration(s)"
+else
+    # Count only active contexts
+    local active_count=0
+    for phase_ctx in ${(k)_ZDOT_PHASES}; do
+        local ctx="${phase_ctx#*@}"
+        if [[ " ${contexts_to_show[@]} " =~ " ${ctx} " ]]; then
+            ((active_count++))
+        fi
+    done
+    echo "Total: $active_count active phase@context registration(s)"
+fi

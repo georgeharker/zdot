@@ -9,4 +9,5 @@ _keybinds_init() {
 }
 
 # Register hook for post-plugin phase (after plugins and functions are loaded)
-zdot_hook_register post-plugin _keybinds_init
+# Keybinds only needed in interactive shells
+zdot_hook_register post-plugin _keybinds_init interactive

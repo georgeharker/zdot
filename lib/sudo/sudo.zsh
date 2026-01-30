@@ -15,4 +15,4 @@ _sudo_init() {
 }
 
 # Register initialization hook for system phase (runs after ssh module in system phase)
-zdot_hook_register system _sudo_init
+zdot_hook_register system _sudo_init interactive noninteractive

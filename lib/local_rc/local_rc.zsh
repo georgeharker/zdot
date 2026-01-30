@@ -11,4 +11,4 @@ _local_rc_init() {
 }
 
 # Register hook for after-secrets phase (runs late to allow overriding anything)
-zdot_hook_register after-secrets _local_rc_init
+zdot_hook_register after-secrets _local_rc_init interactive noninteractive

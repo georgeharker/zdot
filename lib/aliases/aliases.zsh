@@ -8,4 +8,5 @@ _aliases_init() {
 }
 
 # Register hook for post-plugin phase (after plugins load their aliases)
-zdot_hook_register post-plugin _aliases_init
+# Aliases only needed in interactive shells
+zdot_hook_register post-plugin _aliases_init interactive

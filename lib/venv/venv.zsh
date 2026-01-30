@@ -27,8 +27,8 @@ _activate_global_venv() {
 }
 
 # Register hooks
-zdot_hook_register pre-plugin _venv_init
-zdot_hook_register after-secrets _activate_global_venv
+zdot_hook_register pre-plugin _venv_init interactive noninteractive
+zdot_hook_register after-secrets _activate_global_venv interactive noninteractive
 
 # Lazy load module functions
 zdot_module_autoload_funcs

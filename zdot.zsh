@@ -20,7 +20,17 @@ source "${zdot_core_dir}/functions.zsh"
 source "${zdot_core_dir}/completions.zsh"
 source "${zdot_core_dir}/utils.zsh"
 
-unset zdot_core_dir
+# Autoload core functions
+local core_functions_dir="${zdot_core_dir}/functions"
+if [[ -d "$core_functions_dir" ]]; then
+    fpath=("$core_functions_dir" $fpath)
+    for func_file in "$core_functions_dir"/*; do
+        [[ -f "$func_file" ]] || continue
+        autoload -Uz "${func_file:t}"
+    done
+fi
+
+unset zdot_core_dir core_functions_dir
 
 # Mark zdot as loaded
 _ZDOT_MODULES_LOADED[zdot]=1

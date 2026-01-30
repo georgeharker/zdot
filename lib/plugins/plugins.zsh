@@ -12,15 +12,12 @@ _plugins_init() {
     zstyle ':omz:plugins:eza' 'icons' yes
 
     # nvm
-    # NOTE: currently we invoke interactively for VimR
-    # if [[ -o interactive ]]; then
-    if [[ -n "$NVIM" ]]; then
+    if zdot_interactive; then
         zstyle ':omz:plugins:nvm' lazy yes
     else
         zstyle ':omz:plugins:nvm' lazy no
     fi
     zstyle ':omz:plugins:nvm' autoload no
-    zstyle ':omz:plugins:nvm' lazy-cmd mcp-hub
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
 
     # Fast-syntax-highlighting
@@ -81,6 +78,6 @@ _plugins_post_init() {
 }
 
 # Register hooks
-zdot_hook_register pre-plugin _plugins_init
-zdot_hook_register plugin-load _antidote_load
-zdot_hook_register post-plugin _plugins_post_init
+zdot_hook_register pre-plugin _plugins_init interactive noninteractive
+zdot_hook_register plugin-load _antidote_load interactive noninteractive
+zdot_hook_register post-plugin _plugins_post_init interactive noninteractive

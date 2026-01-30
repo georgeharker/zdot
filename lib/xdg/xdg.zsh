@@ -67,5 +67,5 @@ _xdg_cleanup() {
 }
 
 # Register hooks
-zdot_hook_register bootstrap _xdg_init
-zdot_hook_register finalize _xdg_cleanup
+zdot_hook_register bootstrap _xdg_init interactive noninteractive
+zdot_hook_register finalize _xdg_cleanup interactive noninteractive

@@ -19,4 +19,4 @@ _ssh_init() {
 }
 
 # Register initialization hook for system phase (runs after bootstrap, before pre-plugin)
-zdot_hook_register system _ssh_init
+zdot_hook_register system _ssh_init interactive noninteractive

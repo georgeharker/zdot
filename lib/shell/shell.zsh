@@ -18,4 +18,4 @@ _shell_init() {
 }
 
 # Register hook
-zdot_hook_register pre-plugin _shell_init
+zdot_hook_register pre-plugin _shell_init interactive noninteractive

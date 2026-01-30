@@ -7,27 +7,39 @@
 # ============================================================================
 
 # Register a hook function to run during a named phase
-# Usage: zdot_hook_register <phase-name> <function-name>
+# Usage: zdot_hook_register <phase-name> <function-name> <context1> [context2 ...]
+# Contexts: interactive, noninteractive, login, nonlogin
+# Example: zdot_hook_register bootstrap _my_init interactive noninteractive
 zdot_hook_register() {
     local phase="$1"
     local func="$2"
+    local contexts=("${@:3}")
 
     if [[ -z "$phase" || -z "$func" ]]; then
         echo "zdot_hook_register: phase and function required" >&2
         return 1
     fi
 
-    # Initialize phase array if it doesn't exist
-    if [[ -z "${_ZDOT_PHASES[$phase]}" ]]; then
-        _ZDOT_PHASES[$phase]=""
+    if [[ ${#contexts[@]} -eq 0 ]]; then
+        echo "zdot_hook_register: at least one context required (interactive, noninteractive, login, nonlogin)" >&2
+        return 1
     fi
 
-    # Append function to phase
-    if [[ -z "${_ZDOT_PHASES[$phase]}" ]]; then
-        _ZDOT_PHASES[$phase]="$func"
-    else
-        _ZDOT_PHASES[$phase]="${_ZDOT_PHASES[$phase]} $func"
-    fi
+    # Register hook for each specified context
+    for ctx in "${contexts[@]}"; do
+        local phase_ctx="${phase}@${ctx}"
+        # Initialize phase array if it doesn't exist
+        if [[ -z "${_ZDOT_PHASES[$phase_ctx]}" ]]; then
+            _ZDOT_PHASES[$phase_ctx]=""
+        fi
+
+        # Append function to phase
+        if [[ -z "${_ZDOT_PHASES[$phase_ctx]}" ]]; then
+            _ZDOT_PHASES[$phase_ctx]="$func"
+        else
+            _ZDOT_PHASES[$phase_ctx]="${_ZDOT_PHASES[$phase_ctx]} $func"
+        fi
+    done
 
     # Track which module registered this hook
     if [[ -n "$_ZDOT_CURRENT_MODULE_NAME" ]]; then
@@ -37,6 +49,7 @@ zdot_hook_register() {
 
 # Execute all hooks registered for a phase
 # Usage: zdot_phase_run <phase-name>
+# Automatically determines shell context and merges appropriate hook lists
 zdot_phase_run() {
     local phase="$1"
 
@@ -45,90 +58,52 @@ zdot_phase_run() {
         return 1
     fi
 
-    local hooks="${_ZDOT_PHASES[$phase]}"
-    if [[ -n "$hooks" ]]; then
-        for hook in ${=hooks}; do
-            if typeset -f "$hook" > /dev/null; then
-                "$hook"
-            else
-                echo "zdot_phase_run: hook function '$hook' not found for phase '$phase'" >&2
-            fi
-        done
-    fi
-}
-
-# List all registered phases with detailed information
-# Usage: zdot_phase_list [--verbose|-v]
-zdot_phase_list() {
-    local verbose=0
-    if [[ "$1" == "--verbose" || "$1" == "-v" ]]; then
-        verbose=1
+    # Track that this phase was executed (only if not already in the list)
+    if [[ ! " ${_ZDOT_PHASE_EXECUTION_ORDER[@]} " =~ " ${phase} " ]]; then
+        _ZDOT_PHASE_EXECUTION_ORDER+=("$phase")
     fi
 
-    # Define phase order for organized display
-    local -a phase_order
-    phase_order=(bootstrap system pre-plugin plugin-load post-plugin after-secrets finalize)
+    # Determine current shell context
+    local interactive_ctx="noninteractive"
+    [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && interactive_ctx="interactive"
 
-    echo "Registered Phase Hooks:"
-    echo ""
+    local login_ctx="nonlogin"
+    [[ $_ZDOT_IS_LOGIN -eq 1 ]] && login_ctx="login"
 
-    for phase in $phase_order; do
-        local hooks="${_ZDOT_PHASES[$phase]}"
+    # Collect hooks from both context dimensions
+    local interactive_phase_ctx="${phase}@${interactive_ctx}"
+    local hooks_interactive="${_ZDOT_PHASES[${interactive_phase_ctx}]}"
+    local login_phase_ctx="${phase}@${login_ctx}"
+    local hooks_login="${_ZDOT_PHASES[${login_phase_ctx}]}"
 
-        if [[ -n "$hooks" ]]; then
-            echo "Phase: $phase"
+    # Merge hook lists (deduplicate)
+    local -a all_hooks
+    local -A seen_hooks
 
-            local hook_count=0
-            for hook in ${=hooks}; do
-                ((hook_count++))
-
-                # Get module that registered this hook
-                local module="${_ZDOT_HOOK_MODULES[$hook]:-unknown}"
-
-                if [[ $verbose -eq 1 ]]; then
-                    # Verbose mode: show if function exists and is defined
-                    if typeset -f "$hook" > /dev/null 2>&1; then
-                        echo "  ✓ $hook [$module] (defined)"
-                    else
-                        echo "  ✗ $hook [$module] (NOT defined)"
-                    fi
-                else
-                    # Normal mode: show hook and module
-                    echo "  • $hook [$module]"
-                fi
-            done
-
-            if [[ $verbose -eq 0 ]]; then
-                echo "  ($hook_count hook(s))"
-            fi
-            echo ""
+    # Add interactive context hooks
+    for hook in ${=hooks_interactive}; do
+        if [[ -z "${seen_hooks[$hook]}" ]]; then
+            all_hooks+=("$hook")
+            seen_hooks[$hook]=1
         fi
     done
 
-    # Show any phases not in the standard order
-    for phase in ${(k)_ZDOT_PHASES}; do
-        if [[ ! " ${phase_order[@]} " =~ " ${phase} " ]]; then
-            local hooks="${_ZDOT_PHASES[$phase]}"
-            echo "Phase: $phase (custom)"
-            for hook in ${=hooks}; do
-                local module="${_ZDOT_HOOK_MODULES[$hook]:-unknown}"
-                if [[ $verbose -eq 1 ]]; then
-                    if typeset -f "$hook" > /dev/null 2>&1; then
-                        echo "  ✓ $hook [$module] (defined)"
-                    else
-                        echo "  ✗ $hook [$module] (NOT defined)"
-                    fi
-                else
-                    echo "  • $hook [$module]"
-                fi
-            done
-            echo ""
+    # Add login context hooks
+    for hook in ${=hooks_login}; do
+        if [[ -z "${seen_hooks[$hook]}" ]]; then
+            all_hooks+=("$hook")
+            seen_hooks[$hook]=1
         fi
     done
 
-    # Summary
-    local total_phases=${#_ZDOT_PHASES[@]}
-    echo "Total: $total_phases phase(s) registered"
+    # Execute all collected hooks
+    for hook in "${all_hooks[@]}"; do
+        if typeset -f "$hook" > /dev/null; then
+            "$hook"
+        else
+            echo "zdot_phase_run: hook function '$hook' not found for phase '$phase'" >&2
+        fi
+    done
 }
 
 # List hooks organized by module

@@ -7,7 +7,7 @@ _rust_init() {
 }
 
 # Register hooks
-zdot_hook_register finalize _rust_init
+zdot_hook_register finalize _rust_init interactive noninteractive
 
 # Register completions
 zdot_completion_register_file "rustup" "rustup completions zsh > $(_zdot_completions_dir)/_rustup"

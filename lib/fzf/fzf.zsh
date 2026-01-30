@@ -71,8 +71,8 @@ _fzf_post_plugin() {
 }
 
 # Register hooks
-zdot_hook_register pre-plugin _fzf_init
-zdot_hook_register post-plugin _fzf_post_plugin
+zdot_hook_register pre-plugin _fzf_init interactive
+zdot_hook_register post-plugin _fzf_post_plugin interactive
 
 # Lazy load module functions
 zdot_module_autoload_funcs

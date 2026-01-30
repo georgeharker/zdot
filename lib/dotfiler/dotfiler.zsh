@@ -15,4 +15,4 @@ _dotfiler_init() {
 }
 
 # Register hook for after-secrets phase (needs GH_TOKEN from 1Password)
-zdot_hook_register after-secrets _dotfiler_init
+zdot_hook_register after-secrets _dotfiler_init interactive

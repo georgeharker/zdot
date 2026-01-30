@@ -1,123 +1,42 @@
 #!/usr/bin/env zsh
 # op: 1Password secrets management
+#
+# This module manages 1Password integration for secrets and SSH authentication.
+# It runs in both interactive and noninteractive contexts, but interactive prompts
+# are guarded to only run in interactive shells.
+#
+# Inline Functions:
+#   - _op_get_secrets_dirs: Returns secrets_src_dir and secrets_cache
+#   - _setup_ssh_auth_sock: Sets up SSH_AUTH_SOCK for 1Password agent
+#   - _op_init: Module initialization, orchestrates secret loading
+#
+# Autoloaded Functions (in functions/):
+#   - op_get_config_dir: Returns op config directory path via stdout
+#   - op_get_config_args: Returns op config arguments via stdout (one per line)
+#   - op_auth: Handles authentication setup (interactive only)
+#   - op_refresh: Refreshes service account, calls op_auth if needed
+#   - refresh_shell_secrets: Refreshes shell environment secrets
+#   - refresh_mcpservers_secret: Refreshes MCP servers configuration
+#
+# Global State:
+#   - _ZDOT_OP_ACTIVE: Set to 1 when service account is configured and working
+#
+# Behavior:
+#   - Noninteractive: Only loads existing cached secrets, no prompts
+#   - Interactive: May prompt for setup/authentication if not configured
 
-# Module initialization - set up 1Password secrets
-_op_init() {
-    command -v op &> /dev/null || return 0
+typeset -g _ZDOT_OP_ACTIVE=0
 
-    SECRETS_SRC_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/secrets"
-    SECRETS_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/secrets/"
-    [[ ! -d "${SECRETS_CACHE}" ]] && mkdir -p ${SECRETS_CACHE}
+# Autoload module functions
+zdot_module_autoload_funcs
 
-    op_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/op"
-    local op_config=()
-    if [[ ${SUDO_USER} != "" ]]; then
-        op_config=("--config" "${REAL_HOME}/.config/op")
-    fi
-
-    function refresh_op_client_secrets() {
-        typeset +x OP_SERVICE_ACCOUNT_TOKEN
-        rm -f "${SECRETS_CACHE}/${USER}.op-secrets.zsh"
-
-        if [[ -f ${op_config_dir}/no_op ]]; then
-            return
-        fi
-
-        if [[ ! -f ${op_config_dir}/config && ! -f ${op_config_dir}/no_op ]]; then
-            printf "Set up onepassword ? [Y/n/c] "
-            read -r -k 1 option
-            [[ "$option" = $'\n' ]] || echo
-            case "$option" in
-                [yY$'\n']) ;;
-                [nN]) touch ${op_config_dir}/no_op && return ;;
-                *) echo "You will be asked at next login" ;;
-            esac
-        fi
-
-        echo "Using 1Password to refresh service account"
-        if ! op whoami ${op_config} &> /dev/null; then
-            echo "Sign into 1Password"
-            eval $(op ${op_config} signin)
-        fi
-        local new_svc_acct=0
-        printf "Create new service-account? [Y/n/c] "
-        read -r -k 1 option
-        [[ "$option" = $'\n' ]] || echo
-        case "$option" in
-            [yY$'\n']) new_svc_acct=1 ;;
-            [nN]) new_svc_acct=0 ;;
-            *) echo "You will be asked at next login" ;;
-        esac
-
-        local host_service_account="$(hostname)-service-account"
-
-        if [ $new_svc_acct -eq 1 ]; then
-            local svc_acct_output=$(op service-account create "$host_service_account" --can-create-vaults \
-                                        --vault API:read_items \
-                                        --vault SSHKeys:read_items,write_items | grep "export OP_SERVICE_ACCOUNT_TOKEN=")
-            if [[ $? -eq 0 ]]; then
-                local acct_key=$(eval "$svc_acct_output"; echo $OP_SERVICE_ACCOUNT_TOKEN)
-                op item create --vault ServiceAcct \
-                                --category "API Credential" \
-                                --title "$host_service_account" - \
-                                "credential=$acct_key" \
-                                "validFrom[string]=" \
-                                "expires[string]=" \
-                                "host=$(hostname)" > /dev/null
-                echo "export OP_SERVICE_ACCOUNT_TOKEN=op://ServiceAcct/${host_service_account}/credential" > "${SECRETS_SRC_DIR}/op-secrets.zsh"
-                if op ${op_config} inject --force --in-file "${SECRETS_SRC_DIR}/op-secrets.zsh" --out-file "${SECRETS_CACHE}/${USER}.op-secrets.zsh" > /dev/null; then
-                    op signout
-                else
-                    echo "Failed to refresh 1Password service account"
-                fi
-            else
-                echo "Failed to refresh 1Password service account"
-            fi
-        else
-            if [[ ! -f "${SECRETS_SRC_DIR}/op-secrets.zsh" ]]; then
-                printf "Accounts:"
-                op item list --vault ServiceAcct
-                printf "Choose account name: "
-                read -r name
-                echo "export OP_SERVICE_ACCOUNT_TOKEN=op://ServiceAcct/${host_service_account}/credential" > "${SECRETS_SRC_DIR}/op-secrets.zsh"
-            fi
-            if op ${op_config} inject --force --in-file "${SECRETS_SRC_DIR}/op-secrets.zsh" --out-file "${SECRETS_CACHE}/${USER}.op-secrets.zsh" > /dev/null; then
-                op signout
-            else
-                echo "Failed to refresh 1Password service account"
-            fi
-        fi
-    }
-
-    # First set up service key
-    if src-newer-or-dest-missing "${SECRETS_SRC_DIR}/op-secrets.zsh" "${SECRETS_CACHE}/${USER}.op-secrets.zsh"; then
-        refresh_op_client_secrets
-    fi
-    if [ -f "${SECRETS_CACHE}/${USER}.op-secrets.zsh" ]; then
-        source "${SECRETS_CACHE}/${USER}.op-secrets.zsh"
-    fi
-
-    # Bring in all the secrets
-    function refresh_shell_secrets() {
-        op ${op_config} inject --force --in-file "${SECRETS_SRC_DIR}/secrets.zsh" --out-file "${SECRETS_CACHE}/${USER}.secrets.zsh" > /dev/null
-        source "${SECRETS_CACHE}/${USER}.secrets.zsh"
-    }
-    if src-newer-or-dest-missing "${SECRETS_SRC_DIR}/secrets.zsh" "${SECRETS_CACHE}/${USER}.secrets.zsh"; then
-        refresh_shell_secrets
-    fi
-    if [ -f "${SECRETS_CACHE}/${USER}.secrets.zsh" ]; then
-        source "${SECRETS_CACHE}/${USER}.secrets.zsh"
-    fi
-
-    function refresh_mcpservers_secret() {
-        op ${op_config} inject --force --in-file "${SECRETS_SRC_DIR}/mcpservers.json" --out-file "${SECRETS_CACHE}/${USER}.mcpservers.json" > /dev/null
-    }
-    if src-newer-or-dest-missing "${SECRETS_SRC_DIR}/mcpservers.json" "${SECRETS_CACHE}/${USER}.mcpservers.json"; then
-        refresh_mcpservers_secret
-    fi
-
-    # Set up SSH auth socket for 1Password SSH agent
-    _setup_ssh_auth_sock
+# Get secrets directories
+# Returns via caller-declared local variables:
+#   secrets_src_dir - source directory for secret templates
+#   secrets_cache - cache directory for processed secrets
+_op_get_secrets_dirs() {
+    secrets_src_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/secrets"
+    secrets_cache="${XDG_CACHE_HOME:-$HOME/.cache}/secrets/"
 }
 
 # Set up SSH_AUTH_SOCK to use 1Password SSH agent
@@ -133,5 +52,60 @@ _setup_ssh_auth_sock() {
     fi
 }
 
-# Register hook - after plugins so secrets are available to post-plugin hooks
-zdot_hook_register after-secrets _op_init
+# Module initialization - set up 1Password secrets
+_op_init() {
+    command -v op &> /dev/null || return 0
+
+    # Get secrets directories
+    local secrets_src_dir secrets_cache
+    _op_get_secrets_dirs
+    [[ ! -d "${secrets_cache}" ]] && mkdir -p "${secrets_cache}"
+
+    # Get op config
+    local -a op_config
+    local op_config_dir
+    op_config_dir=$(op_get_config_dir)
+    op_config=("${(@f)$(op_get_config_args)}")
+
+    # Check if config exists - set flag accordingly
+    if [[ ! -f "${op_config_dir}/config" ]]; then
+        _ZDOT_OP_ACTIVE=0
+    fi
+
+    # Refresh service account if source is newer or dest is missing
+    if src-newer-or-dest-missing "${secrets_src_dir}/op-secrets.zsh" "${secrets_cache}/${USER}.op-secrets.zsh"; then
+        op_refresh
+    fi
+
+    # Source the service account token if available
+    if [[ -f "${secrets_cache}/${USER}.op-secrets.zsh" ]]; then
+        source "${secrets_cache}/${USER}.op-secrets.zsh"
+        # If we have a token, mark as active
+        [[ -n "$OP_SERVICE_ACCOUNT_TOKEN" ]] && _ZDOT_OP_ACTIVE=1
+    fi
+
+    # Only proceed with shell secrets if OP is active
+    if [[ $_ZDOT_OP_ACTIVE -eq 1 ]]; then
+        # Refresh shell secrets if needed
+        if src-newer-or-dest-missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
+            refresh_shell_secrets
+        fi
+        
+        # Source shell secrets if available
+        if [[ -f "${secrets_cache}/${USER}.secrets.zsh" ]]; then
+            source "${secrets_cache}/${USER}.secrets.zsh"
+        fi
+
+        # Refresh MCP servers config if needed
+        if src-newer-or-dest-missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
+            refresh_mcpservers_secret
+        fi
+    fi
+
+    # Set up SSH auth socket (works in both interactive and noninteractive)
+    _setup_ssh_auth_sock
+}
+
+# Register hook - runs in both interactive and noninteractive modes
+# Interactive prompts only happen in interactive shells due to function guards
+zdot_hook_register after-secrets _op_init interactive noninteractive

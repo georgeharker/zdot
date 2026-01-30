@@ -10,4 +10,5 @@ _prompt_init() {
 }
 
 # Register hook for finalize phase
-zdot_hook_register finalize _prompt_init
+# Prompt only needed in interactive shells
+zdot_hook_register finalize _prompt_init interactive

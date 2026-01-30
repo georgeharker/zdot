@@ -46,4 +46,4 @@ _env_init() {
 }
 
 # Register hook
-zdot_hook_register pre-plugin _env_init
+zdot_hook_register pre-plugin _env_init interactive noninteractive
