@@ -12,7 +12,7 @@ _plugins_init() {
     zstyle ':omz:plugins:eza' 'icons' yes
 
     # nvm
-    if zdot_interactive; then
+    if zdot_interactive && [[ -z "$NVIM" ]]; then
         zstyle ':omz:plugins:nvm' lazy yes
     else
         zstyle ':omz:plugins:nvm' lazy no
