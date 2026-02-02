@@ -43,6 +43,10 @@ _env_init() {
     if command -v eza &> /dev/null; then
         export EZA_ICONS_AUTO=1
     fi
+
+    # Basic memory
+    export BASIC_MEMORY_HOME="${HOME}/basic-memory"
+    export BASIC_MEMORY_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/basic-memory"
 }
 
 # Register hook
