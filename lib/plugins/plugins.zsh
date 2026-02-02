@@ -12,10 +12,10 @@ _plugins_init() {
     zstyle ':omz:plugins:eza' 'icons' yes
 
     # nvm
-    if zdot_interactive && [[ -z "$NVIM" ]]; then
-        zstyle ':omz:plugins:nvm' lazy yes
-    else
+    if ! zdot_interactive || [[ ! -z "$NVIM" ]]; then
         zstyle ':omz:plugins:nvm' lazy no
+    else
+        zstyle ':omz:plugins:nvm' lazy yes
     fi
     zstyle ':omz:plugins:nvm' autoload no
     zstyle ':omz:plugins:nvm' lazy-cmd opencode mcp-hub copilot prettierd claude-code
