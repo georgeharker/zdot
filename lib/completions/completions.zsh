@@ -39,6 +39,7 @@ _completions_init() {
     # Register standard file-based completions
     zdot_completion_register_file "gh" "gh completion -s zsh"
     zdot_completion_register_file "tailscale" "tailscale completion zsh"
+    zdot_completion_register_file "sharedserver" "sharedserver completion zsh"
 }
 
 # Register hooks

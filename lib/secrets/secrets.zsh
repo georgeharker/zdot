@@ -95,11 +95,6 @@ _op_init() {
         if [[ -f "${secrets_cache}/${USER}.secrets.zsh" ]]; then
             source "${secrets_cache}/${USER}.secrets.zsh"
         fi
-
-        # Refresh MCP servers config if needed
-        if src-newer-or-dest-missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
-            refresh_mcpservers_secret
-        fi
     fi
 
     # Set up SSH auth socket (works in both interactive and noninteractive)
@@ -108,4 +103,4 @@ _op_init() {
 
 # Register hook - runs in both interactive and noninteractive modes
 # Interactive prompts only happen in interactive shells due to function guards
-zdot_hook_register after-secrets _op_init interactive noninteractive
+zdot_hook_register secrets _op_init interactive noninteractive

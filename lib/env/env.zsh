@@ -49,8 +49,8 @@ _env_init() {
     export BASIC_MEMORY_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/basic-memory"
 
     # opencode path
-    export OPENCODE_BIN_PATH=/Users/geohar/Development/ext/opencode/packages/opencode/dist/opencode-darwin-arm64/bin/opencode
-    export OPENCODE_SERVER_URL=http://localhost:4097
+    # export OPENCODE_BIN_PATH=/Users/geohar/Development/ext/opencode/packages/opencode/dist/opencode-darwin-arm64/bin/opencode
+    # export OPENCODE_SERVER_URL=http://localhost:4097
 }
 
 # Register hook
