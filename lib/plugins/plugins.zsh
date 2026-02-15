@@ -99,8 +99,16 @@ _nvm_init() {
     zsh_defer_until 1 nvm use node
 }
 
-# Register hooks
-zdot_hook_register pre-plugin _plugins_init interactive noninteractive
-zdot_hook_register plugin-load _antidote_load interactive noninteractive
-zdot_hook_register post-plugin _plugins_post_init interactive noninteractive
-zdot_hook_register finalize _nvm_init interactive
+# Register hooks with dependency chain
+# plugins_init prepares plugin configuration, provides plugins-configured
+zdot_hook_register _plugins_init interactive noninteractive --requires xdg-configured --provides plugins-configured
+
+# antidote_load actually loads plugins, provides plugins-loaded
+zdot_hook_register _antidote_load interactive noninteractive --requires plugins-configured --provides plugins-loaded
+
+# plugins_post_init runs after plugin load, provides plugins-post-configured
+zdot_hook_register _plugins_post_init interactive noninteractive --requires plugins-loaded --provides plugins-post-configured
+
+# nvm_init deferred initialization (interactive only), provides nvm-ready
+# Requires prompt-ready to avoid racing with prompt's zsh-defer initialization
+zdot_hook_register _nvm_init interactive --requires prompt-ready --provides nvm-ready

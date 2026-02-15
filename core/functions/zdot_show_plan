@@ -1,0 +1,28 @@
+#!/usr/bin/env zsh
+# Show the dependency-resolved execution plan for hooks
+# Usage: zdot_show_plan
+
+function zdot_show_plan() {
+    if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
+        zdot_error "No execution plan built yet. Call zdot_build_execution_plan first."
+        return 1
+    fi
+
+    zdot_info "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks):"
+    zdot_info ""
+
+    local i=1
+    for hook_id in $_ZDOT_EXECUTION_PLAN; do
+        local func=${_ZDOT_HOOKS[$hook_id]}
+        local provides=${_ZDOT_HOOK_PROVIDES[$hook_id]:-"(none)"}
+        local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
+        local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
+
+        zdot_info "$i. $func"
+        zdot_info "   contexts: $contexts"
+        zdot_info "   provides: $provides"
+        zdot_info "   requires: $requires"
+        zdot_info ""
+        (( i++ ))
+    done
+}

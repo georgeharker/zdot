@@ -26,7 +26,7 @@ zdot_module_path() {
     local module="$1"
 
     if [[ -z "$module" ]]; then
-        echo "zdot_module_path: module name required" >&2
+        zdot_error "zdot_module_path: module name required"
         return 1
     fi
 
@@ -39,7 +39,7 @@ zdot_module_load() {
     local module="$1"
 
     if [[ -z "$module" ]]; then
-        echo "zdot_module_load: module name required" >&2
+        zdot_error "zdot_module_load: module name required"
         return 1
     fi
 
@@ -51,7 +51,7 @@ zdot_module_load() {
     local module_file=$(zdot_module_path "$module")
 
     if [[ ! -f "$module_file" ]]; then
-        echo "zdot_module_load: module file not found: $module_file" >&2
+        zdot_error "zdot_module_load: module file not found: $module_file"
         return 1
     fi
 
@@ -70,8 +70,8 @@ zdot_module_load() {
 # List all loaded modules
 # Usage: zdot_module_list
 zdot_module_list() {
-    echo "Loaded modules:"
+    zdot_info "Loaded modules:"
     for module in ${(k)_ZDOT_MODULES_LOADED}; do
-        echo "  $module"
+        zdot_info "  $module"
     done
 }

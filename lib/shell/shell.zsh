@@ -17,5 +17,7 @@ _shell_init() {
     setopt share_history
 }
 
-# Register hook
-zdot_hook_register pre-plugin _shell_init interactive noninteractive
+# Register hook - requires XDG paths for history directory
+zdot_hook_register _shell_init interactive noninteractive \
+    --requires xdg-configured \
+    --provides shell-configured

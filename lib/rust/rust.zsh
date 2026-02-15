@@ -7,7 +7,9 @@ _rust_init() {
 }
 
 # Register hooks
-zdot_hook_register finalize _rust_init interactive noninteractive
+zdot_hook_register _rust_init interactive noninteractive \
+    --requires xdg-configured \
+    --provides rust-ready
 
 # Register completions
 zdot_completion_register_file "rustup" "rustup completions zsh > $(_zdot_completions_dir)/_rustup"

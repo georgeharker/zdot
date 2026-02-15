@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # xdg: XDG Base Directory setup
-# Must be loaded in bootstrap phase as everything depends on it
+# Foundation module - provides xdg-configured phase
 
 function is-macos() {
     [[ $OSTYPE == darwin* ]]
@@ -67,5 +67,7 @@ _xdg_cleanup() {
 }
 
 # Register hooks
-zdot_hook_register bootstrap _xdg_init interactive noninteractive
-zdot_hook_register finalize _xdg_cleanup interactive noninteractive
+# xdg is a foundation module - no dependencies, provides xdg-configured phase
+zdot_hook_register _xdg_init interactive noninteractive --provides xdg-configured
+# Cleanup hook runs after finalize phase is manually provided
+zdot_hook_register _xdg_cleanup interactive noninteractive --requires finalize --on-demand

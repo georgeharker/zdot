@@ -5,8 +5,9 @@
 # Autoload module functions immediately
 zdot_module_autoload_funcs
 
-# Set up completion paths (adds directories to fpath)
-zdot_completions_setup() {
+# Module initialization - Phase 1: Setup fpath and register file completions
+_completions_init() {
+    # Add completion directories to fpath
     local completions_dir="$(_zdot_completions_dir)"
     
     # Add global completions directory to fpath
@@ -21,26 +22,31 @@ zdot_completions_setup() {
             fpath=("$comp_dir" $fpath)
         fi
     done
-}
-
-# Run all live completion registrations
-zdot_completions_run_live() {
-    for func in "${_ZDOT_COMPLETION_LIVE[@]}"; do
-        if typeset -f "$func" > /dev/null; then
-            "$func"
-        else
-            echo "completions: live function '${func}' not found" >&2
-        fi
-    done
-}
-
-# Module initialization
-_completions_init() {
+    
     # Register standard file-based completions
     zdot_completion_register_file "gh" "gh completion -s zsh"
     zdot_completion_register_file "tailscale" "tailscale completion zsh"
     zdot_completion_register_file "sharedserver" "sharedserver completion zsh"
 }
 
+# Phase 2: Run live completions after tools are available
+_completions_finalize() {
+    for func in "${_ZDOT_COMPLETION_LIVE[@]}"; do
+        if typeset -f "$func" > /dev/null; then
+            "$func"
+        else
+            zdot_error "completions: live function '${func}' not found"
+        fi
+    done
+}
+
 # Register hooks
-#zdot_hook_register post-plugin _completions_run_live
+# Phase 1: Early fpath setup (before compinit)
+zdot_hook_register _completions_init interactive \
+    --requires xdg-configured \
+    --provides completions-paths-ready
+
+# Phase 2: Late live completions (after tools available)
+zdot_hook_register _completions_finalize interactive \
+    --requires completions-paths-ready plugins-post-configured rust-ready bun-ready uv-configured \
+    --provides completions-ready

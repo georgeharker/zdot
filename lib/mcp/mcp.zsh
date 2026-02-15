@@ -1,8 +1,6 @@
 #!/usr/bin/env zsh
-# mcp: mcp setsup
+# mcp: mcp setup
 #
-
-typeset -g _ZDOT_OP_ACTIVE=0
 
 # Autoload module functions
 zdot_module_autoload_funcs
@@ -17,7 +15,7 @@ _mcp_get_secrets_mcp_dirs() {
     secrets_mcp_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/secrets/${USER}.mcp"
 }
 
-# Module initialization - set up 1Password secrets
+# Module initialization - set up MCP secrets
 _mcp_init() {
     command -v op &> /dev/null || return 0
 
@@ -26,16 +24,14 @@ _mcp_init() {
     _mcp_get_secrets_mcp_dirs
     [[ ! -d "${secrets_mcp_dir}" ]] && mkdir -p "${secrets_mcp_dir}"
 
-    # Only proceed with shell secrets if OP is active
-    if [[ $_ZDOT_OP_ACTIVE -eq 1 ]]; then
-        # Refresh shell secrets if needed
-        # Refresh MCP servers config if needed
-        if src-newer-or-dest-missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
-            refresh_mcpservers_secret
-        fi
+    # Refresh MCP servers config if needed
+    # This only runs if secrets-loaded phase was provided (optional dependency)
+    if src-newer-or-dest-missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
+        refresh_mcpservers_secret
     fi
 }
 
-# Register hook - runs in both interactive and noninteractive modes
-# Interactive prompts only happen in interactive shells due to function guards
-zdot_hook_register after-secrets _mcp_init interactive noninteractive
+# Register hook - optionally requires secrets-loaded, provides mcp-configured
+# Runs in both interactive and noninteractive modes
+# Will skip gracefully if secrets are not available (optional dependency)
+zdot_hook_register _mcp_init interactive noninteractive --requires xdg-configured secrets-loaded --provides mcp-configured --optional

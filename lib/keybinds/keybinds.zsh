@@ -8,6 +8,8 @@ _keybinds_init() {
     bindkey '[D' backward-word
 }
 
-# Register hook for post-plugin phase (after plugins and functions are loaded)
+# Register hook: requires plugins to be loaded and post-configured
 # Keybinds only needed in interactive shells
-zdot_hook_register post-plugin _keybinds_init interactive
+zdot_hook_register _keybinds_init interactive \
+    --requires plugins-post-configured \
+    --provides keybinds-configured

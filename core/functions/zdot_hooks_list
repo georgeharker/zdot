@@ -1,0 +1,227 @@
+#!/usr/bin/env zsh
+# List all registered hooks organized by the phases they provide
+# Usage: zdot_hooks_list [--verbose|-v] [--all|-a|all]
+# Options:
+#   --verbose, -v    Show whether functions are defined and show dependencies
+#   --all, -a, all   Show all contexts (default: only show current shell context)
+
+local verbose=0
+local show_all=0
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --verbose|-v)
+            verbose=1
+            ;;
+        --all|-a|all)
+            show_all=1
+            ;;
+    esac
+done
+
+zdot_info "Registered Hooks:"
+zdot_info ""
+
+# Show current shell context
+local interactive_ctx="noninteractive"
+[[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && interactive_ctx="interactive"
+local login_ctx="nonlogin"
+[[ $_ZDOT_IS_LOGIN -eq 1 ]] && login_ctx="login"
+zdot_info "Current shell context: ${interactive_ctx}, ${login_ctx}"
+
+if [[ $show_all -eq 1 ]]; then
+    zdot_info "Showing: all contexts"
+else
+    zdot_info "Showing: active contexts only (use --all to see all)"
+fi
+zdot_info ""
+
+# Determine which contexts to show
+local -a contexts_to_show
+if [[ $show_all -eq 1 ]]; then
+    contexts_to_show=(interactive noninteractive login nonlogin)
+else
+    contexts_to_show=("$interactive_ctx" "$login_ctx")
+fi
+
+# Group hooks by the phase they provide
+local -A phases_to_hooks=()
+local -a on_demand_hooks=()
+local -a error_hooks=()
+
+for hook_id in ${(k)_ZDOT_HOOKS}; do
+    local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+    local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
+    local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
+
+    # Check if this hook matches any of the contexts we want to show
+    local matches_context=0
+    if [[ $show_all -eq 1 ]]; then
+        matches_context=1
+    else
+        for ctx in ${=contexts}; do
+            if [[ " ${contexts_to_show[@]} " =~ " ${ctx} " ]]; then
+                matches_context=1
+                break
+            fi
+        done
+    fi
+
+    if [[ $matches_context -eq 1 ]]; then
+        if [[ -n "$provides" ]]; then
+            # Hook provides a phase
+            if [[ -z "${phases_to_hooks[$provides]}" ]]; then
+                phases_to_hooks[$provides]="$hook_id"
+            else
+                phases_to_hooks[$provides]="${phases_to_hooks[$provides]} $hook_id"
+            fi
+        elif [[ "$on_demand" -eq 1 ]]; then
+            # Hook is explicitly marked as on-demand
+            on_demand_hooks+=("$hook_id")
+        else
+            # Hook without phase and not on-demand - check for errors
+            local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
+            local has_error=0
+            
+            # Check if any required phase is unsatisfiable
+            for required_phase in ${=requires}; do
+                # Phase is satisfiable if it's:
+                # 1. Provided by a hook
+                # 2. Promised via zdot_promise_phase
+                # 3. Marked as on-demand
+                if [[ -z "${_ZDOT_PHASE_PROVIDERS[$required_phase]}" ]] && \
+                   [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
+                   [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                    has_error=1
+                    break
+                fi
+            done
+            
+            if [[ $has_error -eq 1 ]]; then
+                error_hooks+=("$hook_id")
+            else
+                # No errors, treat as on-demand (legacy behavior)
+                on_demand_hooks+=("$hook_id")
+            fi
+        fi
+    fi
+done
+
+# Display hooks organized by phase
+if [[ ${#phases_to_hooks[@]} -gt 0 ]]; then
+    zdot_info "Hooks by Phase:"
+    zdot_info ""
+
+    # Sort phase names for consistent output
+    local -a sorted_phases=("${(@ko)phases_to_hooks}")
+
+    for phase in "${sorted_phases[@]}"; do
+        zdot_info "Phase: $phase"
+        local hook_ids="${phases_to_hooks[$phase]}"
+
+        for hook_id in ${=hook_ids}; do
+            local func="${_ZDOT_HOOKS[$hook_id]}"
+            local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+            local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+            local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+
+            if [[ $verbose -eq 1 ]]; then
+                # Verbose mode: show if function is defined and dependencies
+                if typeset -f "$func" > /dev/null 2>&1; then
+                    zdot_info "  ✓ $func (defined)"
+                else
+                    zdot_info "  ✗ $func (NOT defined)"
+                fi
+                zdot_info "    contexts: $contexts"
+                zdot_info "    requires: $requires"
+                if [[ -n "$optional" ]]; then
+                    zdot_info "    optional: yes"
+                fi
+            else
+                # Normal mode: just list the hook
+                local optional_mark=""
+                [[ -n "$optional" ]] && optional_mark=" [optional]"
+                zdot_info "  • $func ($contexts)$optional_mark"
+            fi
+        done
+        zdot_info ""
+    done
+fi
+
+# Display on-demand hooks
+if [[ ${#on_demand_hooks[@]} -gt 0 ]]; then
+    zdot_info "On-demand Hooks:"
+    zdot_info ""
+
+    for hook_id in "${on_demand_hooks[@]}"; do
+        local func="${_ZDOT_HOOKS[$hook_id]}"
+        local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+        local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+        local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+        local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
+
+        if [[ $verbose -eq 1 ]]; then
+            if typeset -f "$func" > /dev/null 2>&1; then
+                zdot_info "  ✓ $func (defined)"
+            else
+                zdot_info "  ✗ $func (NOT defined)"
+            fi
+            zdot_info "    contexts: $contexts"
+            zdot_info "    requires: $requires"
+            if [[ "$on_demand" -eq 1 ]]; then
+                zdot_info "    on-demand: yes"
+            fi
+            if [[ -n "$optional" ]]; then
+                zdot_info "    optional: yes"
+            fi
+        else
+            local optional_mark=""
+            [[ -n "$optional" ]] && optional_mark=" [optional]"
+            local on_demand_mark=""
+            [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
+            zdot_info "  • $func ($contexts)$optional_mark$on_demand_mark"
+        fi
+    done
+    zdot_info ""
+fi
+
+# Display hooks with errors (unsatisfiable requirements)
+if [[ ${#error_hooks[@]} -gt 0 ]]; then
+    zdot_warn "⚠️  Hooks with Missing Requirements:"
+    zdot_info ""
+
+    for hook_id in "${error_hooks[@]}"; do
+        local func="${_ZDOT_HOOKS[$hook_id]}"
+        local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+        local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+        local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+
+        zdot_warn "  ✗ $func ($contexts)"
+        zdot_info "    requires: $requires"
+        
+        # Show which requirements are unsatisfiable
+        for required_phase in ${=requires}; do
+            if [[ -z "${_ZDOT_PHASE_PROVIDERS[$required_phase]}" ]] && \
+               [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
+               [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                zdot_error "      ⚠ '$required_phase' is not provided by any hook"
+            fi
+        done
+        
+        if [[ -n "$optional" ]]; then
+            zdot_info "    optional: yes"
+        fi
+    done
+    zdot_info ""
+fi
+
+# Summary
+local total_hooks=${#_ZDOT_HOOKS[@]}
+local shown_hooks=$((${#phases_to_hooks[@]} + ${#hooks_without_phase[@]}))
+
+if [[ $show_all -eq 1 ]]; then
+    zdot_info "Total: $total_hooks registered hook(s)"
+else
+    zdot_info "Total: $shown_hooks hook(s) in active contexts (of $total_hooks registered)"
+fi

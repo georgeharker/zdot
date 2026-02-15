@@ -16,7 +16,7 @@ zdot_completion_register_file() {
     local dest_dir="${3:-$(_zdot_completions_dir)}"  # Lazy eval default
 
     if [[ -z "$cmd" || -z "$gen_cmd" ]]; then
-        echo "zdot_completion_register_file: command and generate-command required" >&2
+        zdot_error "zdot_completion_register_file: command and generate-command required"
         return 1
     fi
 
@@ -31,7 +31,7 @@ zdot_completion_register_live() {
     local func="$1"
 
     if [[ -z "$func" ]]; then
-        echo "zdot_completion_register_live: function name required" >&2
+        zdot_error "zdot_completion_register_live: function name required"
         return 1
     fi
 

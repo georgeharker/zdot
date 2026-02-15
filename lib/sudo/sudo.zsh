@@ -14,5 +14,7 @@ _sudo_init() {
     fi
 }
 
-# Register initialization hook for system phase (runs after ssh module in system phase)
-zdot_hook_register system _sudo_init interactive noninteractive
+# Register hook - requires XDG functions for directory reconfiguration
+zdot_hook_register _sudo_init interactive noninteractive \
+    --requires xdg-configured \
+    --provides sudo-configured

@@ -22,5 +22,5 @@ _brew_init() {
     fi
 }
 
-# Register hooks - runs in bootstrap phase for all shell types
-zdot_hook_register bootstrap _brew_init interactive noninteractive
+# Register hooks - requires xdg-configured, provides brew-ready
+zdot_hook_register _brew_init interactive noninteractive --requires xdg-configured --provides brew-ready

@@ -12,6 +12,9 @@
 # Get the directory where core lives
 local zdot_core_dir="${${(%):-%x}:A:h}/core"
 
+# Source logging first (needed by other components)
+source "${zdot_core_dir}/logging.zsh"
+
 # Source all components in dependency order
 source "${zdot_core_dir}/core.zsh"
 source "${zdot_core_dir}/hooks.zsh"

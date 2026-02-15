@@ -7,6 +7,8 @@ _aliases_init() {
     alias ytdl='yt-dlp -S ext:m4a -x --embed-thumbnail'
 }
 
-# Register hook for post-plugin phase (after plugins load their aliases)
+# Register hook: requires plugins to be loaded and post-configured
 # Aliases only needed in interactive shells
-zdot_hook_register post-plugin _aliases_init interactive
+zdot_hook_register _aliases_init interactive \
+    --requires plugins-post-configured \
+    --provides aliases-configured

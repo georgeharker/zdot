@@ -9,6 +9,8 @@ _prompt_init() {
     fi
 }
 
-# Register hook for finalize phase
+# Register hook: requires plugins to be post-configured, runs late
 # Prompt only needed in interactive shells
-zdot_hook_register prompt _prompt_init interactive
+zdot_hook_register _prompt_init interactive \
+    --requires plugins-post-configured \
+    --provides prompt-ready

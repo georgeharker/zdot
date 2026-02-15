@@ -101,6 +101,7 @@ _op_init() {
     _setup_ssh_auth_sock
 }
 
-# Register hook - runs in both interactive and noninteractive modes
+# Register hook - requires xdg-configured, provides secrets-loaded
+# Runs in both interactive and noninteractive modes
 # Interactive prompts only happen in interactive shells due to function guards
-zdot_hook_register secrets _op_init interactive noninteractive
+zdot_hook_register _op_init interactive noninteractive --requires xdg-configured --provides secrets-loaded

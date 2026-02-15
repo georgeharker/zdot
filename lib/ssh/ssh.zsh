@@ -18,5 +18,6 @@ _ssh_init() {
     ZSH_TMUX_UNICODE="true"
 }
 
-# Register initialization hook for system phase (runs after bootstrap, before pre-plugin)
-zdot_hook_register system _ssh_init interactive noninteractive
+# Register initialization hook - no dependencies, sets tmux flags
+zdot_hook_register _ssh_init interactive noninteractive \
+    --provides ssh-configured

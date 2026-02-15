@@ -71,8 +71,15 @@ _fzf_post_plugin() {
 }
 
 # Register hooks
-zdot_hook_register pre-plugin _fzf_init interactive
-zdot_hook_register post-plugin _fzf_post_plugin interactive
+# Pre-plugin: configure fzf-tab zstyles before plugin loads
+zdot_hook_register _fzf_init interactive \
+    --requires xdg-configured \
+    --provides fzf-configured
+
+# Post-plugin: setup fzf after plugins are loaded
+zdot_hook_register _fzf_post_plugin interactive \
+    --requires plugins-loaded \
+    --provides fzf-ready
 
 # Lazy load module functions
 zdot_module_autoload_funcs

@@ -14,5 +14,8 @@ _dotfiler_init() {
         source "$HOME/.dotfiles/.nounpack/scripts/completions.zsh"
 }
 
-# Register hook for after-secrets phase (needs GH_TOKEN from 1Password)
-zdot_hook_register after-secrets _dotfiler_init interactive
+# Register hook: requires secrets for GH_TOKEN
+# Only needed in interactive shells
+zdot_hook_register _dotfiler_init interactive \
+    --requires secrets-loaded \
+    --provides dotfiler-ready

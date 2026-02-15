@@ -53,5 +53,7 @@ _env_init() {
     # export OPENCODE_SERVER_URL=http://localhost:4097
 }
 
-# Register hook
-zdot_hook_register pre-plugin _env_init interactive noninteractive
+# Register hook - requires XDG paths for tool configurations
+zdot_hook_register _env_init interactive noninteractive \
+    --requires xdg-configured \
+    --provides env-configured
