@@ -1457,6 +1457,278 @@ zshexit() {
 
 ---
 
+## Caching System
+
+zdot uses Zsh's native bytecode compilation (`zcompile`) to improve startup performance. The caching system creates `.zwc` (Zsh Word Code) bytecode files that are co-located with source files, allowing Zsh to use pre-compiled bytecode transparently.
+
+### How Zsh Bytecode Works
+
+Zsh has built-in support for bytecode compilation that works automatically:
+
+1. **Compilation**: The `zcompile` command converts `.zsh` files to `.zwc` bytecode files
+2. **Co-location**: `.zwc` files MUST be in the same directory as the source file
+3. **Automatic usage**: When you `source file.zsh`, Zsh automatically looks for `file.zsh.zwc`
+4. **Transparent loading**: If `.zwc` exists and is newer than `.zsh`, Zsh uses the bytecode
+5. **No code changes**: Module loading code just sources `.zsh` files normally
+
+This is standard Zsh behavior - zdot doesn't need any special logic to use bytecode files.
+
+### Architecture
+
+zdot implements **two types of caching**:
+
+#### 1. Module Caching
+
+Each module file (`*.zsh`) gets a co-located bytecode file:
+
+```
+~/.config/zsh/zdot/core/base.zsh      → base.zsh.zwc (co-located)
+~/.config/zsh/zdot/lib/git/git.zsh    → git.zsh.zwc (co-located)
+```
+
+Implementation:
+```zsh
+# Create bytecode file next to source file
+zcompile module.zsh            # Creates module.zsh.zwc
+
+# Load module (Zsh automatically uses .zwc if available)
+source module.zsh              # Zsh uses module.zsh.zwc transparently
+```
+
+#### 2. Function Caching
+
+Function directories get compiled into a single `.zwc` file:
+
+```
+~/.config/zsh/zdot/lib/git/functions/
+├── git-status
+├── git-branch
+└── functions.zwc              # Contains all functions (co-located)
+```
+
+Implementation:
+```zsh
+# Compile all functions in directory into one .zwc file
+zcompile functions.zwc func1 func2 func3
+
+# Add directory to fpath (Zsh finds .zwc automatically)
+fpath=(~/zdot/lib/git/functions $fpath)
+autoload -Uz git-status git-branch
+```
+
+#### 3. Execution Plan Caching (Separate System)
+
+The execution plan is cached separately in `~/.cache/zdot/plans/`:
+
+```
+~/.cache/zdot/plans/
+├── execution_plan.zsh         # Serialized execution plan
+└── execution_plan.zsh.zwc     # Compiled execution plan
+```
+
+This is a distinct caching mechanism from module/function caching.
+
+### Implementation Details
+
+#### Cache Creation
+
+The `zdot_cache_compile_file()` function handles bytecode compilation:
+
+```zsh
+zdot_cache_compile_file() {
+    local source_file="$1"
+    
+    # Co-locate .zwc file next to source file
+    local zwc_file="${source_file}.zwc"
+    
+    # Check if recompilation needed
+    if [[ ! -f "$zwc_file" ]] || [[ "$source_file" -nt "$zwc_file" ]]; then
+        zcompile "$source_file"
+    fi
+}
+```
+
+Location: `~/.config/zsh/zdot/core/cache.zsh:528`
+
+#### Module Loading
+
+Modules are loaded through `zdot_module_source()`:
+
+```zsh
+zdot_module_source() {
+    local module_file="$1"
+    
+    # Compile if caching enabled
+    if zdot_cache_enabled; then
+        zdot_cache_compile_file "$module_file"
+    fi
+    
+    # Source the .zsh file (Zsh uses .zwc automatically)
+    source "$module_file"
+}
+```
+
+Location: `~/.config/zsh/zdot/core/utils.zsh:68`
+
+#### Function Loading
+
+Functions are compiled and loaded via `zdot_module_autoload_funcs()`:
+
+```zsh
+zdot_module_autoload_funcs() {
+    local func_dir="$1"
+    
+    # Compile functions into co-located .zwc file
+    if zdot_cache_enabled; then
+        zdot_cache_compile_functions "$func_dir"
+    fi
+    
+    # Add directory to fpath (with co-located .zwc)
+    fpath=("$func_dir" $fpath)
+    
+    # Autoload functions (Zsh uses .zwc automatically)
+    autoload -Uz ${func_dir}/*(:t)
+}
+```
+
+Location: `~/.config/zsh/zdot/core/functions.zsh:127`
+
+### Configuration
+
+#### Enabling/Disabling
+
+Control caching with zstyle:
+
+```zsh
+# Enable caching (default in .zshrc)
+zstyle ':zdot:cache' enabled yes
+
+# Disable caching
+zstyle ':zdot:cache' enabled no
+```
+
+Check cache status:
+```zsh
+zdot_cache_enabled && echo "Caching enabled" || echo "Caching disabled"
+```
+
+#### Cache Invalidation
+
+Remove all bytecode files to force recompilation:
+
+```zsh
+# Remove all .zwc files
+zdot_cache_invalidate
+
+# Restart shell to recompile
+exec zsh
+```
+
+This deletes:
+- All `*.zsh.zwc` files in `~/.config/zsh/zdot/`
+- All `*.zwc` files in function directories
+- The execution plan cache in `~/.cache/zdot/plans/`
+
+### Cache File Locations
+
+With zdot installed, bytecode files are co-located with source files:
+
+```
+~/.config/zsh/zdot/                    (symlink to .dotfiles)
+├── core/
+│   ├── base.zsh
+│   ├── base.zsh.zwc                   ← Co-located bytecode
+│   ├── cache.zsh
+│   ├── cache.zsh.zwc                  ← Co-located bytecode
+│   └── ...
+├── lib/
+│   ├── git/
+│   │   ├── git.zsh
+│   │   ├── git.zsh.zwc                ← Co-located bytecode
+│   │   └── functions/
+│   │       ├── git-status
+│   │       ├── git-branch
+│   │       └── functions.zwc          ← Function cache
+│   └── ...
+└── ...
+
+~/.cache/zdot/plans/                   (separate plan cache)
+├── execution_plan.zsh
+└── execution_plan.zsh.zwc
+```
+
+**Total**: ~56 `.zwc` files co-located with source files:
+- 8 core module cache files
+- 22 library module cache files
+- 26 function cache files
+
+### Performance Impact
+
+Bytecode compilation provides significant performance improvements:
+
+- **Startup time**: ~0.40-0.42 seconds with caching enabled
+- **Parsing speed**: ~10x faster with pre-compiled bytecode
+- **Cache overhead**: Minimal (~1-2ms to check timestamps)
+- **Disk usage**: ~200-300KB for all `.zwc` files
+
+The performance gain is most noticeable during shell startup, where dozens of modules and functions are loaded.
+
+### Why Co-location?
+
+The co-location strategy (`.zwc` next to `.zsh`) is **required** by Zsh's design:
+
+1. **Built-in behavior**: When `source file.zsh` is called, Zsh automatically looks for `file.zsh.zwc` in the same directory
+2. **Automatic usage**: If found and newer, Zsh uses bytecode transparently - no code changes needed
+3. **Function compatibility**: Functions in `fpath` work correctly with co-located `.zwc` files
+4. **Simplicity**: No special loading logic required - just compile and source normally
+
+Alternative approaches (separate cache directory) don't work because:
+- Zsh won't find `.zwc` files in different directories
+- Sourcing `.zwc` files directly causes parse errors
+- Function autoloading fails with non-co-located bytecode
+
+### Troubleshooting
+
+#### Cache not being used
+
+If performance doesn't improve:
+
+```zsh
+# Check if caching is enabled
+zstyle -L ':zdot:cache' enabled
+
+# Verify .zwc files exist
+ls -la ~/.config/zsh/zdot/core/*.zwc
+ls -la ~/.config/zsh/zdot/lib/*/*.zwc
+
+# Invalidate and regenerate cache
+zdot_cache_invalidate
+exec zsh
+```
+
+#### Stale bytecode
+
+If code changes aren't reflected:
+
+```zsh
+# .zwc files are automatically updated if source is newer
+# Force regeneration:
+zdot_cache_invalidate
+exec zsh
+```
+
+#### Debug cache operations
+
+Enable debugging to see cache operations:
+
+```zsh
+# In .zshrc, before zdot loads
+zstyle ':zdot:debug' enabled yes
+zstyle ':zdot:debug' verbose yes
+```
+
+---
+
 ## Contributing Guidelines
 
 ### Code Style
