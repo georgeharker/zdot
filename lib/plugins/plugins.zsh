@@ -50,6 +50,9 @@ _antidote_load() {
         zstyle ':antidote:bundle' file ${zsh_plugins}.conf
         zstyle ':antidote:static' file ${zsh_plugins}.zsh
 
+        zstyle ':antidote:bundle:*' zcompile 'yes'
+        zstyle ':antidote:static' zcompile yes
+
         antidote load
     else
         # oh-my-zsh init fallback
