@@ -41,10 +41,9 @@ _antidote_load() {
 
     if [[ -f ${XDG_DATA_HOME:-${HOME}/.local/share}/antidote/antidote.zsh ]]; then
         source ${XDG_DATA_HOME:-${HOME}/.local/share}/antidote/antidote.zsh
-
-        export ZSH=$(antidote path ohmyzsh/ohmyzsh)
-        export ZSH_CUSTOM=${XDG_DATA_HOME:-${HOME}/.local/share}/oh-my-zsh/
-
+        
+        zstyle ':antidote:bundle' use-friendly-names 'yes'
+        
         zsh_plugins=${XDG_CONFIG_HOME:-${HOME}/.config}/antidote/zsh_plugins
 
         zstyle ':antidote:bundle' file ${zsh_plugins}.conf
@@ -52,6 +51,9 @@ _antidote_load() {
 
         zstyle ':antidote:bundle:*' zcompile 'yes'
         zstyle ':antidote:static' zcompile yes
+
+        export ZSH=$(antidote path ohmyzsh/ohmyzsh)
+        export ZSH_CUSTOM=${XDG_DATA_HOME:-${HOME}/.local/share}/oh-my-zsh/
 
         antidote load
     else
