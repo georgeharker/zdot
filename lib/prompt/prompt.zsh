@@ -9,8 +9,8 @@ _prompt_init() {
     fi
 }
 
-# Register hook: requires plugins to be post-configured, runs late
+# Register hook: requires plugins to be loaded (for zsh_defer function), runs late
 # Prompt only needed in interactive shells
 zdot_hook_register _prompt_init interactive \
-    --requires plugins-post-configured \
+    --requires plugins-loaded \
     --provides prompt-ready
