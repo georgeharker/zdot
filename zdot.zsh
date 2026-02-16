@@ -28,15 +28,24 @@ source "${zdot_core_dir}/utils.zsh"
 # Initialize cache system (reads zstyle configuration from .zshrc)
 zdot_cache_init
 
-# Autoload core functions
+# Autoload core functions (with cache compilation if enabled)
 local core_functions_dir="${zdot_core_dir}/functions"
 if [[ -d "$core_functions_dir" ]]; then
+    # Compile functions if caching is enabled
+    if zdot_cache_is_enabled; then
+        zdot_cache_compile_functions "$core_functions_dir"
+    fi
+
+    # Add to fpath and autoload all functions
     fpath=("$core_functions_dir" $fpath)
     for func_file in "$core_functions_dir"/*; do
         [[ -f "$func_file" ]] || continue
         autoload -Uz "${func_file:t}"
     done
 fi
+
+# Autoload user functions
+zdot_autoload_global_funcs
 
 unset zdot_core_dir core_functions_dir
 

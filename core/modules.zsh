@@ -75,7 +75,7 @@ zdot_module_load() {
 # List all loaded modules
 # Usage: zdot_module_list
 zdot_module_list() {
-    zdot_info "Loaded modules:"
+    zdot_report "Loaded modules:"
     for module in ${(k)_ZDOT_MODULES_LOADED}; do
         zdot_info "  $module"
     done

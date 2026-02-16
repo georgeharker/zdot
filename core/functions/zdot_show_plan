@@ -8,7 +8,7 @@ function zdot_show_plan() {
         return 1
     fi
 
-    zdot_info "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks):"
+    zdot_report "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks):"
     zdot_info ""
 
     local i=1
@@ -18,7 +18,7 @@ function zdot_show_plan() {
         local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
         local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
 
-        zdot_info "$i. $func"
+        zdot_report "$i. $func"
         zdot_info "   contexts: $contexts"
         zdot_info "   provides: $provides"
         zdot_info "   requires: $requires"

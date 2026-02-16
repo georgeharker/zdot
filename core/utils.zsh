@@ -55,14 +55,16 @@ zdot_module_source() {
 }
 
 # Debug: show all registered hooks and loaded modules
-# Usage: zdot_base_debug
-zdot_base_debug() {
-    zdot_info "=== ZSH Base Debug Info ==="
+# Usage: zdot_debug_info
+zdot_debug_info() {
+    zdot_report "=== ZSH Info ==="
     zdot_info ""
     zdot_module_list
     zdot_info ""
     zdot_hooks_list
     zdot_info ""
-    zdot_info "Completion commands to generate: ${#_ZDOT_COMPLETION_CMDS}"
-    zdot_info "Live completion functions: ${#_ZDOT_COMPLETION_LIVE}"
+    zdot_show_plan
+    zdot_info ""
+    zdot_report "Completion commands to generate: ${#_ZDOT_COMPLETION_CMDS}"
+    zdot_report "Live completion functions: ${#_ZDOT_COMPLETION_LIVE}"
 }

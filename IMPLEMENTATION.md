@@ -243,7 +243,7 @@ Manually triggers a phase and executes waiting hooks.
 
 **Key Functions:**
 
-##### `zdot_base_debug()` (lines 3-60)
+##### `zdot_debug_info()` (lines 3-60)
 
 Comprehensive debug output.
 
@@ -970,7 +970,7 @@ zdot_error "Failed to initialize: $error_message"
 
 ## Debugging Tools
 
-### zdot_base_debug()
+### zdot_debug_info()
 
 **Purpose**: Show comprehensive system state for troubleshooting.
 
@@ -994,7 +994,7 @@ zdot_error "Failed to initialize: $error_message"
 
 **Usage:**
 ```zsh
-zdot_base_debug
+zdot_debug_info
 ```
 
 **When to use:**
@@ -1757,13 +1757,13 @@ Before submitting changes:
 1. **Test all contexts:**
 ```zsh
 # Interactive
-zsh -i -c 'zdot_base_debug'
+zsh -i -c 'zdot_debug_info'
 
 # Non-interactive
-zsh -c 'zdot_base_debug'
+zsh -c 'zdot_debug_info'
 
 # Login
-zsh -l -c 'zdot_base_debug'
+zsh -l -c 'zdot_debug_info'
 ```
 
 2. **Test edge cases:**
@@ -1780,7 +1780,7 @@ ZDOT_VERBOSE=1 zsh -c 'source ~/.zshrc'
 4. **Verify output:**
 ```zsh
 zdot_hooks_list --all
-zdot_base_debug
+zdot_debug_info
 ```
 
 ### Documentation
@@ -1884,7 +1884,7 @@ When adding features:
 ### Module Not Loading
 
 **Symptoms:**
-- Module file exists but not showing in `zdot_base_debug`
+- Module file exists but not showing in `zdot_debug_info`
 - Hooks not registered
 
 **Debug Steps:**

@@ -267,7 +267,7 @@ zdot_verbose "Debug details"              # Only shown with ZDOT_VERBOSE=1
 
 ### Debugging Functions
 
-#### `zdot_base_debug`
+#### `zdot_debug_info`
 
 Show comprehensive debug information:
 - Loaded modules
@@ -278,7 +278,7 @@ Show comprehensive debug information:
 
 **Usage:**
 ```zsh
-zdot_base_debug
+zdot_debug_info
 ```
 
 #### `zdot_hooks_list [--all]`
@@ -406,7 +406,7 @@ print -l "${(k)_ZDOT_HOOKS_EXECUTED[@]}"
 ### Debug Full Configuration
 
 ```zsh
-zdot_base_debug
+zdot_debug_info
 ```
 
 Shows complete system state including loaded modules, hooks, and completion status.
@@ -477,7 +477,7 @@ Test your module in all relevant contexts:
 zsh -i
 
 # Non-interactive shell
-zsh -c 'source ~/.zshrc && zdot_base_debug'
+zsh -c 'source ~/.zshrc && zdot_debug_info'
 
 # Login shell
 zsh -l
@@ -623,7 +623,7 @@ zdot_hook_register _python_tools_init interactive \
 
 ## Getting Help
 
-- Run `zdot_base_debug` to see system status
+- Run `zdot_debug_info` to see system status
 - Run `zdot_hooks_list --all` to see all registered hooks
 - Set `ZDOT_VERBOSE=1` for detailed logging
 - Check module files in `lib/` for real-world examples
