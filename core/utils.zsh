@@ -42,6 +42,15 @@ zdot_module_source() {
         return 1
     fi
 
+    # If caching is enabled, compile if needed
+    if zdot_cache_is_enabled; then
+        local compiled_path="${source_file}.zwc"
+        if [[ ! -f "$compiled_path" || "$source_file" -nt "$compiled_path" ]]; then
+            zdot_cache_compile_file "$source_file"
+        fi
+    fi
+
+    # Always source the .zsh file - zsh will automatically use .zwc if it exists
     source "$source_file"
 }
 

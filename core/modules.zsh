@@ -59,7 +59,12 @@ zdot_module_load() {
     _ZDOT_CURRENT_MODULE_DIR="${module_file:h}"
     _ZDOT_CURRENT_MODULE_NAME="$module"
 
-    source "$module_file"
+    # Use cached module loading if cache is enabled
+    if zdot_cache_is_enabled; then
+        load_cached_module "$module" "$module_file"
+    else
+        source "$module_file"
+    fi
     _ZDOT_MODULES_LOADED[$module]=1
 
     # Clear the module directory and name after loading

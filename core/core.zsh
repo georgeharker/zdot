@@ -7,11 +7,13 @@
 # ============================================================================
 
 # Self-discover zsh-base location using the currently sourced file
-# This file is at: .config/zsh/lib/zsh-base/core.zsh
-_zdot_this_script_file="${${(%):-%x}:A}"
-_zdot_base_dir="${_zdot_this_script_file:h}"     # .../zdot
-typeset -g _ZDOT_LIB_DIR="${_zdot_base_dir:h}/lib"          # .../lib
-unset _zdot_base_file _zdot_base_dir
+# This file is at: .config/zsh/zdot/core/core.zsh
+# NOTE: Using :a (absolute path) instead of :A to preserve symlinks
+_zdot_this_script_file="${${(%):-%x}:a}"
+_zdot_base_dir="${_zdot_this_script_file:h:h}"     # .../zdot (go up twice from core/)
+typeset -g _ZDOT_BASE_DIR="${_zdot_base_dir}"              # Export as global
+typeset -g _ZDOT_LIB_DIR="${_zdot_base_dir}/lib"            # .../zdot/lib
+unset _zdot_this_script_file _zdot_base_dir
 
 # ============================================================================
 # Lazy Path Evaluation - XDG-Dependent

@@ -10,18 +10,23 @@
 # This is the main entry point that sources all component parts
 
 # Get the directory where core lives
-local zdot_core_dir="${${(%):-%x}:A:h}/core"
+# NOTE: Using :a (absolute path) instead of :A to preserve symlinks
+local zdot_core_dir="${${(%):-%x}:a:h}/core"
 
 # Source logging first (needed by other components)
 source "${zdot_core_dir}/logging.zsh"
 
 # Source all components in dependency order
 source "${zdot_core_dir}/core.zsh"
+source "${zdot_core_dir}/cache.zsh"
 source "${zdot_core_dir}/hooks.zsh"
 source "${zdot_core_dir}/modules.zsh"
 source "${zdot_core_dir}/functions.zsh"
 source "${zdot_core_dir}/completions.zsh"
 source "${zdot_core_dir}/utils.zsh"
+
+# Initialize cache system (reads zstyle configuration from .zshrc)
+zdot_cache_init
 
 # Autoload core functions
 local core_functions_dir="${zdot_core_dir}/functions"
