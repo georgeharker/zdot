@@ -136,13 +136,13 @@ function zdot_hooks_list() {
                     fi
                     zdot_info "    contexts: $contexts"
                     zdot_info "    requires: $requires"
-                    if [[ -n "$optional" ]]; then
+                    if [[ "$optional" == 1 ]]; then
                         zdot_info "    optional: yes"
                     fi
                 else
                     # Normal mode: just list the hook
                     local optional_mark=""
-                    [[ -n "$optional" ]] && optional_mark=" [optional]"
+                    [[ "$optional" == 1 ]] && optional_mark=" [optional]"
                     zdot_info "  • $func ($contexts)$optional_mark"
                 fi
             done
@@ -173,12 +173,12 @@ function zdot_hooks_list() {
                 if [[ "$on_demand" -eq 1 ]]; then
                     zdot_info "    on-demand: yes"
                 fi
-                if [[ -n "$optional" ]]; then
+                if [[ "$optional" == 1 ]]; then
                     zdot_info "    optional: yes"
                 fi
             else
                 local optional_mark=""
-                [[ -n "$optional" ]] && optional_mark=" [optional]"
+                [[ "$optional" == 1 ]] && optional_mark=" [optional]"
                 local on_demand_mark=""
                 [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
                 zdot_info "  • $func ($contexts)$optional_mark$on_demand_mark"
@@ -210,7 +210,7 @@ function zdot_hooks_list() {
                 fi
             done
             
-            if [[ -n "$optional" ]]; then
+            if [[ "$optional" == 1 ]]; then
                 zdot_info "    optional: yes"
             fi
         done
