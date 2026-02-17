@@ -13,7 +13,7 @@ typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase_name"
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_HOOK_ON_DEMAND     # hook_id -> 1 if on-demand
-typeset -gA _ZDOT_PHASE_PROVIDERS    # phase_name -> hook_id (reverse lookup)
+typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
 typeset -gA _ZDOT_PHASES_PROMISED    # phase_name -> 1 when promised (for validation)
 typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
 typeset -gA _ZDOT_HOOKS_EXECUTED     # hook_id -> 1 when executed at runtime
@@ -101,15 +101,32 @@ zdot_hook_register() {
         done
     fi
     
-    # Register phase provider (for reverse lookup)
+    # Register phase provider (context-aware)
     if [[ -n $provides ]]; then
-        if [[ -n ${_ZDOT_PHASE_PROVIDERS[$provides]} ]]; then
-            zdot_error "zdot_hook_register: ERROR: Multiple hooks provide phase '$provides'"
-            zdot_error "  Previous: ${_ZDOT_HOOKS[${_ZDOT_PHASE_PROVIDERS[$provides]}]}"
-            zdot_error "  Current: $func_name"
-            return 1
-        fi
-        _ZDOT_PHASE_PROVIDERS[$provides]=$hook_id
+        # Check for conflicts: same phase provided in overlapping contexts
+        local has_conflict=0
+        local conflicting_hook=""
+        
+        # Check each context this hook runs in
+        for new_ctx in ${contexts[@]}; do
+            local ctx_key="${new_ctx}:${provides}"
+            
+            if [[ -n ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]} ]]; then
+                # Found a conflict: another hook already provides this phase in this context
+                has_conflict=1
+                conflicting_hook=${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}
+                zdot_error "zdot_hook_register: ERROR: Multiple hooks provide phase '$provides' in context '$new_ctx'"
+                zdot_error "  Previous: ${_ZDOT_HOOKS[$conflicting_hook]}"
+                zdot_error "  Current: $func_name"
+                return 1
+            fi
+        done
+        
+        # No conflicts - register provider for each context
+        for ctx in ${contexts[@]}; do
+            local ctx_key="${ctx}:${provides}"
+            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]=$hook_id
+        done
     fi
     
     # Track which module registered this hook
@@ -122,9 +139,27 @@ zdot_hook_register() {
 # Dependency Resolution (Topological Sort)
 # ============================================================================
 
+# Helper: Check if a phase has a provider in any of the given contexts
+# Usage: _zdot_has_provider_in_contexts <phase> <context1> <context2> ...
+# Returns: 0 if provider exists, 1 otherwise
+_zdot_has_provider_in_contexts() {
+    local phase="$1"
+    shift
+    local -a contexts=("$@")
+    
+    for ctx in ${contexts[@]}; do
+        local ctx_key="${ctx}:${phase}"
+        if [[ -n ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]} ]]; then
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Build execution plan using topological sort (Kahn's algorithm)
 # Usage: zdot_build_execution_plan
-# Determines current context and builds dependency-ordered execution plan
+# Determines current shell context and builds dependency-ordered execution plan
 zdot_build_execution_plan() {
     # Determine current shell context
     local -a current_contexts
@@ -170,15 +205,15 @@ zdot_build_execution_plan() {
         
         # Count dependencies
         for phase in $requires; do
-            # Check if phase is promised or has a provider hook
-            if [[ -z ${_ZDOT_PHASE_PROVIDERS[$phase]} && -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
-                # Required phase has no provider
+            # Check if phase is promised or has a provider hook in current contexts
+            if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}" && [[ -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
+                # Required phase has no provider in current context
                 if [[ ${_ZDOT_HOOK_OPTIONAL[$hook_id]} == 1 ]]; then
                     skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (missing: $phase)")
                     degree=-1  # Mark as skipped
                     break
                 else
-                    zdot_error "zdot_build_execution_plan: ERROR: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it"
+                    zdot_error "zdot_build_execution_plan: ERROR: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context"
                     return 1
                 fi
             fi

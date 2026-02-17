@@ -5,7 +5,7 @@
 #   --verbose, -v    Show whether functions are defined and show dependencies
 #   --all, -a, all   Show all contexts (default: only show current shell context)
 
-function zdot_hoos_list() {
+function zdot_hooks_list() {
     local verbose=0
     local show_all=0
 
@@ -88,12 +88,12 @@ function zdot_hoos_list() {
                 # Check if any required phase is unsatisfiable
                 for required_phase in ${=requires}; do
                     # Phase is satisfiable if it's:
-                    # 1. Provided by a hook
+                    # 1. Provided by a hook (in the hook's declared contexts)
                     # 2. Promised via zdot_promise_phase
                     # 3. Marked as on-demand
-                    if [[ -z "${_ZDOT_PHASE_PROVIDERS[$required_phase]}" && \
-                          -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" && \
-                          -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                    if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts} && \
+                       [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
+                       [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
                         has_error=1
                         break
                     fi
@@ -203,9 +203,9 @@ function zdot_hoos_list() {
             
             # Show which requirements are unsatisfiable
             for required_phase in ${=requires}; do
-                if [[ -z "${_ZDOT_PHASE_PROVIDERS[$required_phase]}" && \
-                      -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" && \
-                      -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts} && \
+                   [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
+                   [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
                     zdot_error "      ⚠ '$required_phase' is not provided by any hook"
                 fi
             done

@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="2"          # Cache format version (bumped for context-aware plans)
+typeset -g _ZDOT_CACHE_VERSION="3"          # Cache format version (context-aware providers only)
 
 # ============================================================================
 # Cache Configuration
@@ -299,7 +299,19 @@ zdot_cache_save_plan() {
             echo "_ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand"
 
             if [[ -n "$provides" ]]; then
-                echo "_ZDOT_PHASE_PROVIDERS[$provides]='$hook_id'"
+                # Serialize context-aware providers
+                # NOTE: We intentionally serialize provider mappings for ALL contexts that
+                # this hook declares, not just the current context. This causes some
+                # duplication across cache files (e.g., a hook with contexts="interactive
+                # noninteractive" gets both mappings written to each cache file), but it's
+                # necessary to maintain accuracy in debug commands like zdot_hooks_list
+                # which need to show complete provider relationships across all contexts.
+                # The duplication is minimal (typically 20-50 lines per cache file) and
+                # preserves cache file self-documentation.
+                for ctx in ${=contexts}; do
+                    local ctx_key="${ctx}:${provides}"
+                    echo "_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]='$hook_id'"
+                done
                 echo "_ZDOT_PHASES_PROMISED[$provides]=1"
             fi
 
