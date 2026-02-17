@@ -21,6 +21,14 @@ _plugins_init() {
     zstyle ':omz:plugins:nvm' lazy-cmd opencode mcp-hub copilot prettierd claude-code
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
 
+    # Ensure nvm.sh is compiled for faster loading
+    if [[ -f "$NVM_DIR/nvm.sh" ]]; then
+        # Compile if .zwc doesn't exist or is older than nvm.sh
+        if [[ ! -f "$NVM_DIR/nvm.sh.zwc" ]] || [[ "$NVM_DIR/nvm.sh" -nt "$NVM_DIR/nvm.sh.zwc" ]]; then
+            zcompile "$NVM_DIR/nvm.sh"
+        fi
+    fi
+
     # Fast-syntax-highlighting
     FAST_WORK_DIR=XDG:fast-syntax-highlighting
 
@@ -99,9 +107,13 @@ _plugins_post_init() {
     fi
 }
 
-_nvm_init() {
+_nvm_interactive_init() {
     # Delay nvm init for interactive until after prompt
     zsh_defer_until 1 nvm use node
+}
+
+_nvm_noninteractive_init() {
+    nvm use node
 }
 
 # Register hooks with dependency chain
@@ -114,6 +126,8 @@ zdot_hook_register _antidote_load interactive noninteractive --requires plugins-
 # plugins_post_init runs after plugin load, provides plugins-post-configured
 zdot_hook_register _plugins_post_init interactive noninteractive --requires plugins-loaded --provides plugins-post-configured
 
-# nvm_init deferred initialization (interactive only), provides nvm-ready
+# nvm_interactive_init deferred initialization (interactive only), provides nvm-ready
 # Requires prompt-ready to avoid racing with prompt's zsh-defer initialization
-zdot_hook_register _nvm_init interactive --requires prompt-ready --provides nvm-ready
+zdot_hook_register _nvm_interactive_init interactive --requires prompt-ready --provides nvm-ready
+# nvm_noninteractive_init, provides nvm-ready
+zdot_hook_register _nvm_noninteractive_init noninteractive --requires plugins-loaded --provides nvm-ready
