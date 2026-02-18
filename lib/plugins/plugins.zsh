@@ -152,12 +152,13 @@ zdot_hook_register _plugins_post_init interactive noninteractive \
 # ============================================================================
 
 _nvm_interactive_init() {
+    (( ${+functions[nvm]} )) || return 0
     zdot_defer_until 1 nvm use node
 }
 
 _nvm_noninteractive_init() {
-    # Only run if nvm is available
-    (( $+commands[nvm] )) || return 0
+    # Only run if nvm shell function is available
+    (( ${+functions[nvm]} )) || return 0
     nvm use node >/dev/null
 }
 
