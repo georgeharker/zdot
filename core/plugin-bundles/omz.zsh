@@ -105,24 +105,33 @@ _compdef_queue() {
     _ZDOT_COMPDEF_QUEUE+=("$*")
 }
 
-zdot_compdef() {
-    if [[ -n "$_ZDOT_COMPINIT_DONE" ]]; then
-        compdef "$@"
-    else
-        _compdef_queue "$@"
-    fi
+# compdef stub: installed immediately so bare `compdef` calls from OMZ plugins
+# are intercepted before compinit runs.
+#
+# Behaviour:
+#   - non-interactive shell  → no-op (completions not needed; suppresses errors)
+#   - interactive, pre-compinit → queue for replay after compinit
+#   - after compinit → this function is removed by zdot_compdef_queue_process;
+#     the real compdef function (defined by compinit) handles calls from that
+#     point on
+compdef() {
+    [[ -o interactive ]] || return 0
+    _compdef_queue "$@"
 }
 
 zdot_compdef_queue_process() {
-    if [[ ${#_ZDOT_COMPDEF_QUEUE} -eq 0 ]]; then
-        return 0
-    fi
-    
+    # Remove our stub so the real compdef (defined by compinit) takes over.
+    unfunction compdef 2>/dev/null
+
+    # If compinit didn't define the real compdef (e.g. non-interactive or
+    # compinit failed), there is nothing to replay — bail out silently.
+    (( ${+functions[compdef]} )) || return 0
+
     local cmd
     for cmd in "$_ZDOT_COMPDEF_QUEUE[@]"; do
-        eval "compdef $cmd"
+        compdef "${(z)cmd}"
     done
-    
+
     _ZDOT_COMPDEF_QUEUE=()
 }
 
@@ -470,14 +479,14 @@ zdot_bundle_register omz
 # ============================================================================
 
 # OMZ theme hook: loads theme during precmd if ZSH_THEME is set
-# Depends on omz-lib-loaded (compinit done), provides omz-theme-ready
+# Depends on omz-plugins-loaded (compinit done), provides omz-theme-ready
 zdot_omz_theme_init() {
     autoload -Uz add-zsh-hook
     add-zsh-hook precmd zdot_omz_theme_hook
 }
 
 zdot_hook_register zdot_omz_theme_init interactive \
-    --requires omz-lib-loaded \
+    --requires plugins-cloned \
     --provides omz-theme-ready
 
 # ============================================================================
@@ -630,5 +639,5 @@ _zdot_omz_setup_prompt_funcs() {
 }
 
 zdot_hook_register _zdot_omz_setup_prompt_funcs interactive \
-    --requires omz-lib-loaded \
+    --requires plugins-cloned \
     --provides omz-prompt-funcs-ready

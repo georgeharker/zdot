@@ -157,11 +157,17 @@ all supported formats.
 
 ### Compdef Queue
 
-Queues `compdef` calls for execution after compinit runs:
+Before `compinit` runs, bare `compdef` calls (e.g. from OMZ plugins) are
+intercepted by a stub function and queued. After `compinit` runs, the stub is
+removed and the queue is replayed using the real `compdef` defined by
+`compinit`.
+
+OMZ plugins call `compdef` directly; no wrapper is needed:
 
 ```zsh
-zdot_compdef _git git
-# Later processed by zdot_compdef_queue_process
+# OMZ plugins call compdef directly — the stub queues it automatically
+compdef _git git
+# Later replayed by zdot_compdef_queue_process after compinit
 ```
 
 ### Compinit Deferral

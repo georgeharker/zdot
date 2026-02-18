@@ -377,6 +377,14 @@ load_cache() {
     # Load the cached plan (zsh will automatically use .zwc if available)
     source "$plan_file"
 
+    # Validate that the sourced plan actually populated the execution plan.
+    # An empty plan can be written when hooks aren't registered yet at save
+    # time; treat it as a cache miss so the plan gets rebuilt.
+    if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
+        zdot_error "load_cache: cached plan is empty, forcing rebuild"
+        return 1
+    fi
+
     return 0
 }
 
