@@ -30,7 +30,7 @@ zdot_cache_compile_functions() {
         local cache_path="${func_file}.zwc"
 
         # Compile if needed (source newer than cache or cache doesn't exist)
-        if [[ ! -f "$cache_path" || "$func_file" -nt "$cache_path" ]]; then
+        if zdot_is_newer_or_missing "$func_file" "$cache_path"; then
             if ! zcompile "$cache_path" "$func_file" 2>/dev/null; then
                 zdot_error "zdot_cache_compile_functions: compilation failed for: $func_file"
                 failed=1

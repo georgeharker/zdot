@@ -26,7 +26,7 @@ _mcp_init() {
 
     # Refresh MCP servers config if needed
     # This only runs if secrets-loaded phase was provided (optional dependency)
-    if src-newer-or-dest-missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
+    if zdot_is_newer_or_missing "${secrets_src_dir}/mcpservers.json" "${secrets_cache}/${USER}.mcpservers.json"; then
         refresh_mcpservers_secret
     fi
 }

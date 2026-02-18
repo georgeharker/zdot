@@ -24,6 +24,21 @@ zdot_login() {
 # Utility Functions
 # ============================================================================
 
+# Check if source file is newer than destination or destination is missing
+# Usage: if zdot_is_newer_or_missing <source> <dest>; then ...; fi
+# Uses :A for symlink resolution (zsh builtin, faster than realpath)
+zdot_is_newer_or_missing() {
+    local src="$1"
+    local dst="$2"
+    if [[ ! -f "$dst" ]]; then
+        return 0
+    fi
+    if [[ -f "$src" && "$src:A" -nt "$dst" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Source a file relative to the calling module
 # Usage: zdot_module_source <relative-path>
 zdot_module_source() {
@@ -45,7 +60,7 @@ zdot_module_source() {
     # If caching is enabled, compile if needed
     if zdot_cache_is_enabled; then
         local compiled_path="${source_file}.zwc"
-        if [[ ! -f "$compiled_path" || "$source_file" -nt "$compiled_path" ]]; then
+        if zdot_is_newer_or_missing "$source_file" "$compiled_path"; then
             zdot_cache_compile_file "$source_file"
         fi
     fi

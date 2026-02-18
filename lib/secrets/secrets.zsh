@@ -73,7 +73,7 @@ _op_init() {
     fi
 
     # Refresh service account if source is newer or dest is missing
-    if src-newer-or-dest-missing "${secrets_src_dir}/op-secrets.zsh" "${secrets_cache}/${USER}.op-secrets.zsh"; then
+    if zdot_is_newer_or_missing "${secrets_src_dir}/op-secrets.zsh" "${secrets_cache}/${USER}.op-secrets.zsh"; then
         op_refresh
     fi
 
@@ -87,7 +87,7 @@ _op_init() {
     # Only proceed with shell secrets if OP is active
     if [[ $_ZDOT_OP_ACTIVE -eq 1 ]]; then
         # Refresh shell secrets if needed
-        if src-newer-or-dest-missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
+        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
             refresh_shell_secrets
         fi
         

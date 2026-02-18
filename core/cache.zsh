@@ -112,11 +112,8 @@ zdot_cache_compile_file() {
     local output_file="${source_file}.zwc"
 
     # Check if compilation is needed (source newer than compiled)
-    if [[ -f "$output_file" ]]; then
-        if [[ ! "$source_file" -nt "$output_file" ]]; then
-            # Compiled file is up to date
-            return 0
-        fi
+    if [[ -f "$output_file" ]] && ! zdot_is_newer_or_missing "$source_file" "$output_file"; then
+        return 0
     fi
 
     # Compile source file (creates .zwc next to it)
@@ -202,7 +199,7 @@ load_cached_module() {
     # If caching is enabled, compile if needed
     if zdot_cache_is_enabled; then
         local compiled_path="${module_file}.zwc"
-        if [[ ! -f "$compiled_path" || "$module_file" -nt "$compiled_path" ]]; then
+        if zdot_is_newer_or_missing "$module_file" "$compiled_path"; then
             zdot_cache_compile_file "$module_file"
         fi
     fi
@@ -364,7 +361,7 @@ load_cache() {
     local lib_dir="${_ZDOT_LIB_DIR}"
 
     for core_file in "$core_dir"/*.zsh(N); do
-        if [[ -f "$core_file" && "$core_file" -nt "$plan_file" ]]; then
+        if [[ -f "$core_file" ]] && zdot_is_newer_or_missing "$core_file" "$plan_file"; then
             return 1
         fi
     done
@@ -372,7 +369,7 @@ load_cache() {
     for module_dir in "$lib_dir"/*(N/); do
         local module_name="${module_dir:t}"
         local module_file="${module_dir}/${module_name}.zsh"
-        if [[ -f "$module_file" && "$module_file" -nt "$plan_file" ]]; then
+        if [[ -f "$module_file" ]] && zdot_is_newer_or_missing "$module_file" "$plan_file"; then
             return 1
         fi
     done

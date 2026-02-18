@@ -10,12 +10,6 @@ function is-debian() {
     [[ $OSTYPE == linux* && -f /etc/debian_version ]]
 }
 
-function src-newer-or-dest-missing() {
-    local src="$1"
-    local dst="$2"
-    [[ ! -f "${dst}" || ( -f "${src}" && ( $(realpath "${src}") -nt "${dst}" ) ) ]]
-}
-
 xdg_runtime_dir() {
     if is-macos; then
         export XDG_RUNTIME_DIR=$(getconf DARWIN_USER_TEMP_DIR)
