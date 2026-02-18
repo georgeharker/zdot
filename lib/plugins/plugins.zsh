@@ -23,7 +23,7 @@ _plugins_configure() {
 
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
     if [[ -f "$NVM_DIR/nvm.sh" ]]; then
-        if [[ ! -f "$NVM_DIR/nvm.sh.zwc" ]] || [[ "$NVM_DIR/nvm.sh" -nt "$NVM_DIR/nvm.sh.zwc" ]]; then
+        if zdot_is_newer_or_missing "$NVM_DIR/nvm.sh" "$NVM_DIR/nvm.sh.zwc"; then
             zcompile "$NVM_DIR/nvm.sh"
         fi
     fi
@@ -85,7 +85,10 @@ _plugins_load_omz() {
     zdot_load_plugin omz:lib
     zdot_load_plugin omz:plugins/git
     zdot_load_plugin omz:plugins/tmux
-    zdot_load_plugin omz:plugins/fzf
+    # fzf keybindings require a PTY; skip the plugin in non-PTY contexts to
+    # avoid "(eval):1: can't change option: zle" errors from fzf --zsh's
+    # option-snapshot/restore blocks.
+    zdot_has_tty && zdot_load_plugin omz:plugins/fzf
     zdot_load_plugin omz:plugins/zoxide
     zdot_load_plugin omz:plugins/npm
     zdot_load_plugin omz:plugins/nvm
@@ -153,13 +156,16 @@ zdot_hook_register _plugins_post_init interactive noninteractive \
 
 _nvm_interactive_init() {
     (( ${+functions[nvm]} )) || return 0
-    zdot_defer_until 1 nvm use node
+    # -q suppresses precmd hooks and zle reset-prompt after the deferred call,
+    # preventing oh-my-posh's built-in newline in PS1 from producing a spurious
+    # blank line before the next prompt.
+    zdot_defer_until -q 1 nvm use node --silent
 }
 
 _nvm_noninteractive_init() {
     # Only run if nvm shell function is available
     (( ${+functions[nvm]} )) || return 0
-    nvm use node >/dev/null
+    nvm use node --silent >/dev/null
 }
 
 zdot_hook_register _nvm_interactive_init interactive \

@@ -318,13 +318,27 @@ if [[ "$_zdot_defer_enabled" == true ]]; then
     # Load zsh-defer
     zdot_load_plugin romkatv/zsh-defer
     
-    # Define wrappers that use zsh-defer
-    zdot_defer() { zsh-defer "$@" }
-    zdot_defer_until() { local delay=$1; shift; zsh-defer -t "$delay" "$@"; }
+    # Define wrappers that use zsh-defer.
+    # Both accept an optional -q (quiet) flag as the first argument.
+    # -q suppresses precmd hooks (+m) and zle reset-prompt (+p) after the
+    # deferred command runs, preventing prompts that embed a newline (e.g.
+    # oh-my-posh with newline=true) from rendering a spurious blank line.
+    zdot_defer() {
+        local extra_opts=''
+        [[ $1 == -q ]] && { extra_opts='+mp'; shift }
+        zsh-defer ${extra_opts:+$extra_opts} "$@"
+    }
+    zdot_defer_until() {
+        local extra_opts=''
+        [[ $1 == -q ]] && { extra_opts='+mp'; shift }
+        local delay=$1; shift
+        zsh-defer ${extra_opts:+$extra_opts} -t "$delay" "$@"
+    }
 else
-    # Define passthrough wrappers - run immediately
-    zdot_defer() { "$@" }
-    zdot_defer_until() { local delay=$1; shift; "$@"; }
+    # Define passthrough wrappers - run immediately.
+    # -q is accepted for API compatibility but is a no-op here (no ZLE).
+    zdot_defer() { [[ $1 == -q ]] && shift; "$@" }
+    zdot_defer_until() { [[ $1 == -q ]] && shift; local delay=$1; shift; "$@"; }
 fi
 
 # ============================================================================

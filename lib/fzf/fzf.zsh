@@ -58,7 +58,7 @@ _fzf_post_plugin() {
     [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/tokyonight_night.sh" ] && \
         source "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/tokyonight_night.sh"
 
-    # Load fzf shell integration (only in interactive mode)
+    # Load fzf shell integration
     [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/fzf.zsh" ] && \
         source "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/fzf.zsh"
 
