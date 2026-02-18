@@ -24,6 +24,13 @@ source "${zdot_core_dir}/modules.zsh"
 source "${zdot_core_dir}/functions.zsh"
 source "${zdot_core_dir}/completions.zsh"
 source "${zdot_core_dir}/utils.zsh"
+source "${zdot_core_dir}/plugins.zsh"
+
+# Source plugin bundles
+source "${zdot_core_dir}/plugin-bundles/omz.zsh"
+
+# Early plugin initialization: clone/cache required plugins BEFORE hooks run
+_zdot_plugins_init
 
 # Initialize cache system (reads zstyle configuration from .zshrc)
 zdot_cache_init

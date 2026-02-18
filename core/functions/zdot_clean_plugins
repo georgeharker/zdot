@@ -1,0 +1,64 @@
+#!/usr/bin/env zsh
+# zdot_clean_plugins: Clean up plugin cache
+
+zdot_clean_plugins() {
+    local dry_run=0
+    local remove_unused=0
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dry-run) dry_run=1 ;;
+            --remove-unused) remove_unused=1 ;;
+            --help)
+                zdot_info "Usage: zdot_clean_plugins [options]"
+                zdot_info "  --dry-run        Show what would be removed"
+                zdot_info "  --remove-unused  Remove plugins not in declared list"
+                return 0
+                ;;
+        esac
+        shift
+    done
+    
+    local cache_dir
+    zstyle -s ':zdot:plugins' directory cache_dir
+    cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
+    local cache=$cache_dir
+    
+    # Always keep these
+    local -A keep
+    keep[ohmyzsh]=1
+    keep[romkatv]=1
+    
+    # Build set of declared plugins
+    local spec
+    for spec in $_ZDOT_PLUGINS_ORDER; do
+        if [[ $spec == omz:* ]]; then
+            keep[ohmyzsh]=1
+        else
+            keep[${spec%%/*}]=1
+        fi
+    done
+    
+    local removed=0
+    local dir
+    for dir in "$cache"/*; do
+        [[ ! -d "$dir" ]] && continue
+        
+        local name=${dir:t}
+        [[ -n "${keep[$name]}" ]] && continue
+        
+        if [[ $dry_run -eq 1 ]]; then
+            zdot_info "Would remove: $name"
+        elif [[ $remove_unused -eq 1 ]]; then
+            zdot_action "Removing: $name"
+            rm -rf "$dir"
+            ((removed++))
+        fi
+    done
+    
+    if [[ $dry_run -eq 1 ]]; then
+        zdot_info "(dry run - no changes made)"
+    elif [[ $remove_unused -eq 1 ]]; then
+        zdot_info "Removed $removed plugin(s)."
+    fi
+}

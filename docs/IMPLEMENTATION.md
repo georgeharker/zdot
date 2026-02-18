@@ -1482,7 +1482,7 @@ zdot implements **two types of caching**:
 Each module file (`*.zsh`) gets a co-located bytecode file:
 
 ```
-~/.config/zsh/zdot/core/base.zsh      → base.zsh.zwc (co-located)
+~/.config/zsh/zdot/core/core.zsh      → core.zsh.zwc (co-located)
 ~/.config/zsh/zdot/lib/git/git.zsh    → git.zsh.zwc (co-located)
 ```
 
@@ -1497,19 +1497,21 @@ source module.zsh              # Zsh uses module.zsh.zwc transparently
 
 #### 2. Function Caching
 
-Function directories get compiled into a single `.zwc` file:
+Each function file gets its own co-located `.zwc` file:
 
 ```
 ~/.config/zsh/zdot/lib/git/functions/
 ├── git-status
+├── git-status.zwc             # Per-file bytecode (co-located)
 ├── git-branch
-└── functions.zwc              # Contains all functions (co-located)
+└── git-branch.zwc             # Per-file bytecode (co-located)
 ```
 
 Implementation:
 ```zsh
-# Compile all functions in directory into one .zwc file
-zcompile functions.zwc func1 func2 func3
+# Compile each function file individually (co-located .zwc)
+zcompile git-status.zwc git-status
+zcompile git-branch.zwc git-branch
 
 # Add directory to fpath (Zsh finds .zwc automatically)
 fpath=(~/zdot/lib/git/functions $fpath)
@@ -1522,8 +1524,8 @@ The execution plan is cached separately in `~/.cache/zdot/plans/`:
 
 ```
 ~/.cache/zdot/plans/
-├── execution_plan.zsh         # Serialized execution plan
-└── execution_plan.zsh.zwc     # Compiled execution plan
+├── execution_plan_interactive_nonlogin.zsh         # Serialized execution plan
+└── execution_plan_interactive_nonlogin.zsh.zwc     # Compiled execution plan
 ```
 
 This is a distinct caching mechanism from module/function caching.
@@ -1537,18 +1539,24 @@ The `zdot_cache_compile_file()` function handles bytecode compilation:
 ```zsh
 zdot_cache_compile_file() {
     local source_file="$1"
-    
+
     # Co-locate .zwc file next to source file
-    local zwc_file="${source_file}.zwc"
-    
+    local output_file="${source_file}.zwc"
+
     # Check if recompilation needed
-    if [[ ! -f "$zwc_file" ]] || [[ "$source_file" -nt "$zwc_file" ]]; then
-        zcompile "$source_file"
+    if [[ -f "$output_file" ]] && ! zdot_is_newer_or_missing "$source_file" "$output_file"; then
+        return 0
     fi
+
+    if ! zcompile "$output_file" "$source_file" 2>/dev/null; then
+        zdot_error "zdot_cache_compile_file: compilation failed for: $source_file"
+        return 1
+    fi
+    return 0
 }
 ```
 
-Location: `~/.config/zsh/zdot/core/cache.zsh:528`
+Location: `~/.config/zsh/zdot/core/cache.zsh:98`
 
 #### Module Loading
 
@@ -1556,19 +1564,25 @@ Modules are loaded through `zdot_module_source()`:
 
 ```zsh
 zdot_module_source() {
-    local module_file="$1"
-    
-    # Compile if caching enabled
-    if zdot_cache_enabled; then
-        zdot_cache_compile_file "$module_file"
+    local rel_path="$1"
+    local module_dir=$(zdot_module_dir)
+
+    local source_file="${module_dir}/${rel_path}"
+
+    # Compile if caching enabled and .zwc is stale or missing
+    if zdot_cache_is_enabled; then
+        local compiled_path="${source_file}.zwc"
+        if zdot_is_newer_or_missing "$source_file" "$compiled_path"; then
+            zdot_cache_compile_file "$source_file"
+        fi
     fi
-    
+
     # Source the .zsh file (Zsh uses .zwc automatically)
-    source "$module_file"
+    source "$source_file"
 }
 ```
 
-Location: `~/.config/zsh/zdot/core/utils.zsh:68`
+Location: `~/.config/zsh/zdot/core/utils.zsh:44`
 
 #### Function Loading
 
@@ -1576,18 +1590,25 @@ Functions are compiled and loaded via `zdot_module_autoload_funcs()`:
 
 ```zsh
 zdot_module_autoload_funcs() {
-    local func_dir="$1"
-    
-    # Compile functions into co-located .zwc file
-    if zdot_cache_enabled; then
+    local module_dir=$(zdot_module_dir)
+    local func_dir="${module_dir}/functions"
+
+    [[ -d "$func_dir" ]] || return 0
+
+    # Compile each function file to a co-located .zwc if caching enabled
+    if zdot_cache_is_enabled; then
         zdot_cache_compile_functions "$func_dir"
     fi
-    
-    # Add directory to fpath (with co-located .zwc)
+
+    # Add directory to fpath (Zsh picks up co-located .zwc automatically)
     fpath=("$func_dir" $fpath)
-    
-    # Autoload functions (Zsh uses .zwc automatically)
-    autoload -Uz ${func_dir}/*(:t)
+
+    # Autoload all function files found in the directory
+    for func_file in "$func_dir"/*; do
+        [[ -f "$func_file" ]] || continue
+        local func_name="${func_file:t}"
+        autoload -Uz "$func_name"
+    done
 }
 ```
 
@@ -1609,7 +1630,7 @@ zstyle ':zdot:cache' enabled no
 
 Check cache status:
 ```zsh
-zdot_cache_enabled && echo "Caching enabled" || echo "Caching disabled"
+zdot_cache_is_enabled && echo "Caching enabled" || echo "Caching disabled"
 ```
 
 #### Cache Invalidation
@@ -1636,8 +1657,8 @@ With zdot installed, bytecode files are co-located with source files:
 ```
 ~/.config/zsh/zdot/                    (symlink to .dotfiles)
 ├── core/
-│   ├── base.zsh
-│   ├── base.zsh.zwc                   ← Co-located bytecode
+│   ├── core.zsh
+│   ├── core.zsh.zwc                   ← Co-located bytecode
 │   ├── cache.zsh
 │   ├── cache.zsh.zwc                  ← Co-located bytecode
 │   └── ...
@@ -1647,14 +1668,16 @@ With zdot installed, bytecode files are co-located with source files:
 │   │   ├── git.zsh.zwc                ← Co-located bytecode
 │   │   └── functions/
 │   │       ├── git-status
+│   │       ├── git-status.zwc         ← Per-file bytecode
 │   │       ├── git-branch
-│   │       └── functions.zwc          ← Function cache
+│   │       ├── git-branch.zwc         ← Per-file bytecode
+│   │       └── ...
 │   └── ...
 └── ...
 
 ~/.cache/zdot/plans/                   (separate plan cache)
-├── execution_plan.zsh
-└── execution_plan.zsh.zwc
+├── execution_plan_interactive_nonlogin.zsh
+└── execution_plan_interactive_nonlogin.zsh.zwc
 ```
 
 **Total**: ~56 `.zwc` files co-located with source files:
@@ -1695,7 +1718,7 @@ If performance doesn't improve:
 
 ```zsh
 # Check if caching is enabled
-zstyle -L ':zdot:cache' enabled
+zdot_cache_is_enabled && echo "Caching enabled" || echo "Caching disabled"
 
 # Verify .zwc files exist
 ls -la ~/.config/zsh/zdot/core/*.zwc

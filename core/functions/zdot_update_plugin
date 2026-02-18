@@ -1,0 +1,105 @@
+#!/usr/bin/env zsh
+# zdot_update_plugin: Update plugin(s) via git pull
+
+zdot_update_plugin() {
+    local cache_dir
+    zstyle -s ':zdot:plugins' directory cache_dir
+    cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
+    local cache=$cache_dir
+    
+    if [[ -n "$1" ]]; then
+        # Update specific plugin
+        local spec=$1
+        local version=""
+        
+        # Parse version from spec (user/repo@v1.0.0)
+        if [[ $spec == *@* ]]; then
+            version=${spec##*@}
+            spec=${spec%@*}
+        fi
+        
+        local path
+        
+        if [[ $spec == omz:* ]]; then
+            path="$cache/ohmyzsh/ohmyzsh/${spec#omz:}"
+        else
+            path="$cache/$spec"
+        fi
+        
+        if [[ ! -d "$path" ]]; then
+            zdot_error "plugin not installed: $spec"
+            return 1
+        fi
+        
+        if [[ -d "$path/.git" ]]; then
+            if [[ -n "$version" ]]; then
+                zdot_action "Checking out $version for $spec..."
+                (cd "$path" && command git fetch --quiet && command git checkout --quiet "$version")
+                zdot_info "  $spec@$version"
+            else
+                zdot_action "Updating $spec..."
+                (cd "$path" && command git pull --quiet)
+                zdot_info "  $spec updated"
+            fi
+        else
+            zdot_error "not a git repo: $path"
+            return 1
+        fi
+    else
+        # Update all declared plugins
+        zdot_report "Updating all declared plugins..."
+        
+        local updated=0
+        
+        # Check if we have any omz: plugins - need to update ohmyzsh repo
+        local has_omz=0
+        for spec in $_ZDOT_PLUGINS_ORDER; do
+            [[ $spec == omz:* ]] && has_omz=1 && break
+        done
+        
+        if [[ $has_omz -eq 1 ]]; then
+            local omz_path="$cache/ohmyzsh/ohmyzsh"
+            zdot_action "  Updating ohmyzsh..."
+            if [[ -d "$omz_path/.git" ]]; then
+                (cd "$omz_path" && command git pull --quiet) 2>/dev/null && zdot_info "    ohmyzsh updated" || zdot_error "    ohmyzsh failed"
+                ((updated++))
+            fi
+        fi
+        
+        local spec
+        for spec in $_ZDOT_PLUGINS_ORDER; do
+            # Skip omz: specs - handled above
+            [[ $spec == omz:* ]] && continue
+            
+            local version=""
+            if [[ $spec == *@* ]]; then
+                version=${spec##*@}
+                spec=${spec%@*}
+            fi
+            
+            local path="$cache/$spec"
+            
+            if [[ ! -d "$path" ]]; then
+                zdot_info "  $spec not installed (run clone first)"
+                continue
+            fi
+            
+            if [[ -d "$path/.git" ]]; then
+                if [[ -n "$version" ]]; then
+                    zdot_action "  Checking out $version for $spec..."
+                    (cd "$path" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null
+                else
+                    zdot_action "  Updating $spec..."
+                    (cd "$path" && command git pull --quiet) 2>/dev/null && zdot_info "    updated" || zdot_error "    failed"
+                fi
+                ((updated++))
+            fi
+        done
+        
+        if [[ $updated -eq 0 ]]; then
+            zdot_info "No plugins to update"
+        else
+            zdot_info "Done ($updated updated)"
+        fi
+    fi
+}

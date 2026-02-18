@@ -1,0 +1,62 @@
+#!/usr/bin/env zsh
+# zdot_import_antidote: Import plugins from antidote-style config file
+
+zdot_import_antidote() {
+    local config_file=${1:-${HOME}/.config/antidote/zsh_plugins.conf}
+
+    [[ -f "$config_file" ]] || {
+        zdot_error "zdot_import_antidote: config file not found: $config_file"
+        return 1
+    }
+
+    local line spec subpath kind conditional
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip comments and empty lines (including tab-only lines)
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line//[[:space:]]}" ]] && continue
+
+        # Parse: owner/repo [path:xxx] [kind:xxx] [conditional:xxx]
+        spec=""
+        subpath=""
+        kind="normal"
+        conditional=""
+
+        # Extract each part — use ${=line} to force word splitting in zsh
+        for word in ${=line}; do
+            if [[ "$word" == path:* ]]; then
+                subpath=${word#path:}
+            elif [[ "$word" == kind:* ]]; then
+                kind=${word#kind:}
+            elif [[ "$word" == conditional:* ]]; then
+                conditional=${word#conditional:}
+            elif [[ "$word" =~ ^[^/]+/[^/]+$ ]]; then
+                spec=$word
+            fi
+        done
+
+        [[ -z "$spec" ]] && continue
+
+        # Convert to zdot format
+        if [[ "$spec" == "ohmyzsh/ohmyzsh" ]]; then
+            # OMZ plugins
+            if [[ -n "$subpath" ]]; then
+                spec="omz:$subpath"
+            else
+                spec="omz:lib"
+            fi
+        fi
+
+        # Check conditional
+        if [[ -n "$conditional" ]]; then
+            case $conditional in
+                is-debian)
+                    [[ $(uname) != Linux ]] && continue
+                    [[ -f /etc/debian_version ]] || continue
+                    ;;
+            esac
+        fi
+
+        # Declare with kind
+        zdot_use "$spec" "$kind"
+    done < "$config_file"
+}

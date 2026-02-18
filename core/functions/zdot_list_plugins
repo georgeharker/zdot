@@ -1,0 +1,85 @@
+#!/usr/bin/env zsh
+# zdot_list_plugins: List plugins (declared/loaded/installed)
+
+zdot_list_plugins() {
+    local mode=${1:-declared}
+    local cache_dir
+    zstyle -s ':zdot:plugins' directory cache_dir
+    cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
+    local cache=$cache_dir
+    
+    # Ensure plugin arrays exist (in case called in fresh shell)
+    if [[ -z "$_ZDOT_PLUGINS_ORDER" ]]; then
+        typeset -ga _ZDOT_PLUGINS_ORDER
+    fi
+    if [[ -z "$_ZDOT_PLUGINS" ]]; then
+        typeset -gA _ZDOT_PLUGINS
+    fi
+    if [[ -z "$_ZDOT_PLUGINS_LOADED" ]]; then
+        typeset -gA _ZDOT_PLUGINS_LOADED
+    fi
+    
+    case $mode in
+        --loaded)
+            zdot_report "Loaded Plugins"
+            local spec plugin_path
+            for spec in ${(k)_ZDOT_PLUGINS_LOADED}; do
+                plugin_path=$(zdot_plugin_path $spec)
+                if [[ -d "$plugin_path" ]]; then
+                    zdot_info "  $spec (loaded)"
+                else
+                    zdot_error "  $spec (loaded, path missing!)"
+                fi
+            done
+            ;;
+        --installed)
+            zdot_report "Installed Plugins"
+            local dir subdir
+            for dir in "$cache"/*; do
+                [[ ! -d "$dir" ]] && continue
+                
+                # For org directories (e.g., Aloxaf/), list subdirs
+                if [[ -d "$dir" && ! -d "$dir/.git" ]]; then
+                    for subdir in "$dir"/*; do
+                        [[ ! -d "$subdir" ]] && continue
+                        local name=${dir:t}/${subdir:t}
+                        [[ -d "$subdir/.git" ]] || continue
+                        local branch=$(cd "$subdir" 2>/dev/null && git branch --show-current 2>/dev/null)
+                        local ref=$(cd "$subdir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
+                        zdot_info "  $name ($branch $ref)"
+                    done
+                fi
+                
+                # Skip ohmyzsh and romkatv (core)
+                local name=${dir:t}
+                [[ $name == "ohmyzsh" ]] && continue
+                [[ $name == "romkatv" ]] && continue
+                
+                # Direct git repos
+                if [[ -d "$dir/.git" ]]; then
+                    local branch=$(cd "$dir" 2>/dev/null && git branch --show-current 2>/dev/null)
+                    local ref=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
+                    zdot_info "  $name ($branch $ref)"
+                fi
+            done
+            ;;
+        --declared|*)
+            zdot_report "Declared Plugins"
+            local spec kind version plugin_path
+            for spec in $_ZDOT_PLUGINS_ORDER; do
+                kind=${_ZDOT_PLUGINS[$spec]:-normal}
+                version=${_ZDOT_PLUGINS_VERSION[$spec]:-}
+                local loaded=""
+                [[ -n "${_ZDOT_PLUGINS_LOADED[$spec]}" ]] && loaded=" [loaded]"
+                plugin_path=$(zdot_plugin_path $spec)
+                local ver_str=""
+                [[ -n "$version" ]] && ver_str="@$version"
+                if [[ -d "$plugin_path" ]]; then
+                    zdot_info "  $spec$ver_str (kind:$kind)$loaded"
+                else
+                    zdot_error "  $spec$ver_str (kind:$kind)$loaded [MISSING]"
+                fi
+            done
+            ;;
+    esac
+}

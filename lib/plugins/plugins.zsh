@@ -1,29 +1,28 @@
 #!/usr/bin/env zsh
-# Plugins: Antidote/Oh-My-Zsh plugin manager setup
-# Settings for oh-my-zsh plugins and related tools
+# Plugins: zdot-plugins manager setup
+# Uses zdot-plugins for plugin management (now in core/plugins.zsh)
 
-_plugins_init() {
-    # Oh My Zsh update settings
+# ============================================================================
+# Plugin Configuration (zstyles for OMZ plugins)
+# ============================================================================
+
+_plugins_configure() {
     zstyle ':omz:update' mode prompt
-
-    # Plugin-specific configuration
     zstyle ':omz:plugins:eza' 'dirs-first' yes
     zstyle ':omz:plugins:eza' 'git-status' yes
     zstyle ':omz:plugins:eza' 'icons' yes
 
-    # nvm
-    if ! zdot_interactive || [[ ! -z "$NVIM" ]]; then
+    if ! zdot_interactive || [[ -n "$NVIM" ]]; then
         zstyle ':omz:plugins:nvm' lazy no
     else
         zstyle ':omz:plugins:nvm' lazy yes
     fi
+
     zstyle ':omz:plugins:nvm' autoload no
     zstyle ':omz:plugins:nvm' lazy-cmd opencode mcp-hub copilot prettierd claude-code
-    export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
 
-    # Ensure nvm.sh is compiled for faster loading
+    export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
     if [[ -f "$NVM_DIR/nvm.sh" ]]; then
-        # Compile if .zwc doesn't exist or is older than nvm.sh
         if [[ ! -f "$NVM_DIR/nvm.sh.zwc" ]] || [[ "$NVM_DIR/nvm.sh" -nt "$NVM_DIR/nvm.sh.zwc" ]]; then
             zcompile "$NVM_DIR/nvm.sh"
         fi
@@ -43,91 +42,129 @@ _plugins_init() {
     ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations
 }
 
-_antidote_load() {
-    export ANTIDOTE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache/}/antidote
-    [[ ! -d ${ANTIDOTE_HOME} ]] && mkdir -p ${ANTIDOTE_HOME}
+# ============================================================================
+# Plugin Declarations
+# ============================================================================
 
-    if [[ -f ${XDG_DATA_HOME:-${HOME}/.local/share}/antidote/antidote.zsh ]]; then
-        source ${XDG_DATA_HOME:-${HOME}/.local/share}/antidote/antidote.zsh
-        
-        zstyle ':antidote:bundle' use-friendly-names 'yes'
-        
-        zsh_plugins=${XDG_CONFIG_HOME:-${HOME}/.config}/antidote/zsh_plugins
+# OMZ lib and plugins (from ohmyzsh/ohmyzsh)
+zdot_use omz:lib
+zdot_use omz:plugins/git
+zdot_use omz:plugins/tmux
+zdot_use omz:plugins/fzf
+zdot_use omz:plugins/zoxide
+zdot_use omz:plugins/npm
+zdot_use omz:plugins/nvm
+zdot_use omz:plugins/eza
+zdot_use omz:plugins/ssh
+zdot_use omz:plugins/debian
 
-        zstyle ':antidote:bundle' file ${zsh_plugins}.conf
-        zstyle ':antidote:static' file ${zsh_plugins}.zsh
+# Abbreviations support
+zdot_use_defer olets/zsh-abbr
 
-        zstyle ':antidote:bundle:*' zcompile 'yes'
-        zstyle ':antidote:static' zcompile yes
+# Syntax highlighting (deferred for faster startup)
+zdot_use_defer zdharma-continuum/fast-syntax-highlighting
+zdot_use_defer 5A6F65/fast-abbr-highlighting
 
-        export ZSH=$(antidote path ohmyzsh/ohmyzsh)
-        export ZSH_CUSTOM=${XDG_DATA_HOME:-${HOME}/.local/share}/oh-my-zsh/
+# Autosuggestions (deferred)
+zdot_use_defer zsh-users/zsh-autosuggestions
+zdot_use_defer olets/zsh-autosuggestions-abbreviations-strategy
 
-        antidote load
-    else
-        # oh-my-zsh init fallback
-        export ZSH="${HOME}/.oh-my-zsh"
+# fzf tab completion (must be last)
+zdot_use Aloxaf/fzf-tab
 
-        # Which plugins would you like to load?
-        # Standard plugins can be found in $ZSH/plugins/
-        # Custom plugins may be added to $ZSH_CUSTOM/plugins/
-        # Example format: plugins=(rails git textmate ruby lighthouse)
-        # Add wisely, as too many plugins slow down shell startup.
-        plugins=(git tmux fzf nvm per-directory-history zsh-autosuggestions fzf-tab zoxide)
+# Register hook that provides plugins-declared (after declarations are made)
+zdot_hook_register _plugins_configure interactive noninteractive \
+    --requires xdg-configured \
+    --provides plugins-declared
 
-        source "${ZSH}/oh-my-zsh.sh"
+# OMZ Library Loader (called when needed)
+# Uses omz.zsh bundle for compdef queue and compinit deferral
+# ============================================================================
+
+_plugins_load_omz() {
+    zdot_load_plugin omz:lib
+    zdot_load_plugin omz:plugins/git
+    zdot_load_plugin omz:plugins/tmux
+    zdot_load_plugin omz:plugins/fzf
+    zdot_load_plugin omz:plugins/zoxide
+    zdot_load_plugin omz:plugins/npm
+    zdot_load_plugin omz:plugins/nvm
+    zdot_load_plugin omz:plugins/eza
+    zdot_load_plugin omz:plugins/ssh
+    if [[ $(uname -v 2>/dev/null) == *"Debian"* || $(uname -v 2>/dev/null) == *"Ubuntu"* ]]; then
+        zdot_load_plugin omz:plugins/debian
     fi
-
-    # Check if zsh-defer is available
-    zsh_defer() {
-        "$@" 
-    }
-    zsh_defer_until() {
-        local delay=$1
-        shift
-        "$@" 
-    }
-
-    if command -v zsh-defer &> /dev/null; then
-        zsh_defer() {
-            zsh-defer "$@"
-        }
-        zsh_defer_until() {
-            local delay=$1
-            shift
-            zsh-defer -t "$delay" "$@"
-        }
-    fi
+    zdot_compinit_defer
 }
+
+# Register phase for when OMZ lib is ready
+# Note: _plugins_load_omz handles non-interactive gracefully (skips compinit)
+zdot_hook_register _plugins_load_omz interactive noninteractive \
+    --requires plugins-cloned \
+    --provides omz-plugins-loaded
+
+# ============================================================================
+# Deferred Plugins Loader
+# ============================================================================
+
+_plugins_load_deferred() {
+    # Load zsh-defer and all deferred plugins
+    zdot_load_deferred_plugins
+}
+
+zdot_hook_register _plugins_load_deferred interactive noninteractive \
+    --requires omz-plugins-loaded \
+    --provides plugins-loaded
+
+# ============================================================================
+# Non-deferred plugins (fzf-tab)
+# ============================================================================
+
+_plugins_load_fzf_tab() {
+    zdot_load_plugin Aloxaf/fzf-tab
+}
+
+zdot_hook_register _plugins_load_fzf_tab interactive \
+    --requires plugins-loaded \
+    --provides fzf-tab-loaded
+
+# ============================================================================
+# Post-Load Setup
+# ============================================================================
 
 _plugins_post_init() {
     # Fast-syntax-highlighting theme (after plugins load)
-    if [[ $(realpath ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini) -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh ]]; then
-        zsh_defer fast-theme ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
+    if zdot_interactive; then
+        if [[ -f ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini ]]; then
+            if [[ $(realpath ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini) -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh ]]; then
+                zdot_defer fast-theme -q ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
+            fi
+        fi
     fi
 }
 
+zdot_hook_register _plugins_post_init interactive noninteractive \
+    --requires plugins-loaded \
+    --provides plugins-post-configured
+
+# ============================================================================
+# NVM Initialization
+# ============================================================================
+
 _nvm_interactive_init() {
-    # Delay nvm init for interactive until after prompt
-    zsh_defer_until 1 nvm use node
+    zdot_defer_until 1 nvm use node
 }
 
 _nvm_noninteractive_init() {
-    nvm use node
+    # Only run if nvm is available
+    (( $+commands[nvm] )) || return 0
+    nvm use node >/dev/null
 }
 
-# Register hooks with dependency chain
-# plugins_init prepares plugin configuration, provides plugins-configured
-zdot_hook_register _plugins_init interactive noninteractive --requires xdg-configured --provides plugins-configured
+zdot_hook_register _nvm_interactive_init interactive \
+    --requires prompt-ready \
+    --provides nvm-ready
 
-# antidote_load actually loads plugins, provides plugins-loaded
-zdot_hook_register _antidote_load interactive noninteractive --requires plugins-configured --provides plugins-loaded
-
-# plugins_post_init runs after plugin load, provides plugins-post-configured
-zdot_hook_register _plugins_post_init interactive noninteractive --requires plugins-loaded --provides plugins-post-configured
-
-# nvm_interactive_init deferred initialization (interactive only), provides nvm-ready
-# Requires prompt-ready to avoid racing with prompt's zsh-defer initialization
-zdot_hook_register _nvm_interactive_init interactive --requires prompt-ready --provides nvm-ready
-# nvm_noninteractive_init, provides nvm-ready
-zdot_hook_register _nvm_noninteractive_init noninteractive --requires plugins-loaded --provides nvm-ready
+zdot_hook_register _nvm_noninteractive_init noninteractive \
+    --requires plugins-loaded \
+    --provides nvm-ready

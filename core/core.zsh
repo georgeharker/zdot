@@ -31,7 +31,7 @@ _zdot_functions_dir() {
 # Get completions directory (respects current XDG_CACHE_HOME)
 # Generated completions are cache data, not configuration
 _zdot_completions_dir() {
-    echo "${XDG_CACHE_HOME:-${HOME}/.cache}/zsh/completions"
+    echo "${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/completions"
 }
 
 # ============================================================================
