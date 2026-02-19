@@ -115,17 +115,17 @@ _compdef_queue() {
 #     the real compdef function (defined by compinit) handles calls from that
 #     point on
 compdef() {
-    [[ -o interactive ]] || return 0
+    zdot_interactive || return 0
     _compdef_queue "$@"
 }
 
 zdot_compdef_queue_process() {
-    # Remove our stub so the real compdef (defined by compinit) takes over.
-    unfunction compdef 2>/dev/null
-
-    # If compinit didn't define the real compdef (e.g. non-interactive or
-    # compinit failed), there is nothing to replay — bail out silently.
-    (( ${+functions[compdef]} )) || return 0
+    # The stub was already removed before compinit ran (in zdot_compinit_run).
+    # compinit defines the real compdef; if for any reason it's still missing,
+    # bail silently rather than erroring out.
+    if ! (( ${+functions[compdef]} )); then
+        return 0
+    fi
 
     local cmd
     for cmd in "$_ZDOT_COMPDEF_QUEUE[@]"; do
@@ -176,14 +176,28 @@ zdot_omz_compdump_meta_init() {
     _ZDOT_COMPDUMP_META_FILE="${cache_dir}/zcompdump-metadata.zsh"
 }
 
+_zdot_omz_fpath_files() {
+    # Emit a sorted newline-separated list of all _* completion files found
+    # across every directory currently in $fpath.  Used to detect when a new
+    # completion file is added to (or removed from) an existing fpath entry.
+    local d
+    for d in $fpath; do
+        [[ -d "$d" ]] && print -l "$d"/_*(N) 2>/dev/null
+    done | sort
+}
+
 zdot_omz_compdump_write_meta() {
     zdot_omz_compdump_meta_init
     local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
     typeset -g  ZSH_COMPDUMP_REV
     typeset -ga ZSH_COMPDUMP_FPATH
+    typeset -g  ZSH_COMPDUMP_FPATH_FILES
     ZSH_COMPDUMP_REV=$(cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     ZSH_COMPDUMP_FPATH=($fpath)
-    { typeset -p ZSH_COMPDUMP_REV; typeset -p ZSH_COMPDUMP_FPATH } >| "$_ZDOT_COMPDUMP_META_FILE"
+    ZSH_COMPDUMP_FPATH_FILES=$(_zdot_omz_fpath_files)
+    { typeset -p ZSH_COMPDUMP_REV
+      typeset -p ZSH_COMPDUMP_FPATH
+      typeset -p ZSH_COMPDUMP_FPATH_FILES } >| "$_ZDOT_COMPDUMP_META_FILE"
 }
 
 zdot_omz_compdump_needs_refresh() {
@@ -193,14 +207,17 @@ zdot_omz_compdump_needs_refresh() {
     [[ ! -f "$compfile" ]] && return 0
     [[ -n "$_ZDOT_FORCE_COMPDUMP_REFRESH" ]] && return 0
     local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-    local current_rev current_fpath
+    local current_rev current_fpath current_fpath_files
     current_rev=$(cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     current_fpath=($fpath)
+    current_fpath_files=$(_zdot_omz_fpath_files)
     typeset -g  ZSH_COMPDUMP_REV
     typeset -ga ZSH_COMPDUMP_FPATH
+    typeset -g  ZSH_COMPDUMP_FPATH_FILES
     [[ -r "$_ZDOT_COMPDUMP_META_FILE" ]] && source "$_ZDOT_COMPDUMP_META_FILE"
-    if [[ "$current_rev"   != "$ZSH_COMPDUMP_REV"   ]] ||
-       [[ "$current_fpath" != "$ZSH_COMPDUMP_FPATH" ]]; then
+    if [[ "$current_rev"         != "$ZSH_COMPDUMP_REV"         ]] ||
+       [[ "$current_fpath"       != "$ZSH_COMPDUMP_FPATH"       ]] ||
+       [[ "$current_fpath_files" != "$ZSH_COMPDUMP_FPATH_FILES" ]]; then
         return 0
     fi
     return 1
@@ -220,60 +237,89 @@ zdot_omz_compdump_recompile() {
 }
 
 # ============================================================================
-# Compinit Deferral
+# Two-phase compinit: defer → flag → precmd
 # ============================================================================
+#
+# The problem: compinit must run *after* all deferred plugins have been
+# sourced (so $fpath is fully populated), but compinit hangs when called
+# directly inside a zsh-defer / ZLE callback.
+#
+# Solution:
+#   Phase 1 – zdot_compinit_defer (called via zdot_defer from plugins.zsh,
+#              therefore guaranteed to run after all deferred plugin sources):
+#              Just sets _ZDOT_FPATH_READY=1.  Does NOT call compinit.
+#
+#   Phase 2 – zdot_ensure_compinit_during_precmd (precmd hook, normal shell
+#              context): checks _ZDOT_FPATH_READY; if set, calls
+#              zdot_compinit_run which runs compinit safely.  If not yet set
+#              (rare: first precmd fired before zsh-defer finished), skips and
+#              retries on the next precmd.
 
-typeset -g _ZDOT_COMPINIT_DEFERRED=0
+# Phase 1: called from zsh-defer after all deferred plugin sources.
+# Sets the "fpath is ready" flag; never calls compinit directly.
+typeset -g _ZDOT_FPATH_READY=0
 
 zdot_compinit_defer() {
-    # Skip compinit in non-interactive shells - completions not needed
-    [[ -o interactive ]] || return 0
-    
-    [[ $_ZDOT_COMPINIT_DEFERRED -eq 1 ]] && return 0
-    
+    _ZDOT_FPATH_READY=1
+}
+
+# ============================================================================
+# Compinit Run (precmd)
+# ============================================================================
+#
+# zdot_compinit_run is the single entry point for running compinit.  It is
+# called from zdot_ensure_compinit_during_precmd, which is registered as a
+# precmd hook.  Running compinit from precmd (normal shell context) avoids the
+# fpath-scan hang that occurs when compinit is invoked inside a zsh-defer /
+# ZLE callback.
+#
+# Fast path: when the compdump is fresh (rev + fpath unchanged) we call
+#   compinit -C  to load cached completions without regenerating the dump.
+# Full path: when a refresh is needed we call compinit -i/-u and write new
+#   cache metadata + recompile the dump in the background.
+#
+# After compinit finishes, zdot_compdef_queue_process replays any compdef
+# calls that were queued by the stub before compinit ran.
+
+zdot_compinit_run() {
+    # Completions are not needed in non-interactive shells.
+    zdot_interactive || return 0
+
+    # Guard against double-invocation (precmd hook fires on every prompt).
+    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0
+
     _zdot_compdef_queue_init
     zdot_init_compfile
-    
+
     autoload -Uz compinit
-    
+
     local compfile="$_ZDOT_COMPFILE"
-    local do_compinit=1
-    
+
+    local do_full_compinit=1
     if [[ -f "$compfile" ]] && ! zdot_omz_compdump_needs_refresh; then
-        do_compinit=0
+        do_full_compinit=0
     fi
-    
-    if [[ $do_compinit -eq 1 ]]; then
+
+    # Remove our stub BEFORE calling compinit so compinit can freely define the
+    # real compdef function.  If the stub is present when compinit runs, compinit
+    # silently skips redefining compdef (a function with that name already
+    # exists), leaving us with no real compdef after the stub is removed.
+    unfunction compdef 2>/dev/null
+
+    if [[ $do_full_compinit -eq 1 ]]; then
         if [[ "$ZSH_DISABLE_COMPFIX" != true ]]; then
             autoload -Uz compaudit
             compinit -i -d "$compfile"
         else
             compinit -u -d "$compfile"
         fi
-        
         zdot_omz_compdump_write_meta
         zdot_omz_compdump_recompile
-    fi
-    
-    _ZDOT_COMPINIT_DONE=1
-    _ZDOT_COMPINIT_DEFERRED=1
-    zdot_compdef_queue_process
-    
-    return 0
-}
-
-zdot_compinit_reexec() {
-    local compfile="$_ZDOT_COMPFILE"
-
-    if [[ "$ZSH_DISABLE_COMPFIX" != true ]]; then
-        autoload -Uz compaudit
-        compinit -i -d "$compfile"
     else
-        compinit -u -d "$compfile"
+        # Fast path: compdump is fresh.  compinit -C loads cached completions
+        # and defines the real compdef function without regenerating the dump.
+        compinit -C -d "$compfile"
     fi
-
-    zdot_omz_compdump_write_meta
-    zdot_omz_compdump_recompile
 
     _ZDOT_COMPINIT_DONE=1
     zdot_compdef_queue_process
@@ -284,11 +330,21 @@ zdot_compinit_reexec() {
 # ============================================================================
 
 zdot_ensure_compinit_during_precmd() {
-    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && {
+    # Once compinit has run, deregister so we don't fire on every prompt.
+    if [[ -n "$_ZDOT_COMPINIT_DONE" ]]; then
         add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
         return 0
-    }
-    zdot_compinit_reexec
+    fi
+
+    # Phase 2 gate: wait until all deferred plugins have been sourced (fpath
+    # fully populated).  zdot_compinit_defer (called via zdot_defer in
+    # plugins.zsh after all deferred sources) sets this flag.  On the rare
+    # first precmd that fires before zsh-defer completes, skip and retry.
+    if (( ! _ZDOT_FPATH_READY )); then
+        return 0
+    fi
+
+    zdot_compinit_run
     add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
 }
 
@@ -483,6 +539,13 @@ zdot_use_omz() {
 # Register this bundle handler with the registry
 zdot_bundle_register omz
 
+# Eagerly compute _ZDOT_COMPFILE at source time so that zdot_omz_init_short_host
+# (which calls `scutil --get LocalHostName` on macOS) runs now — during normal
+# shell startup — rather than inside the zsh-defer callback zdot_compinit_defer.
+# Without this, scutil can block the deferred callback, preventing
+# zdot_compdef_queue_process from ever replaying queued compdef calls.
+zdot_init_compfile
+
 # ============================================================================
 # Hook Registration for zdot
 # These are called by the zdot hook system
@@ -508,6 +571,11 @@ zdot_omz_theme_init() {
 zdot_hook_register zdot_omz_theme_init interactive \
     --requires omz-lib-loaded \
     --provides omz-theme-ready
+
+# Compinit precmd safety net: if zsh-defer doesn't fire, compinit runs on first prompt
+zdot_hook_register zdot_enable_compinit_precmd interactive \
+    --requires omz-lib-loaded \
+    --provides compinit-precmd-ready
 
 # ============================================================================
 # Lazy-loaded OMZ Libs (from use-omz)

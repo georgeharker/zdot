@@ -390,10 +390,12 @@ zdot_load_deferred_plugins() {
         _ZDOT_PLUGINS_LOADED[$spec]=1
     done
 
-    # Enqueue compinit after all deferred plugin sources so fpath is fully
-    # populated (deferred plugins add completion dirs during their source).
-    # In the non-defer passthrough path zdot_defer calls zdot_compinit_defer
-    # directly; its [[ -o interactive ]] guard handles non-interactive shells.
+    # Phase 1 of two-phase compinit: enqueue zdot_compinit_defer via zsh-defer
+    # *after* all deferred plugin sources above.  zsh-defer executes callbacks
+    # in FIFO order, so this runs only after every plugin has been sourced and
+    # $fpath is fully populated.  zdot_compinit_defer simply sets
+    # _ZDOT_FPATH_READY=1; the actual compinit runs in precmd context (phase 2)
+    # via zdot_ensure_compinit_during_precmd, avoiding the ZLE-callback hang.
     zdot_defer zdot_compinit_defer
 }
 

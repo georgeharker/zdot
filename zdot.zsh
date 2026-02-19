@@ -47,12 +47,17 @@ if [[ -d "$core_functions_dir" ]]; then
     fpath=("$core_functions_dir" $fpath)
     for func_file in "$core_functions_dir"/*; do
         [[ -f "$func_file" ]] || continue
+        # Skip completion functions (_*) — compinit discovers them via fpath
+        [[ "${func_file:t}" == _* ]] && continue
         autoload -Uz "${func_file:t}"
     done
 fi
 
 # Autoload user functions
 zdot_autoload_global_funcs
+
+# Wire zdot completion — compdef stub queues this until after compinit runs
+compdef _zdot zdot
 
 unset zdot_core_dir core_functions_dir
 

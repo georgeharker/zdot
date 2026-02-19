@@ -71,6 +71,8 @@ zdot_module_autoload_funcs() {
         for func_file in "$func_dir"/*; do
             [[ -f "$func_file" ]] || continue
             local func_name="${func_file:t}"
+            # Skip completion functions (_*) — compinit discovers them via fpath
+            [[ "$func_name" == _* ]] && continue
 
             # Individual function file - autoload it
             autoload -Uz "$func_name"
@@ -107,6 +109,8 @@ zdot_autoload_global_funcs() {
         for func_file in "$functions_dir"/*; do
             [[ -f "$func_file" ]] || continue
             local func_name="${func_file:t}"
+            # Skip completion functions (_*) — compinit discovers them via fpath
+            [[ "$func_name" == _* ]] && continue
 
             # Individual function file - autoload it
             autoload -Uz "$func_name"
