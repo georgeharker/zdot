@@ -170,15 +170,89 @@ compdef _git git
 # Later replayed by zdot_compdef_queue_process after compinit
 ```
 
-### Compinit Deferral
+### Two-Phase Compinit Flow
 
-Defers compinit for faster shell startup:
+Completions require a careful ordering: all plugins must add to `$fpath` before
+`compinit` runs, but `compinit` must not block startup. The solution is a
+two-phase approach with a compdef stub queue.
+
+#### Phase 1 — Compdef stub (sourced immediately)
+
+A `compdef()` stub is installed at source time. When plugins call `compdef`
+before `compinit` has run, the stub queues the call in `_ZDOT_COMPDEF_QUEUE`
+instead of executing it. In non-interactive shells the stub is a no-op:
 
 ```zsh
-zdot_compinit_defer
+compdef() {
+    zdot_interactive || return 0
+    _compdef_queue "$@"          # append to _ZDOT_COMPDEF_QUEUE
+}
 ```
 
-Important: This returns early in non-interactive shells since completions aren't needed.
+#### Phase 2a — fpath accumulation + deferred signal
+
+After all deferred plugins are loaded (and have added their dirs to `$fpath`),
+`zdot_compinit_defer` is called via `zdot_defer`. Its only job is to set the
+`_ZDOT_FPATH_READY=1` flag — it never calls `compinit` directly (doing so
+inside `zsh-defer` would cause a hang):
+
+```zsh
+zdot_compinit_defer() {
+    zdot_interactive || return 0
+    _ZDOT_FPATH_READY=1
+}
+```
+
+#### Phase 2b — precmd hook triggers compinit
+
+`zdot_ensure_compinit_during_precmd` is registered as a `precmd` hook. On each
+prompt draw it checks both conditions, then runs `zdot_compinit_run` exactly
+once:
+
+```zsh
+zdot_ensure_compinit_during_precmd() {
+    (( _ZDOT_COMPINIT_DONE )) && { _zdot_remove_precmd_hook; return 0 }
+    (( _ZDOT_FPATH_READY  )) || return 0   # not ready yet — try next precmd
+    zdot_compinit_run
+}
+```
+
+#### `zdot_compinit_run` — the critical step
+
+**`unfunction compdef` MUST precede `compinit`.**  If the stub is still defined
+when `compinit` runs, zsh sees an existing `compdef` and silently skips
+redefining it — leaving only the stub, which can only queue and never register
+completions.
+
+```zsh
+zdot_compinit_run() {
+    unfunction compdef 2>/dev/null   # remove stub BEFORE compinit
+    if zdot_compdump_needs_refresh; then
+        compinit -i                  # full init, refresh compdump
+    else
+        compinit -C                  # fast path, trust cached compdump
+    fi
+    zdot_compdef_queue_process       # replay all queued compdef calls
+    _ZDOT_COMPINIT_DONE=1
+}
+```
+
+#### Queue replay
+
+After `compinit` defines the real `compdef`, all queued entries are replayed:
+
+```zsh
+zdot_compdef_queue_process() {
+    local entry
+    for entry in "${_ZDOT_COMPDEF_QUEUE[@]}"; do
+        compdef "${(@Q)${(z)entry}}"
+    done
+    _ZDOT_COMPDEF_QUEUE=()
+}
+```
+
+**Key ordering constraint**: stub removal → `compinit` → queue replay. Deviating
+from this order silently breaks tab completions.
 
 ### Compdump Management
 
@@ -257,12 +331,12 @@ The plugin system handles non-interactive shells gracefully:
 
 1. **Compinit** - `zdot_compinit_defer` returns early in non-interactive:
    ```zsh
-   [[ -o interactive ]] || return 0
+   zdot_interactive || return 0
    ```
 
 2. **fzf module** - Early exit in non-interactive:
    ```zsh
-   [[ -o interactive ]] && (( ${+zle} )) || return 0
+   zdot_interactive && (( ${+zle} )) || return 0
    ```
 
 3. **NVM** - Uses `nvm use node >/dev/null` (silent) in non-interactive

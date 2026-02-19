@@ -83,21 +83,29 @@ This document provides technical implementation details for the zdot system. It 
 
 ```
 zdot/
-├── zdot.zsh                    # Entry point (28 lines)
+├── zdot.zsh                         # Entry point (66 lines)
 ├── core/
-│   ├── hooks.zsh              # Hook system (528 lines)
-│   ├── logging.zsh            # Logging functions (56 lines)
-│   ├── utils.zsh              # Utility functions (60 lines)
-│   └── functions/             # Autoloaded functions
-│       ├── zdot_hooks_list    # Hook inspection (230 lines)
-│       └── ...                # Other utilities
-├── lib/                       # User modules
-│   ├── xdg/
-│   │   └── xdg.zsh
-│   ├── brew/
-│   │   └── brew.zsh
-│   └── ...
-└── config/                    # Static config files
+│   ├── core.zsh                     # Core bootstrap (sources other core modules)
+│   ├── cache.zsh                    # Cache invalidation & compilation
+│   ├── completions.zsh              # Completion helpers (compdump management)
+│   ├── functions.zsh                # Function autoloading setup
+│   ├── hooks.zsh                    # Hook system (528 lines)
+│   ├── logging.zsh                  # Logging functions (56 lines)
+│   ├── modules.zsh                  # Module loading
+│   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer)
+│   ├── utils.zsh                    # Utility functions (zdot_interactive, zdot_login, …)
+│   ├── functions/                   # Autoloaded functions (zdot, zdot_hooks_list, …)
+│   │   ├── zdot                     # CLI dispatcher
+│   │   ├── _zdot                    # Tab-completion for zdot CLI
+│   │   └── ...
+│   └── plugin-bundles/
+│       └── omz.zsh                  # OMZ plugin bundle (two-phase compinit, compdef queue)
+└── lib/                             # User modules
+    ├── xdg/
+    │   └── xdg.zsh
+    ├── brew/
+    │   └── brew.zsh
+    └── ...
 ```
 
 ### Core Modules
@@ -112,10 +120,12 @@ zdot/
 
 **Key Code:**
 ```zsh
-# Lines 27-34: Function autoloading setup
+# Function autoloading — skips completion functions prefixed with _
 if [[ -d "${ZDOTDIR}/core/functions" ]]; then
     fpath=("${ZDOTDIR}/core/functions" $fpath)
     for func_file in "${ZDOTDIR}"/core/functions/*; do
+        [[ -f "$func_file" ]] || continue
+        [[ "${func_file:t}" == _* ]] && continue   # skip _zdot (completion function)
         autoload -Uz "${func_file:t}"
     done
 fi
@@ -254,17 +264,25 @@ Comprehensive debug output.
 
 **Design Note**: Entry point for troubleshooting configuration issues.
 
-##### `zdot_is_login()`, `zdot_is_interactive()` (lines 21-32)
+##### `zdot_interactive()`, `zdot_login()`, `zdot_has_tty()` (core/utils.zsh)
 
-Shell context detection.
+Shell context detection helpers.
 
 **Implementation:**
-- `zdot_is_login()`: Checks `$options[login]`
-- `zdot_is_interactive()`: Checks `$options[interactive]`
+- `zdot_interactive()`: Checks `$_ZDOT_IS_INTERACTIVE -eq 1` (flag set once at startup by `core.zsh`)
+- `zdot_login()`: Checks `$_ZDOT_IS_LOGIN -eq 1` (flag set once at startup by `core.zsh`)
+- `zdot_has_tty()`: Checks `[[ -t 1 ]]` — distinct from interactive; `zsh -i -c ...` is interactive but has no PTY
 
 **Return Values:**
-- 0 = true (yes, is login/interactive)
-- 1 = false (no, is not login/interactive)
+- 0 = true (condition holds)
+- 1 = false (condition does not hold)
+
+**Usage:**
+```zsh
+zdot_interactive || return 0    # skip in non-interactive shells
+zdot_login       || return 0    # skip in non-login shells
+zdot_has_tty     || return 0    # skip when no terminal I/O available
+```
 
 #### core/functions/zdot_hooks_list (Hook Inspection)
 
@@ -698,16 +716,24 @@ Zsh provides context information via the `$options` associative array.
 - `login`: First shell after authentication
 - `nonlogin`: Subsequent shells (new terminal tabs/windows)
 
-**Detection Code** (core/utils.zsh:21-32):
+**Detection Code** (core/utils.zsh):
 ```zsh
-zdot_is_login() {
-    [[ -o login ]]
+zdot_interactive() {
+    [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]]
 }
 
-zdot_is_interactive() {
-    [[ -o interactive ]]
+zdot_login() {
+    [[ $_ZDOT_IS_LOGIN -eq 1 ]]
+}
+
+zdot_has_tty() {
+    [[ -t 1 ]]
 }
 ```
+
+`$_ZDOT_IS_INTERACTIVE` and `$_ZDOT_IS_LOGIN` are set once at startup (before any plugin sourcing) based on zsh option flags, ensuring consistent context detection throughout the session regardless of subshell state.
+
+`zdot_has_tty()` checks for a connected terminal (stdout is a TTY) — distinct from interactive mode and useful for guarding output that would break pipe usage.
 
 **Usage in Hook Registration:**
 ```zsh
@@ -723,30 +749,40 @@ zdot_hook_register _universal_init interactive noninteractive login nonlogin
 
 ### Context Matching Algorithm
 
-**Function**: `zdot_build_execution_plan()` (core/hooks.zsh:128-137)
+**Function**: `zdot_build_execution_plan()` (core/hooks.zsh)
 
 **Algorithm:**
 ```zsh
 # Determine current context
-local current_contexts=""
-zdot_is_interactive && current_contexts+="interactive " || current_contexts+="noninteractive "
-zdot_is_login && current_contexts+="login " || current_contexts+="nonlogin "
+local -a current_contexts
+if [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]]; then
+    current_contexts+=(interactive)
+else
+    current_contexts+=(noninteractive)
+fi
+if [[ $_ZDOT_IS_LOGIN -eq 1 ]]; then
+    current_contexts+=(login)
+else
+    current_contexts+=(nonlogin)
+fi
 
 # For each hook, check if contexts match
-for hook_id in "${(k)_ZDOT_HOOKS[@]}"; do
-    local hook_contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
-    
+for hook_id in ${(k)_ZDOT_HOOKS}; do
+    local hook_contexts=(${=_ZDOT_HOOK_CONTEXTS[$hook_id]})
+
     # Check if any hook context matches current context
-    local match=0
-    for ctx in ${(z)hook_contexts}; do
-        if [[ " $current_contexts " == *" $ctx "* ]]; then
-            match=1
+    local context_match=0
+    for ctx in "${current_contexts[@]}"; do
+        if [[ " ${hook_contexts[*]} " =~ " ${ctx} " ]]; then
+            context_match=1
             break
         fi
     done
-    
-    # Skip hook if contexts don't match
-    [[ $match -eq 0 ]] && continue
+
+    # Skip hooks not in current context
+    if [[ $context_match -eq 0 ]]; then
+        continue
+    fi
     
     # Proceed with dependency resolution...
 done
