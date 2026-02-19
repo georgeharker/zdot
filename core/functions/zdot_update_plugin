@@ -18,31 +18,31 @@ zdot_update_plugin() {
             spec=${spec%@*}
         fi
         
-        local path
+        local plugin_path
         
         if [[ $spec == omz:* ]]; then
-            path="$cache/ohmyzsh/ohmyzsh/${spec#omz:}"
+            plugin_path="$cache/ohmyzsh/ohmyzsh/${spec#omz:}"
         else
-            path="$cache/$spec"
+            plugin_path="$cache/$spec"
         fi
         
-        if [[ ! -d "$path" ]]; then
+        if [[ ! -d "$plugin_path" ]]; then
             zdot_error "plugin not installed: $spec"
             return 1
         fi
         
-        if [[ -d "$path/.git" ]]; then
+        if [[ -d "$plugin_path/.git" ]]; then
             if [[ -n "$version" ]]; then
                 zdot_action "Checking out $version for $spec..."
-                (cd "$path" && command git fetch --quiet && command git checkout --quiet "$version")
+                (cd "$plugin_path" && command git fetch --quiet && command git checkout --quiet "$version")
                 zdot_info "  $spec@$version"
             else
                 zdot_action "Updating $spec..."
-                (cd "$path" && command git pull --quiet)
+                (cd "$plugin_path" && command git pull --quiet)
                 zdot_info "  $spec updated"
             fi
         else
-            zdot_error "not a git repo: $path"
+            zdot_error "not a git repo: $plugin_path"
             return 1
         fi
     else
@@ -77,20 +77,20 @@ zdot_update_plugin() {
                 spec=${spec%@*}
             fi
             
-            local path="$cache/$spec"
+            local plugin_path="$cache/$spec"
             
-            if [[ ! -d "$path" ]]; then
+            if [[ ! -d "$plugin_path" ]]; then
                 zdot_info "  $spec not installed (run clone first)"
                 continue
             fi
             
-            if [[ -d "$path/.git" ]]; then
+            if [[ -d "$plugin_path/.git" ]]; then
                 if [[ -n "$version" ]]; then
                     zdot_action "  Checking out $version for $spec..."
-                    (cd "$path" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null
+                    (cd "$plugin_path" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null
                 else
                     zdot_action "  Updating $spec..."
-                    (cd "$path" && command git pull --quiet) 2>/dev/null && zdot_info "    updated" || zdot_error "    failed"
+                    (cd "$plugin_path" && command git pull --quiet) 2>/dev/null && zdot_info "    updated" || zdot_error "    failed"
                 fi
                 ((updated++))
             fi
