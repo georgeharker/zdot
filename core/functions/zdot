@@ -1,0 +1,332 @@
+#!/usr/bin/env zsh
+# zdot: Top-level CLI dispatcher for zdot management commands
+# Usage: zdot <noun> <verb> [options...]
+#
+# Nouns and verbs:
+#   cache   status | invalidate | compile
+#   hook    list [--verbose|-v] [--all|-a] | plan
+#   plugin  list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone
+#   module  list
+#   completion refresh
+#   secret  refresh
+#   info
+#   debug
+#   bench
+#   profile
+#   help    [noun]
+
+function zdot() {
+    local noun="${1:-}"
+    local verb="${2:-}"
+
+    # ── per-noun help blocks ─────────────────────────────────────────────────
+
+    function _zdot_help_cache() {
+        zdot_info "zdot cache — cache management"
+        zdot_info ""
+        zdot_info "  zdot cache status      Show cache stats and hit/miss counts"
+        zdot_info "  zdot cache invalidate  Invalidate all cached files"
+        zdot_info "  zdot cache compile     Recompile all autoloaded function files"
+    }
+
+    function _zdot_help_hook() {
+        zdot_info "zdot hook — hook and execution plan management"
+        zdot_info ""
+        zdot_info "  zdot hook list [-v] [-a]  List registered hooks"
+        zdot_info "    -v, --verbose            Show full hook metadata"
+        zdot_info "    -a, --all                Include unexecuted hooks"
+        zdot_info "  zdot hook plan            Print the full execution plan"
+    }
+
+    function _zdot_help_plugin() {
+        zdot_info "zdot plugin — plugin management"
+        zdot_info ""
+        zdot_info "  zdot plugin list [--loaded|--installed|--declared]"
+        zdot_info "                          List plugins (default: all declared)"
+        zdot_info "  zdot plugin update [spec]  Update one or all plugins"
+        zdot_info "  zdot plugin clean [--dry-run] [--remove-unused]"
+        zdot_info "                          Remove stale plugin directories"
+        zdot_info "  zdot plugin reclone     Delete and re-clone all plugins"
+    }
+
+    function _zdot_help_module() {
+        zdot_info "zdot module — module management"
+        zdot_info ""
+        zdot_info "  zdot module list  List all loaded modules and their status"
+    }
+
+    function _zdot_help_completion() {
+        zdot_info "zdot completion — shell completion management"
+        zdot_info ""
+        zdot_info "  zdot completion refresh  Regenerate completion files for registered tools"
+    }
+
+    function _zdot_help_secret() {
+        zdot_info "zdot secret — secret management"
+        zdot_info ""
+        zdot_info "  zdot secret refresh  Pull latest secrets from 1Password into the shell"
+    }
+
+    function _zdot_help_info() {
+        zdot_info "zdot info — show zdot environment and runtime state"
+        zdot_info ""
+        zdot_info "  Prints key paths, shell context flags, cache config, and counts"
+        zdot_info "  for plugins, hooks, and modules."
+    }
+
+    function _zdot_help_debug() {
+        zdot_info "zdot debug — dump full internal state"
+        zdot_info ""
+        zdot_info "  Prints the execution plan, executed hooks, provided/promised phases,"
+        zdot_info "  plugin load status, and loaded modules."
+    }
+
+    function _zdot_help_bench() {
+        zdot_info "zdot bench — run shell startup benchmark"
+        zdot_info ""
+        zdot_info "  Runs scripts/benchmark.zsh. Additional args are forwarded."
+    }
+
+    function _zdot_help_profile() {
+        zdot_info "zdot profile — run shell startup profiler"
+        zdot_info ""
+        zdot_info "  Runs scripts/profile.zsh. Additional args are forwarded."
+    }
+
+    function _zdot_help_help() {
+        zdot_info "zdot help — show help"
+        zdot_info ""
+        zdot_info "  zdot help           Show the top-level noun list"
+        zdot_info "  zdot help <noun>    Show detailed help for a noun"
+        zdot_info ""
+        zdot_info "  Available nouns: cache hook plugin module completion secret info debug bench profile"
+    }
+
+    function _zdot_usage() {
+        zdot_info "Usage: zdot <noun> <verb> [options]"
+        zdot_info ""
+        zdot_info "  cache      status | invalidate | compile"
+        zdot_info "  hook       list [-v] [-a] | plan"
+        zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
+        zdot_info "  module     list"
+        zdot_info "  completion refresh"
+        zdot_info "  secret     refresh"
+        zdot_info "  info"
+        zdot_info "  debug"
+        zdot_info "  bench"
+        zdot_info "  profile"
+        zdot_info "  help       [noun]"
+        zdot_info ""
+        zdot_info "Run 'zdot help <noun>' for detailed help on any noun."
+    }
+
+    # ── dispatch ─────────────────────────────────────────────────────────────
+
+    case "$noun" in
+
+        # ── cache ─────────────────────────────────────────────────────────
+        cache)
+            case "$verb" in
+                status)   zdot_cache_stats ;;
+                invalidate) zdot_cache_invalidate ;;
+                compile)  zdot_cache_compile_all ;;
+                help|--help|-h) _zdot_help_cache ;;
+                *)
+                    zdot_error "zdot cache: unknown verb '${verb}'"
+                    zdot_info "  verbs: status | invalidate | compile"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── hook ──────────────────────────────────────────────────────────
+        hook)
+            case "$verb" in
+                list) zdot_hooks_list "${@:3}" ;;
+                plan) zdot_show_plan ;;
+                help|--help|-h) _zdot_help_hook ;;
+                *)
+                    zdot_error "zdot hook: unknown verb '${verb}'"
+                    zdot_info "  verbs: list | plan"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── plugin ────────────────────────────────────────────────────────
+        plugin)
+            case "$verb" in
+                list)    zdot_list_plugins "${@:3}" ;;
+                update)  zdot_update_plugin "${@:3}" ;;
+                clean)   zdot_clean_plugins "${@:3}" ;;
+                reclone) zdot_reclone_plugins ;;
+                help|--help|-h) _zdot_help_plugin ;;
+                *)
+                    zdot_error "zdot plugin: unknown verb '${verb}'"
+                    zdot_info "  verbs: list | update [spec] | clean | reclone"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── module ────────────────────────────────────────────────────────
+        module)
+            case "$verb" in
+                list) zdot_module_list ;;
+                help|--help|-h) _zdot_help_module ;;
+                *)
+                    zdot_error "zdot module: unknown verb '${verb}'"
+                    zdot_info "  verbs: list"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── completion ────────────────────────────────────────────────────
+        completion)
+            case "$verb" in
+                refresh) refresh_completions ;;
+                help|--help|-h) _zdot_help_completion ;;
+                *)
+                    zdot_error "zdot completion: unknown verb '${verb}'"
+                    zdot_info "  verbs: refresh"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── secret ────────────────────────────────────────────────────────
+        secret)
+            case "$verb" in
+                refresh) refresh_shell_secrets ;;
+                help|--help|-h) _zdot_help_secret ;;
+                *)
+                    zdot_error "zdot secret: unknown verb '${verb}'"
+                    zdot_info "  verbs: refresh"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── info ──────────────────────────────────────────────────────────
+        info)
+            zdot_report "zdot info"
+            zdot_info ""
+            zdot_info "Paths:"
+            zdot_info "  base:  ${_ZDOT_BASE_DIR:-<unset>}"
+            zdot_info "  lib:   ${_ZDOT_LIB_DIR:-<unset>}"
+            zdot_info "  cache: ${_ZDOT_CACHE_DIR:-<unset>}"
+            zdot_info ""
+            zdot_info "Shell context:"
+            zdot_info "  interactive: ${_ZDOT_IS_INTERACTIVE:-<unset>}"
+            zdot_info "  login:       ${_ZDOT_IS_LOGIN:-<unset>}"
+            zdot_info ""
+            zdot_info "Cache:"
+            zdot_info "  enabled: ${_ZDOT_CACHE_ENABLED:-<unset>}"
+            zdot_info "  version: ${_ZDOT_CACHE_VERSION:-<unset>}"
+            zdot_info ""
+            zdot_info "Counts:"
+            zdot_info "  plugins declared: ${#_ZDOT_PLUGINS_ORDER}"
+            zdot_info "  plugins loaded:   ${#_ZDOT_PLUGINS_LOADED}"
+            zdot_info "  hooks registered: ${#_ZDOT_HOOKS}"
+            zdot_info "  hooks executed:   ${#_ZDOT_HOOKS_EXECUTED}"
+            zdot_info "  modules loaded:   ${#_ZDOT_MODULES_LOADED}"
+            ;;
+
+        # ── debug ─────────────────────────────────────────────────────────
+        debug)
+            zdot_report "zdot debug — global state"
+            zdot_info ""
+
+            zdot_info "--- _ZDOT_EXECUTION_PLAN (${#_ZDOT_EXECUTION_PLAN} entries) ---"
+            local i=1
+            local id
+            for id in $_ZDOT_EXECUTION_PLAN; do
+                zdot_info "  $i. $id -> ${_ZDOT_HOOKS[$id]:-?}"
+                (( i++ ))
+            done
+
+            zdot_info ""
+            zdot_info "--- _ZDOT_HOOKS_EXECUTED (${#_ZDOT_HOOKS_EXECUTED} entries) ---"
+            for id in "${(k)_ZDOT_HOOKS_EXECUTED[@]}"; do
+                zdot_info "  $id"
+            done
+
+            zdot_info ""
+            zdot_info "--- _ZDOT_PHASES_PROVIDED ---"
+            zdot_info "  ${(j: :)${(k)_ZDOT_PHASES_PROVIDED[@]:-<none>}}"
+
+            zdot_info ""
+            zdot_info "--- _ZDOT_PHASES_PROMISED ---"
+            zdot_info "  ${(j: :)${(k)_ZDOT_PHASES_PROMISED[@]:-<none>}}"
+
+            zdot_info ""
+            zdot_info "--- _ZDOT_PLUGINS_ORDER (${#_ZDOT_PLUGINS_ORDER} entries) ---"
+            local spec
+            for spec in $_ZDOT_PLUGINS_ORDER; do
+                local loaded="${_ZDOT_PLUGINS_LOADED[$spec]:+yes}"
+                zdot_info "  ${loaded:-no }  $spec"
+            done
+
+            zdot_info ""
+            zdot_info "--- _ZDOT_MODULES_LOADED (${#_ZDOT_MODULES_LOADED} entries) ---"
+            local mod
+            for mod in "${(k)_ZDOT_MODULES_LOADED[@]}"; do
+                zdot_info "  $mod"
+            done
+            ;;
+
+        # ── bench ─────────────────────────────────────────────────────────
+        bench)
+            local bench_script="${_ZDOT_BASE_DIR}/scripts/benchmark.zsh"
+            if [[ ! -f "$bench_script" ]]; then
+                zdot_error "zdot bench: benchmark script not found: $bench_script"
+                return 1
+            fi
+            zsh "$bench_script" "${@:2}"
+            ;;
+
+        # ── profile ───────────────────────────────────────────────────────
+        profile)
+            local profile_script="${_ZDOT_BASE_DIR}/scripts/profile.zsh"
+            if [[ ! -f "$profile_script" ]]; then
+                zdot_error "zdot profile: profile script not found: $profile_script"
+                return 1
+            fi
+            zsh "$profile_script" "${@:2}"
+            ;;
+
+        # ── help ──────────────────────────────────────────────────────────
+        help)
+            case "$verb" in
+                cache)      _zdot_help_cache ;;
+                hook)       _zdot_help_hook ;;
+                plugin)     _zdot_help_plugin ;;
+                module)     _zdot_help_module ;;
+                completion) _zdot_help_completion ;;
+                secret)     _zdot_help_secret ;;
+                info)       _zdot_help_info ;;
+                debug)      _zdot_help_debug ;;
+                bench)      _zdot_help_bench ;;
+                profile)    _zdot_help_profile ;;
+                help)       _zdot_help_help ;;
+                "")         _zdot_usage ;;
+                *)
+                    zdot_error "zdot help: unknown noun '${verb}'"
+                    zdot_info "  nouns: cache hook plugin module completion secret info debug bench profile"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── fallthrough ───────────────────────────────────────────────────
+        ""|--help|-h)
+            _zdot_usage
+            ;;
+        *)
+            zdot_error "zdot: unknown noun '${noun}'"
+            _zdot_usage
+            return 1
+            ;;
+    esac
+}

@@ -1,0 +1,129 @@
+function _zdot() {
+    local -a nouns
+    nouns=(
+        'cache:cache management (status, invalidate, compile)'
+        'hook:hook and execution-plan management (list, plan)'
+        'plugin:plugin management (list, update, clean, reclone)'
+        'module:module management (list)'
+        'completion:shell completion management (refresh)'
+        'secret:secret management (refresh)'
+        'info:show zdot environment and runtime state'
+        'debug:dump full internal state'
+        'bench:run shell startup benchmark'
+        'profile:run shell startup profiler'
+        'help:show help (optionally for a noun)'
+    )
+
+    # ── verbs per noun ───────────────────────────────────────────────────────
+
+    local -a verbs_cache verbs_hook verbs_plugin verbs_module \
+             verbs_completion verbs_secret verbs_help
+
+    verbs_cache=(
+        'status:show cache stats and hit/miss counts'
+        'invalidate:invalidate all cached files'
+        'compile:recompile all autoloaded function files'
+        'help:show help for cache'
+    )
+
+    verbs_hook=(
+        'list:list registered hooks'
+        'plan:print the full execution plan'
+        'help:show help for hook'
+    )
+
+    verbs_plugin=(
+        'list:list plugins'
+        'update:update one or all plugins'
+        'clean:remove stale plugin directories'
+        'reclone:delete and re-clone all plugins'
+        'help:show help for plugin'
+    )
+
+    verbs_module=(
+        'list:list all loaded modules and their status'
+        'help:show help for module'
+    )
+
+    verbs_completion=(
+        'refresh:regenerate completion files for registered tools'
+        'help:show help for completion'
+    )
+
+    verbs_secret=(
+        'refresh:pull latest secrets from 1Password into the shell'
+        'help:show help for secret'
+    )
+
+    verbs_help=(
+        'cache:show help for cache'
+        'hook:show help for hook'
+        'plugin:show help for plugin'
+        'module:show help for module'
+        'completion:show help for completion'
+        'secret:show help for secret'
+        'info:show help for info'
+        'debug:show help for debug'
+        'bench:show help for bench'
+        'profile:show help for profile'
+    )
+
+    # ── flags per noun+verb ──────────────────────────────────────────────────
+
+    local -a flags_hook_list flags_plugin_list flags_plugin_clean
+
+    flags_hook_list=(
+        '(-v --verbose)'{-v,--verbose}'[show full hook metadata]'
+        '(-a --all)'{-a,--all}'[include hooks from all contexts]'
+    )
+
+    flags_plugin_list=(
+        '--loaded[show only loaded plugins]'
+        '--installed[show only installed plugins]'
+        '--declared[show only declared plugins]'
+    )
+
+    flags_plugin_clean=(
+        '--dry-run[show what would be removed without deleting]'
+        '--remove-unused[also remove plugins not declared anywhere]'
+    )
+
+    # ── dispatch on word position ────────────────────────────────────────────
+
+    local noun="${words[2]}"
+    local verb="${words[3]}"
+    local cur_word="$CURRENT"
+
+    case "$cur_word" in
+
+        # ── completing noun (word 2) ─────────────────────────────────────────
+        2)
+            _describe -t nouns 'zdot noun' nouns
+            ;;
+
+        # ── completing verb (word 3) ─────────────────────────────────────────
+        3)
+            case "$noun" in
+                cache)      _describe -t verbs 'cache verb' verbs_cache ;;
+                hook)       _describe -t verbs 'hook verb' verbs_hook ;;
+                plugin)     _describe -t verbs 'plugin verb' verbs_plugin ;;
+                module)     _describe -t verbs 'module verb' verbs_module ;;
+                completion) _describe -t verbs 'completion verb' verbs_completion ;;
+                secret)     _describe -t verbs 'secret verb' verbs_secret ;;
+                help)       _describe -t nouns 'noun' verbs_help ;;
+                *)          ;;
+            esac
+            ;;
+
+        # ── completing flags (word 4+) ───────────────────────────────────────
+        *)
+            case "${noun}:${verb}" in
+                hook:list)    _arguments -s "${flags_hook_list[@]}" ;;
+                plugin:list)  _arguments -s "${flags_plugin_list[@]}" ;;
+                plugin:clean) _arguments -s "${flags_plugin_clean[@]}" ;;
+                *)            ;;
+            esac
+            ;;
+
+    esac
+}
