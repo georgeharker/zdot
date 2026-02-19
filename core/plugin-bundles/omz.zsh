@@ -167,37 +167,56 @@ zdot_has_zcompdump_expired() {
     [[ $age_hours -ge $max_age_hours ]]
 }
 
-zdot_compdump_needs_refresh() {
-    zdot_init_compfile
-    
-    local compfile="$_ZDOT_COMPFILE"
+typeset -g _ZDOT_COMPDUMP_META_FILE
+
+zdot_omz_compdump_meta_init() {
+    [[ -n "$_ZDOT_COMPDUMP_META_FILE" ]] && return 0
+    local cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/omz"
+    [[ ! -d "$cache_dir" ]] && mkdir -p "$cache_dir"
+    _ZDOT_COMPDUMP_META_FILE="${cache_dir}/zcompdump-metadata.zsh"
+}
+
+zdot_omz_compdump_write_meta() {
+    zdot_omz_compdump_meta_init
     local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-    
-    if [[ ! -f "$compfile" ]]; then
-        return 0
-    fi
-    
-    local old_rev old_fpath
-    old_rev=$(grep -Fx '#omz revision:' "$compfile" 2>/dev/null | cut -d: -f3)
-    old_fpath=$(grep -Fx '#omz fpath:' "$compfile" 2>/dev/null | cut -d: -f2-)
-    
-    if [[ -z "$old_rev" || -z "$old_fpath" ]]; then
-        return 0
-    fi
-    
-    local current_rev
+    typeset -g  ZSH_COMPDUMP_REV
+    typeset -ga ZSH_COMPDUMP_FPATH
+    ZSH_COMPDUMP_REV=$(cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
+    ZSH_COMPDUMP_FPATH=($fpath)
+    { typeset -p ZSH_COMPDUMP_REV; typeset -p ZSH_COMPDUMP_FPATH } >| "$_ZDOT_COMPDUMP_META_FILE"
+}
+
+zdot_omz_compdump_needs_refresh() {
+    zdot_init_compfile
+    zdot_omz_compdump_meta_init
+    local compfile="$_ZDOT_COMPFILE"
+    [[ ! -f "$compfile" ]] && return 0
+    [[ -n "$_ZDOT_FORCE_COMPDUMP_REFRESH" ]] && return 0
+    local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+    local current_rev current_fpath
     current_rev=$(cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
-    
-    if [[ "$current_rev" != "$old_rev" ]]; then
+    current_fpath=($fpath)
+    typeset -g  ZSH_COMPDUMP_REV
+    typeset -ga ZSH_COMPDUMP_FPATH
+    [[ -r "$_ZDOT_COMPDUMP_META_FILE" ]] && source "$_ZDOT_COMPDUMP_META_FILE"
+    if [[ "$current_rev"   != "$ZSH_COMPDUMP_REV"   ]] ||
+       [[ "$current_fpath" != "$ZSH_COMPDUMP_FPATH" ]]; then
         return 0
     fi
-    
-    local current_fpath="${fpath[*]}"
-    if [[ "$old_fpath" != "$current_fpath" ]]; then
-        return 0
-    fi
-    
     return 1
+}
+
+zdot_omz_compdump_recompile() {
+    local compfile="$_ZDOT_COMPFILE"
+    {
+        if [[ -s "$compfile" && (! -s "${compfile}.zwc" || "$compfile" -nt "${compfile}.zwc") ]]; then
+            if command mkdir "${compfile}.lock" 2>/dev/null; then
+                autoload -U zrecompile
+                zrecompile -q -p "$compfile"
+                command rm -rf "${compfile}.zwc.old" "${compfile}.lock" 2>/dev/null
+            fi
+        fi
+    } &!
 }
 
 # ============================================================================
@@ -220,7 +239,7 @@ zdot_compinit_defer() {
     local compfile="$_ZDOT_COMPFILE"
     local do_compinit=1
     
-    if [[ -f "$compfile" ]] && ! zdot_compdump_needs_refresh; then
+    if [[ -f "$compfile" ]] && ! zdot_omz_compdump_needs_refresh; then
         do_compinit=0
     fi
     
@@ -232,27 +251,8 @@ zdot_compinit_defer() {
             compinit -u -d "$compfile"
         fi
         
-        local omz_rev cache
-        cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-        omz_rev=$(cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
-        
-        if [[ -n "$omz_rev" ]]; then
-            {
-                echo
-                echo "#omz revision:$omz_rev"
-                echo "#omz fpath:${fpath[*]}"
-            } >> "$compfile"
-        fi
-        
-        {
-            if [[ -s "$compfile" && (! -s "${compfile}.zwc" || "$compfile" -nt "${compfile}.zwc") ]]; then
-                if command mkdir "${compfile}.lock" 2>/dev/null; then
-                    autoload -U zrecompile
-                    zrecompile -q -p "$compfile"
-                    command rm -rf "${compfile}.zwc.old" "${compfile}.lock" 2>/dev/null
-                fi
-            fi
-        } &!
+        zdot_omz_compdump_write_meta
+        zdot_omz_compdump_recompile
     fi
     
     _ZDOT_COMPINIT_DONE=1
@@ -263,7 +263,18 @@ zdot_compinit_defer() {
 }
 
 zdot_compinit_reexec() {
-    compinit -i
+    local compfile="$_ZDOT_COMPFILE"
+
+    if [[ "$ZSH_DISABLE_COMPFIX" != true ]]; then
+        autoload -Uz compaudit
+        compinit -i -d "$compfile"
+    else
+        compinit -u -d "$compfile"
+    fi
+
+    zdot_omz_compdump_write_meta
+    zdot_omz_compdump_recompile
+
     _ZDOT_COMPINIT_DONE=1
     zdot_compdef_queue_process
 }
@@ -272,17 +283,13 @@ zdot_compinit_reexec() {
 # Ensure Compinit During Precmd
 # ============================================================================
 
-typeset -g _ZDOT_COMPINIT_CHECKED_DURING_PRECMD=0
-
 zdot_ensure_compinit_during_precmd() {
-    [[ $_ZDOT_COMPINIT_CHECKED_DURING_PRECMD -eq 1 ]] && return 0
-    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0
-    
-    _ZDOT_COMPINIT_CHECKED_DURING_PRECMD=1
-    
-    if zdot_compdump_needs_refresh; then
-        zdot_compinit_reexec
-    fi
+    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && {
+        add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
+        return 0
+    }
+    zdot_compinit_reexec
+    add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
 }
 
 zdot_enable_compinit_precmd() {
@@ -394,6 +401,9 @@ zdot_load_omz_lib() {
 # This is a no-op - OMZ already cloned
 zdot_bundle_omz_clone() {
     local spec=$1
+    # Populate path cache so zdot_load_deferred_plugins avoids a subshell
+    local relpath=${spec#omz:}
+    _ZDOT_PLUGINS_PATH[$spec]="${_ZDOT_PLUGINS_CACHE}/ohmyzsh/ohmyzsh/${relpath}"
     return 0
 }
 
@@ -478,15 +488,25 @@ zdot_bundle_register omz
 # These are called by the zdot hook system
 # ============================================================================
 
+# Load omz:lib so downstream hooks (theme, prompt funcs) don't need to
+# depend on the user-space omz-plugins-loaded phase.
+_zdot_omz_load_lib() {
+    zdot_load_plugin omz:lib
+}
+
+zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
+    --requires plugins-cloned \
+    --provides omz-lib-loaded
+
 # OMZ theme hook: loads theme during precmd if ZSH_THEME is set
-# Depends on omz-plugins-loaded (compinit done), provides omz-theme-ready
+# Depends on omz-lib-loaded (omz:lib sourced), provides omz-theme-ready
 zdot_omz_theme_init() {
     autoload -Uz add-zsh-hook
     add-zsh-hook precmd zdot_omz_theme_hook
 }
 
 zdot_hook_register zdot_omz_theme_init interactive \
-    --requires plugins-cloned \
+    --requires omz-lib-loaded \
     --provides omz-theme-ready
 
 # ============================================================================
@@ -639,5 +659,5 @@ _zdot_omz_setup_prompt_funcs() {
 }
 
 zdot_hook_register _zdot_omz_setup_prompt_funcs interactive \
-    --requires plugins-cloned \
+    --requires omz-lib-loaded \
     --provides omz-prompt-funcs-ready

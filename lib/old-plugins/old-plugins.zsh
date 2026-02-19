@@ -78,43 +78,31 @@ _antidote_load() {
         source "${ZSH}/oh-my-zsh.sh"
     fi
 
-    # Check if zsh-defer is available
-    zsh_defer() {
-        "$@" 
-    }
-    zsh_defer_until() {
-        local delay=$1
-        shift
-        "$@" 
-    }
-
-    if command -v zsh-defer &> /dev/null; then
-        zsh_defer() {
-            zsh-defer "$@"
-        }
-        zsh_defer_until() {
-            local delay=$1
-            shift
-            zsh-defer -t "$delay" "$@"
-        }
-    fi
 }
 
 _plugins_post_init() {
     # Fast-syntax-highlighting theme (after plugins load)
     if [[ $(realpath ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini) -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh ]]; then
-        zsh_defer fast-theme ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
+        zdot_defer fast-theme ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
     fi
 }
 
 _nvm_interactive_init() {
     # Delay nvm init for interactive until after prompt
-    zsh_defer_until 1 nvm use node
+    zdot_defer_until 1 nvm use node
 }
 
 _nvm_noninteractive_init() {
     nvm use node
 }
+
+# No-op hook to satisfy plugins-declared dependency
+# zdot_plugins_clone_all in core/plugins.zsh requires this phase unconditionally (bug to fix later)
+_plugins_declare_noop() {
+    :
+}
+zdot_hook_register _plugins_declare_noop interactive noninteractive \
+    --provides plugins-declared
 
 # Register hooks with dependency chain
 # plugins_init prepares plugin configuration, provides plugins-configured

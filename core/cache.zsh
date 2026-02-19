@@ -374,6 +374,19 @@ load_cache() {
         fi
     done
 
+    local zshrc_file="${ZDOTDIR:-$HOME}/.zshrc"
+    if [[ -f "$zshrc_file" ]] && zdot_is_newer_or_missing "${zshrc_file:A}" "$plan_file"; then
+        return 1
+    fi
+
+    # Whilst cache.zsh is loaded before plugins.zsh, when load_cache
+    # runs, zdot_plugins_have_changed should be available,
+    # this check is just defensive.
+    if (( ${+functions[zdot_plugins_have_changed]} )) && zdot_plugins_have_changed; then
+        typeset -g _ZDOT_FORCE_COMPDUMP_REFRESH=1
+        return 1
+    fi
+
     # Load the cached plan (zsh will automatically use .zwc if available)
     source "$plan_file"
 
@@ -430,6 +443,13 @@ zdot_cache_invalidate() {
                 fi
             done
         done
+    fi
+
+    if (( ${+_ZDOT_COMPDUMP_META_FILE} )) && [[ -f "$_ZDOT_COMPDUMP_META_FILE" ]]; then
+        rm -f "$_ZDOT_COMPDUMP_META_FILE"
+    fi
+    if (( ${+_ZDOT_PLUGINS_REV_STAMP} )) && [[ -f "$_ZDOT_PLUGINS_REV_STAMP" ]]; then
+        rm -f "$_ZDOT_PLUGINS_REV_STAMP"
     fi
 
     return 0

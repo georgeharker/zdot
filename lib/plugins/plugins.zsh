@@ -97,7 +97,6 @@ _plugins_load_omz() {
     if [[ $(uname -v 2>/dev/null) == *"Debian"* || $(uname -v 2>/dev/null) == *"Ubuntu"* ]]; then
         zdot_load_plugin omz:plugins/debian
     fi
-    zdot_compinit_defer
 }
 
 # Register phase for when OMZ lib is ready
@@ -123,6 +122,10 @@ zdot_hook_register _plugins_load_deferred interactive noninteractive \
 # Non-deferred plugins (fzf-tab)
 # ============================================================================
 
+# fzf-tab explicitly handles being initialized before compinit (see fzf-tab.zsh
+# line 376-379: it pre-creates the completion widget when compinit hasn't run
+# yet). Compinit itself is enqueued at the end of zdot_load_deferred_plugins
+# via zdot_defer, so it runs after all deferred plugin fpath additions.
 _plugins_load_fzf_tab() {
     zdot_load_plugin Aloxaf/fzf-tab
 }

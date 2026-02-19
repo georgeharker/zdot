@@ -10,9 +10,47 @@ typeset -ga _ZDOT_PLUGINS_ORDER   # Ordered list of plugin specs
 typeset -gA _ZDOT_PLUGINS        # plugin spec -> kind (normal/defer/fpath/path)
 typeset -gA _ZDOT_PLUGINS_LOADED # plugin spec -> 1 (already loaded)
 typeset -gA _ZDOT_PLUGINS_VERSION # plugin spec -> version/rev (optional)
+typeset -gA _ZDOT_PLUGINS_PATH   # plugin spec -> filesystem path (populated at clone time)
+typeset -gA _ZDOT_PLUGINS_FILE   # plugin spec -> *.plugin.zsh path (populated at load time)
 typeset -g  _ZDOT_PLUGINS_CACHE  # cache directory
 typeset -g  _ZDOT_PLUGINS_INITIALIZED=0
 typeset -ga _ZDOT_BUNDLE_HANDLERS # Ordered list of registered bundle handler names
+
+# ============================================================================
+# Plugin Rev Stamp
+# ============================================================================
+
+typeset -g _ZDOT_PLUGINS_REV_STAMP
+
+_zdot_plugins_rev_stamp_init() {
+    [[ -n "$_ZDOT_PLUGINS_REV_STAMP" ]] && return 0
+    local cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/zdot"
+    _ZDOT_PLUGINS_REV_STAMP="${cache_dir}/plugin-revs.zsh"
+}
+
+zdot_plugins_have_changed() {
+    _zdot_plugins_rev_stamp_init
+    typeset -gA _ZDOT_PLUGINS_SAVED_REV
+    [[ -r "$_ZDOT_PLUGINS_REV_STAMP" ]] && source "$_ZDOT_PLUGINS_REV_STAMP"
+    local changed=0
+    local spec path current_rev
+    typeset -gA _ZDOT_PLUGINS_CURRENT_REV
+    for spec in ${(k)_ZDOT_PLUGINS_PATH}; do
+        path="${_ZDOT_PLUGINS_PATH[$spec]}"
+        [[ -d "$path/.git" ]] || continue
+        current_rev=$(git -C "$path" rev-parse HEAD 2>/dev/null)
+        _ZDOT_PLUGINS_CURRENT_REV[$spec]="$current_rev"
+        if [[ "$current_rev" != "${_ZDOT_PLUGINS_SAVED_REV[$spec]}" ]]; then
+            changed=1
+        fi
+    done
+    if [[ $changed -eq 1 ]]; then
+        _ZDOT_PLUGINS_SAVED_REV=("${(kv)_ZDOT_PLUGINS_CURRENT_REV[@]}")
+        { typeset -p _ZDOT_PLUGINS_SAVED_REV } >| "$_ZDOT_PLUGINS_REV_STAMP"
+        return 0
+    fi
+    return 1
+}
 
 # ============================================================================
 # Configuration
@@ -149,18 +187,22 @@ zdot_plugin_clone() {
     local handler
     handler=$(_zdot_bundle_handler_for "$spec") && {
         zdot_bundle_${handler}_clone "$spec"
+        # Path is populated by the bundle handler's clone function
         return $?
     }
 
     local repo=$spec
     local dest="$cache/$repo"
     local version=${_ZDOT_PLUGINS_VERSION[$spec]:-}
-    
+
+    # Cache path in global assoc array — no subshell needed for user/repo specs
+    _ZDOT_PLUGINS_PATH[$spec]="$dest"
+
     [[ -d "$dest" ]] && return 0
-    
+
     print "zdot-plugins: cloning $repo..." >&2
     git clone --quiet --recurse-submodules "https://github.com/$repo" "$dest"
-    
+
     # Check out specific version if specified
     if [[ -n "$version" ]]; then
         (cd "$dest" && git checkout --quiet "$version") || {
@@ -172,11 +214,56 @@ zdot_plugin_clone() {
 # Clone all declared plugins
 zdot_plugins_clone_all() {
     _zdot_plugins_init
-    
+
+    local sentinel="${_ZDOT_PLUGINS_CACHE}/.cloned"
+
+    # Build the sentinel string from specs + version pins so that changing a
+    # version pin (e.g. user/repo@v1 → user/repo@v2) invalidates the sentinel
+    # and triggers a re-clone.  Specs without a pin appear as plain user/repo.
+    local _s _v
+    local -a _sentinel_parts
+    for _s in $_ZDOT_PLUGINS_ORDER; do
+        _v=${_ZDOT_PLUGINS_VERSION[$_s]:-}
+        if [[ -n "$_v" ]]; then
+            _sentinel_parts+=( "${_s}@${_v}" )
+        else
+            _sentinel_parts+=( "$_s" )
+        fi
+    done
+    local current_specs="${(j: :)_sentinel_parts}"
+
+    # Fast path: if the sentinel records the exact same spec+version list, all
+    # plugins are already on disk — skip all clone-checks entirely.
+    if [[ -f "$sentinel" && "$(<$sentinel)" == "$current_specs" ]]; then
+        # Populate _ZDOT_PLUGINS_PATH from cache dir without subshells so that
+        # zdot_load_deferred_plugins can use it even on the fast path.
+        local _fast_spec _fast_cache _fast_all_present=1
+        _fast_cache=${_ZDOT_PLUGINS_CACHE}
+        for _fast_spec in $_ZDOT_PLUGINS_ORDER; do
+            [[ -n "${_ZDOT_PLUGINS_PATH[$_fast_spec]}" ]] && continue
+            # Bundle specs (omz:*) are handled by their own handler; skip here.
+            # This is safe only because no omz:* spec uses kind=defer — if that
+            # ever changes, this skip must be revisited.
+            [[ $_fast_spec == *:* ]] && continue
+            # If the plugin directory was manually deleted, bail out of the fast
+            # path so the slow path can re-clone it.
+            if [[ ! -d "${_fast_cache}/${_fast_spec}" ]]; then
+                _fast_all_present=0
+                break
+            fi
+            _ZDOT_PLUGINS_PATH[$_fast_spec]="${_fast_cache}/${_fast_spec}"
+        done
+        [[ $_fast_all_present -eq 1 ]] && return 0
+        # Fall through to slow path if any directory was missing.
+    fi
+
     local spec
     for spec in $_ZDOT_PLUGINS_ORDER; do
         zdot_plugin_clone "$spec"
     done
+
+    # Write sentinel so next startup can skip clone-checks
+    print -r -- "$current_specs" >| "$sentinel"
 }
 
 # ============================================================================
@@ -284,19 +371,30 @@ zdot_load_deferred_plugins() {
     for spec in $_ZDOT_PLUGINS_ORDER; do
         kind=${_ZDOT_PLUGINS[$spec]}
         [[ $kind != defer ]] && continue
-        
-        local plugin_path=$(zdot_plugin_path $spec)
-        local plugin_file=$(ls $plugin_path/*.plugin.zsh(N) 2>/dev/null | head -1)
-        
+
+        # Use cached path (populated by zdot_plugin_clone / sentinel fast-path);
+        # fall back to computing it inline without a subshell for user/repo specs.
+        local plugin_path=${_ZDOT_PLUGINS_PATH[$spec]:-${_ZDOT_PLUGINS_CACHE}/${spec}}
+
+        # Glob into an array — no ls subprocess, no head subprocess
+        local -a _plugin_files=( $plugin_path/*.plugin.zsh(N) )
+        local plugin_file=${_plugin_files[1]}
+
         [[ -z "$plugin_file" ]] && continue
-        
+
         # Add to fpath if needed
         [[ -d "$plugin_path/functions" ]] && fpath+=( "$plugin_path" )
-        
+
         # Load deferred - zdot_defer wrapper handles defer vs immediate
         zdot_defer source "$plugin_file"
         _ZDOT_PLUGINS_LOADED[$spec]=1
     done
+
+    # Enqueue compinit after all deferred plugin sources so fpath is fully
+    # populated (deferred plugins add completion dirs during their source).
+    # In the non-defer passthrough path zdot_defer calls zdot_compinit_defer
+    # directly; its [[ -o interactive ]] guard handles non-interactive shells.
+    zdot_defer zdot_compinit_defer
 }
 
 # ============================================================================
