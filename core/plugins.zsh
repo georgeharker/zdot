@@ -396,7 +396,7 @@ zdot_load_deferred_plugins() {
     # $fpath is fully populated.  zdot_compinit_defer simply sets
     # _ZDOT_FPATH_READY=1; the actual compinit runs in precmd context (phase 2)
     # via zdot_ensure_compinit_during_precmd, avoiding the ZLE-callback hang.
-    zdot_defer zdot_compinit_defer
+    zdot_defer -q zdot_compinit_defer
 }
 
 # ============================================================================
