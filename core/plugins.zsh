@@ -320,17 +320,20 @@ if [[ "$_zdot_defer_enabled" == true ]]; then
     
     # Define wrappers that use zsh-defer.
     # Both accept an optional -q (quiet) flag as the first argument.
-    # -q suppresses precmd hooks (+m) and zle reset-prompt (+p) after the
+    # -q suppresses precmd hooks (-m) and zle reset-prompt (-p) after the
     # deferred command runs, preventing prompts that embed a newline (e.g.
     # oh-my-posh with newline=true) from rendering a spurious blank line.
+    # zsh-defer option syntax: '-' prefix removes a letter from opts (disables),
+    # '+' prefix adds a letter (enables). Default opts already include 'm' and
+    # 'p', so we need '-mp' to disable them, not '+mp' which is a no-op.
     zdot_defer() {
         local extra_opts=''
-        [[ $1 == -q ]] && { extra_opts='+mp'; shift }
+        [[ $1 == -q ]] && { extra_opts='-mp'; shift }
         zsh-defer ${extra_opts:+$extra_opts} "$@"
     }
     zdot_defer_until() {
         local extra_opts=''
-        [[ $1 == -q ]] && { extra_opts='+mp'; shift }
+        [[ $1 == -q ]] && { extra_opts='-mp'; shift }
         local delay=$1; shift
         zsh-defer ${extra_opts:+$extra_opts} -t "$delay" "$@"
     }
