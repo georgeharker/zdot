@@ -27,6 +27,7 @@ source "${zdot_core_dir}/utils.zsh"
 source "${zdot_core_dir}/plugins.zsh"
 
 # Source plugin bundles
+source "${zdot_core_dir}/compinit.zsh"              # shared compinit (before any bundle)
 source "${zdot_core_dir}/plugin-bundles/omz.zsh"
 
 # Early plugin initialization: clone/cache required plugins BEFORE hooks run

@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # zsh-base/utils: Utility functions
-# Provides debugging and helper functions
+# Provides debugging and helper functions, and shared host detection
 
 # ============================================================================
 # Context Helper Functions
@@ -77,6 +77,26 @@ zdot_module_source() {
     # Always source the .zsh file - zsh will automatically use .zwc if it exists
     source "$source_file"
 }
+
+# ============================================================================
+# Host Detection
+# ============================================================================
+
+typeset -g SHORT_HOST
+
+zdot_init_short_host() {
+    [[ -n "$SHORT_HOST" ]] && return 0
+
+    if [[ "$OSTYPE" = darwin* ]]; then
+        SHORT_HOST=$(scutil --get LocalHostName 2>/dev/null) || SHORT_HOST="${HOST/.*/}"
+    else
+        SHORT_HOST="${HOST/.*/}"
+    fi
+}
+
+# Must run eagerly at source time (not in zsh-defer) so scutil doesn't block
+# a deferred callback.
+zdot_init_short_host
 
 # Debug: show all registered hooks and loaded modules
 # Usage: zdot_debug_info
