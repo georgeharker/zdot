@@ -1,0 +1,125 @@
+#!/usr/bin/env zsh
+# List all phases organised by provider
+# Usage: zdot_phases_list [--context <ctx>]
+# Options:
+#   --context <ctx>  Show only hooks matching the given context
+
+function zdot_phases_list() {
+    local filter_ctx=""
+
+    # Parse arguments
+    local i=1
+    while [[ $i -le $# ]]; do
+        case "${(P)i}" in
+            --context)
+                (( i++ ))
+                filter_ctx="${(P)i}"
+                ;;
+        esac
+        (( i++ ))
+    done
+
+    zdot_info "Phases:"
+    zdot_info ""
+
+    # ── build phase → hook_id mapping ──────────────────────────────────────
+    # Separate regular phases from tool: phases
+    local -A regular_phases=()   # phase → "hook_id [hook_id ...]"
+    local -A tool_phases=()      # phase → "hook_id [hook_id ...]"
+
+    for hook_id in ${(k)_ZDOT_HOOKS}; do
+        local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
+        local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+
+        # Apply optional context filter
+        if [[ -n "$filter_ctx" ]]; then
+            local matches=0
+            for ctx in ${=contexts}; do
+                if [[ "$ctx" == "$filter_ctx" ]]; then
+                    matches=1
+                    break
+                fi
+            done
+            [[ $matches -eq 0 ]] && continue
+        fi
+
+        for phase in ${=provides}; do
+            if [[ "$phase" == tool:* ]]; then
+                if [[ -z "${tool_phases[$phase]}" ]]; then
+                    tool_phases[$phase]="$hook_id"
+                else
+                    tool_phases[$phase]="${tool_phases[$phase]} $hook_id"
+                fi
+            else
+                if [[ -z "${regular_phases[$phase]}" ]]; then
+                    regular_phases[$phase]="$hook_id"
+                else
+                    regular_phases[$phase]="${regular_phases[$phase]} $hook_id"
+                fi
+            fi
+        done
+    done
+
+    # ── regular phases ──────────────────────────────────────────────────────
+    if [[ ${#regular_phases[@]} -gt 0 ]]; then
+        zdot_report "Regular Phases:"
+        zdot_info ""
+
+        local -a sorted=("${(@ko)regular_phases}")
+        for phase in "${sorted[@]}"; do
+            local hook_ids="${regular_phases[$phase]}"
+            local -a id_list=(${=hook_ids})
+            local conflict=""
+            [[ ${#id_list[@]} -gt 1 ]] && conflict=" [conflict]"
+
+            zdot_info "  ${phase}${conflict}"
+
+            for hook_id in "${id_list[@]}"; do
+                local func="${_ZDOT_HOOKS[$hook_id]}"
+                local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
+                local on_demand_mark=""
+                [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
+                zdot_info "    • $func${on_demand_mark}"
+            done
+        done
+        zdot_info ""
+    else
+        zdot_info "  (no regular phases registered)"
+        zdot_info ""
+    fi
+
+    # ── tool phases ─────────────────────────────────────────────────────────
+    if [[ ${#tool_phases[@]} -gt 0 ]]; then
+        zdot_report "Tool Phases:"
+        zdot_info ""
+
+        local -a sorted_tools=("${(@ko)tool_phases}")
+        for phase in "${sorted_tools[@]}"; do
+            local hook_ids="${tool_phases[$phase]}"
+            local -a id_list=(${=hook_ids})
+            # tool: phases: first-registered wins; extras are silently skipped
+            # (warn already emitted at registration time)
+            local tool_name="${phase#tool:}"
+            local available=""
+            command -v "$tool_name" > /dev/null 2>&1 && available=" [available]"
+
+            zdot_info "  ${phase}${available}"
+
+            for hook_id in "${id_list[@]}"; do
+                local func="${_ZDOT_HOOKS[$hook_id]}"
+                local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
+                local on_demand_mark=""
+                [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
+                zdot_info "    • $func${on_demand_mark}"
+            done
+        done
+        zdot_info ""
+    else
+        zdot_info "  (no tool phases registered)"
+        zdot_info ""
+    fi
+
+    # ── summary ─────────────────────────────────────────────────────────────
+    local total=$(( ${#regular_phases[@]} + ${#tool_phases[@]} ))
+    zdot_info "Total: ${#regular_phases[@]} regular phase(s), ${#tool_phases[@]} tool phase(s), $total phase(s) total"
+}

@@ -5,6 +5,7 @@
 # Nouns and verbs:
 #   cache   status | invalidate | compile
 #   hook    list [--verbose|-v] [--all|-a] | plan
+#   phase   list [--context <ctx>]
 #   plugin  list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone
 #   module  list
 #   completion refresh
@@ -95,13 +96,20 @@ function zdot() {
         zdot_info "  Runs scripts/profile.zsh. Additional args are forwarded."
     }
 
+    function _zdot_help_phase() {
+        zdot_info "zdot phase — phase and tool phase inspection"
+        zdot_info ""
+        zdot_info "  zdot phase list [--context <ctx>]  List all registered phases"
+        zdot_info "    --context <ctx>                  Filter to hooks in the given context"
+    }
+
     function _zdot_help_help() {
         zdot_info "zdot help — show help"
         zdot_info ""
         zdot_info "  zdot help           Show the top-level noun list"
         zdot_info "  zdot help <noun>    Show detailed help for a noun"
         zdot_info ""
-        zdot_info "  Available nouns: cache hook plugin module completion secret info debug bench profile"
+        zdot_info "  Available nouns: cache hook phase plugin module completion secret info debug bench profile"
     }
 
     function _zdot_usage() {
@@ -109,6 +117,7 @@ function zdot() {
         zdot_info ""
         zdot_info "  cache      status | invalidate | compile"
         zdot_info "  hook       list [-v] [-a] | plan"
+        zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
         zdot_info "  module     list | user-list | user-clone <name>"
         zdot_info "  completion refresh"
@@ -150,6 +159,19 @@ function zdot() {
                 *)
                     zdot_error "zdot hook: unknown verb '${verb}'"
                     zdot_info "  verbs: list | plan"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── phase ─────────────────────────────────────────────────────────
+        phase)
+            case "$verb" in
+                list) zdot_phases_list "${@:3}" ;;
+                help|--help|-h) _zdot_help_phase ;;
+                *)
+                    zdot_error "zdot phase: unknown verb '${verb}'"
+                    zdot_info "  verbs: list"
                     return 1
                     ;;
             esac
@@ -332,6 +354,7 @@ function zdot() {
             case "$verb" in
                 cache)      _zdot_help_cache ;;
                 hook)       _zdot_help_hook ;;
+                phase)      _zdot_help_phase ;;
                 plugin)     _zdot_help_plugin ;;
                 module)     _zdot_help_module ;;
                 completion) _zdot_help_completion ;;
@@ -344,7 +367,7 @@ function zdot() {
                 "")         _zdot_usage ;;
                 *)
                     zdot_error "zdot help: unknown noun '${verb}'"
-                    zdot_info "  nouns: cache hook plugin module completion secret info debug bench profile"
+                    zdot_info "  nouns: cache hook phase plugin module completion secret info debug bench profile"
                     return 1
                     ;;
             esac

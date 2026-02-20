@@ -71,12 +71,14 @@ function zdot_hooks_list() {
 
         if [[ $matches_context -eq 1 ]]; then
             if [[ -n "$provides" ]]; then
-                # Hook provides a phase
-                if [[ -z "${phases_to_hooks[$provides]}" ]]; then
-                    phases_to_hooks[$provides]="$hook_id"
-                else
-                    phases_to_hooks[$provides]="${phases_to_hooks[$provides]} $hook_id"
-                fi
+                # Hook provides one or more phases (space-separated)
+                for phase in ${=provides}; do
+                    if [[ -z "${phases_to_hooks[$phase]}" ]]; then
+                        phases_to_hooks[$phase]="$hook_id"
+                    else
+                        phases_to_hooks[$phase]="${phases_to_hooks[$phase]} $hook_id"
+                    fi
+                done
             elif [[ "$on_demand" -eq 1 ]]; then
                 # Hook is explicitly marked as on-demand
                 on_demand_hooks+=("$hook_id")

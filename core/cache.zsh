@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="3"          # Cache format version (context-aware providers only)
+typeset -g _ZDOT_CACHE_VERSION="4"          # Cache format version (per-phase PHASE_PROVIDERS_BY_CONTEXT keys)
 
 # ============================================================================
 # Cache Configuration
@@ -289,10 +289,14 @@ zdot_cache_save_plan() {
                 # The duplication is minimal (typically 20-50 lines per cache file) and
                 # preserves cache file self-documentation.
                 for ctx in ${=contexts}; do
-                    local ctx_key="${ctx}:${provides}"
-                    echo "_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]='$hook_id'"
+                    for phase in ${=provides}; do
+                        local ctx_key="${ctx}:${phase}"
+                        echo "_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]='$hook_id'"
+                    done
                 done
-                echo "_ZDOT_PHASES_PROMISED[$provides]=1"
+                for phase in ${=provides}; do
+                    echo "_ZDOT_PHASES_PROMISED[$phase]=1"
+                done
             fi
 
             for phase in ${=requires}; do

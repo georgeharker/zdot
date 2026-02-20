@@ -82,6 +82,24 @@ zdot_module_source() {
 }
 
 # ============================================================================
+# Platform Detection
+# ============================================================================
+
+# Check if running on macOS.
+# Available from bootstrap (before xdg loads), unlike is-macos() in xdg.zsh.
+# Usage: if zdot_is_macos; then ...; fi
+zdot_is_macos() {
+    [[ "$OSTYPE" == darwin* ]]
+}
+
+# Check if running on Debian (or a Debian-derived distro).
+# Available from bootstrap (before xdg loads), unlike is-debian() in xdg.zsh.
+# Usage: if zdot_is_debian; then ...; fi
+zdot_is_debian() {
+    [[ "$OSTYPE" == linux* && -f /etc/debian_version ]]
+}
+
+# ============================================================================
 # Host Detection
 # ============================================================================
 

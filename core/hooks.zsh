@@ -10,7 +10,7 @@
 typeset -gA _ZDOT_HOOKS              # hook_id -> function_name
 typeset -gA _ZDOT_HOOK_CONTEXTS      # hook_id -> "interactive noninteractive ..."
 typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
-typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase_name"
+typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_HOOK_ON_DEMAND     # hook_id -> 1 if on-demand
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
@@ -27,19 +27,23 @@ typeset -ga _ZDOT_EXECUTION_PLAN     # Ordered array of hook_ids
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_hook_register <function-name> <context...> [--requires <phase...>] [--provides <phase>] [--optional] [--on-demand]
+# Usage: zdot_hook_register <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional] [--on-demand]
 # Contexts: interactive, noninteractive, login, nonlogin
+# --provides-tool <tool>  sugar for --provides tool:<tool>
+# --requires-tool <tool>  sugar for --requires tool:<tool>
+# Multiple --provides / --provides-tool flags are allowed
 # Example: zdot_hook_register _my_init interactive --requires xdg-configured --provides my-ready
+# Example: zdot_hook_register _brew_install interactive --provides-tool fzf --provides-tool op
 zdot_hook_register() {
     local func_name=$1
     shift
-    
+
     local -a contexts
     local -a requires
-    local provides=""
+    local -a provides
     local optional=0
     local on_demand=0
-    
+
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -51,8 +55,16 @@ zdot_hook_register() {
                     shift
                 done
                 ;;
+            --requires-tool)
+                requires+=("tool:$2")
+                shift 2
+                ;;
             --provides)
-                provides=$2
+                provides+=($2)
+                shift 2
+                ;;
+            --provides-tool)
+                provides+=("tool:$2")
                 shift 2
                 ;;
             --optional)
@@ -90,7 +102,7 @@ zdot_hook_register() {
     _ZDOT_HOOKS[$hook_id]=$func_name
     _ZDOT_HOOK_CONTEXTS[$hook_id]="${contexts[*]}"
     _ZDOT_HOOK_REQUIRES[$hook_id]="${requires[*]}"
-    _ZDOT_HOOK_PROVIDES[$hook_id]=$provides
+    _ZDOT_HOOK_PROVIDES[$hook_id]="${provides[*]}"
     _ZDOT_HOOK_OPTIONAL[$hook_id]=$optional
     _ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand
     
@@ -102,30 +114,42 @@ zdot_hook_register() {
     fi
     
     # Register phase provider (context-aware)
-    if [[ -n $provides ]]; then
-        # Check for conflicts: same phase provided in overlapping contexts
-        local has_conflict=0
-        local conflicting_hook=""
-        
-        # Check each context this hook runs in
-        for new_ctx in ${contexts[@]}; do
-            local ctx_key="${new_ctx}:${provides}"
-            
-            if [[ -n ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]} ]]; then
-                # Found a conflict: another hook already provides this phase in this context
-                has_conflict=1
-                conflicting_hook=${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}
-                zdot_error "zdot_hook_register: ERROR: Multiple hooks provide phase '$provides' in context '$new_ctx'"
-                zdot_error "  Previous: ${_ZDOT_HOOKS[$conflicting_hook]}"
-                zdot_error "  Current: $func_name"
-                return 1
-            fi
+    if [[ ${#provides[@]} -gt 0 ]]; then
+        local -a phases_to_register=()
+
+        for p in ${provides[@]}; do
+            local is_tool_phase=0
+            [[ $p == tool:* ]] && is_tool_phase=1
+
+            local skip_phase=0
+            for new_ctx in ${contexts[@]}; do
+                local ctx_key="${new_ctx}:${p}"
+
+                if [[ -n ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]} ]]; then
+                    local conflicting_hook=${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}
+                    if [[ $is_tool_phase -eq 1 ]]; then
+                        # Tool phases: first registered wins; warn and skip
+                        zdot_warn "zdot_hook_register: phase '$p' already provided by '${_ZDOT_HOOKS[$conflicting_hook]}' in context '$new_ctx'; skipping '$func_name'"
+                        skip_phase=1
+                        break
+                    else
+                        zdot_error "zdot_hook_register: ERROR: Multiple hooks provide phase '$p' in context '$new_ctx'"
+                        zdot_error "  Previous: ${_ZDOT_HOOKS[$conflicting_hook]}"
+                        zdot_error "  Current: $func_name"
+                        return 1
+                    fi
+                fi
+            done
+
+            [[ $skip_phase -eq 0 ]] && phases_to_register+=($p)
         done
-        
-        # No conflicts - register provider for each context
-        for ctx in ${contexts[@]}; do
-            local ctx_key="${ctx}:${provides}"
-            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]=$hook_id
+
+        # Register non-conflicting phases for each context
+        for p in ${phases_to_register[@]}; do
+            for ctx in ${contexts[@]}; do
+                local ctx_key="${ctx}:${p}"
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]=$hook_id
+            done
         done
     fi
     
@@ -213,8 +237,10 @@ zdot_build_execution_plan() {
                     degree=-1  # Mark as skipped
                     break
                 else
-                    zdot_error "zdot_build_execution_plan: ERROR: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context"
-                    return 1
+                    zdot_warn "zdot_build_execution_plan: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context; skipping"
+                    skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (missing: $phase)")
+                    degree=-1
+                    break
                 fi
             fi
             
@@ -273,23 +299,23 @@ zdot_build_execution_plan() {
         # Add to execution order
         execution_order+=($current_hook)
         
-        # Get phase this hook provides
-        local provided_phase=${_ZDOT_HOOK_PROVIDES[$current_hook]}
-        
-        if [[ -n $provided_phase ]]; then
+        # Get phases this hook provides
+        local -a provided_phases=(${=_ZDOT_HOOK_PROVIDES[$current_hook]})
+
+        for provided_phase in $provided_phases; do
             # Find all hooks that depend on this phase
             local dependent_hooks=(${=adjacency_list[$provided_phase]})
-            
+
             for dep_hook in $dependent_hooks; do
                 # Decrease in-degree
                 (( in_degree[$dep_hook]-- ))
-                
+
                 # If in-degree becomes 0, add to queue
                 if [[ ${in_degree[$dep_hook]} -eq 0 ]]; then
                     zero_in_degree+=($dep_hook)
                 fi
             done
-        fi
+        done
     done
     
     # Add hooks that depend ONLY on promised phases to the END of execution order
@@ -375,6 +401,18 @@ zdot_promise_phase() {
     return 0
 }
 
+# Verify that declared tools are available on PATH (runtime post-hoc check)
+# Usage: zdot_verify_tools <tool1> [tool2 ...]
+# Warns for each tool not found; does not affect scheduling
+zdot_verify_tools() {
+    local tool
+    for tool in "$@"; do
+        if ! command -v "$tool" &>/dev/null; then
+            zdot_warn "zdot_verify_tools: tool '$tool' not found on PATH"
+        fi
+    done
+}
+
 # Internal helper to execute a single hook
 # Usage: _zdot_execute_hook <hook_id> <function_name> [stop_callback]
 # Returns:
@@ -387,24 +425,24 @@ _zdot_execute_hook() {
     local stop_callback="$3"
     
     local func=${_ZDOT_HOOKS[$hook_id]}
-    local provides=${_ZDOT_HOOK_PROVIDES[$hook_id]}
-    
+    local -a provides=(${=_ZDOT_HOOK_PROVIDES[$hook_id]})
+
     # Execute the hook function
     if typeset -f "$func" > /dev/null; then
         zdot_verbose "zdot: hooks: run: $func"
         if $func; then
             _ZDOT_HOOKS_EXECUTED[$hook_id]=1
-            
-            # Mark phase as provided
-            if [[ -n $provides ]]; then
-                _ZDOT_PHASES_PROVIDED[$provides]=1
-                zdot_verbose "zdot: hooks: provided: $provides"
-                
+
+            # Mark each provided phase as provided
+            for phase in $provides; do
+                _ZDOT_PHASES_PROVIDED[$phase]=1
+                zdot_verbose "zdot: hooks: provided: $phase"
+
                 # Call stop callback if provided
-                if [[ -n $stop_callback ]] && $stop_callback "$provides"; then
+                if [[ -n $stop_callback ]] && $stop_callback "$phase"; then
                     return 2
                 fi
-            fi
+            done
             return 0
         else
             zdot_error "${function_name}: Hook '$func' failed (exit code: $?)"
