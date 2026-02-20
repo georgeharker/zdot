@@ -332,10 +332,8 @@ zdot_load_plugin() {
     source "$plugin_file"
     _ZDOT_PLUGINS_LOADED[$spec]=1
     
-    # Optionally compile plugin to .zwc for faster loading
-    local compile_plugins=no
-    zstyle -b ':zdot:plugins' compile compile_plugins
-    if [[ "$compile_plugins" == yes ]]; then
+    # Optionally compile plugin to .zwc for faster loading (opt-out: enabled by default)
+    if zstyle -T ':zdot:plugins' compile; then
         zdot_plugin_compile "$spec"
     fi
     
