@@ -7,6 +7,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Creating Modules](#creating-modules)
+- [User Modules](#user-modules)
 - [Core Functions Reference](#core-functions-reference)
 - [Hook System](#hook-system)
 - [Debugging](#debugging)
@@ -17,6 +18,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 ### Key Features
 
 - **Modular Architecture**: Split your configuration into logical modules (brew, ssh, completions, etc.)
+- **User Modules**: Extend or override built-in modules without touching the core library
 - **Dependency Management**: Hooks automatically execute in the correct order based on their dependencies
 - **Context Awareness**: Different configurations for interactive/non-interactive and login/non-login shells
 - **Optional Loading**: Modules can gracefully handle missing dependencies (e.g., if homebrew isn't installed)
@@ -47,13 +49,15 @@ The system automatically:
 │   ├── logging.zsh       # Logging functions
 │   ├── utils.zsh         # Utility functions
 │   └── functions/        # Autoloaded functions
-├── lib/                  # Your modules go here
+├── lib/                  # Built-in modules
 │   ├── brew/
 │   ├── ssh/
 │   ├── completions/
 │   └── ...
 └── config/               # Static configuration files
 ```
+
+User modules live in a separate directory outside the core tree (see [User Modules](#user-modules)).
 
 ### Basic Usage in .zshrc
 
@@ -179,6 +183,66 @@ zdot_hook_register _mymodule_cleanup interactive noninteractive \
 ```
 
 The `--on-demand` flag tells zdot that this hook is waiting for a manually-triggered phase and won't show up as an error if `finalize` isn't provided by another hook.
+
+## User Modules
+
+User modules let you add custom modules (or locally-modified copies of built-in modules) without
+touching the core `lib/` tree. They follow the same structure and load the same way; the framework
+keeps them separate so updates to `lib/` never overwrite your customisations.
+
+### Setup
+
+Tell zdot where your user modules live by adding a `zstyle` before `zdot_load_modules`:
+
+```zsh
+zstyle ':zdot:user-modules' path ~/path/to/my-modules
+```
+
+### Module structure
+
+Identical to built-in modules — one directory per module, main file named the same as the directory:
+
+```
+~/my-modules/
+└── mymodule/
+    └── mymodule.zsh     # Main module file
+```
+
+### Loading user modules
+
+```zsh
+# In your .zshrc (after the zstyle and before zdot_build_execution_plan):
+zdot_user_module_load mymodule
+```
+
+The framework tracks user modules in `_ZDOT_USER_MODULES_LOADED` in addition to the shared
+`_ZDOT_MODULES_LOADED` map, so there are no name collisions and every module is sourced at
+most once regardless of whether it is built-in or user-provided.
+
+### Cloning a built-in module as a starting point
+
+```zsh
+zdot module user-clone brew   # copies lib/brew/ into your user modules directory
+```
+
+The destination must not already exist. Edit the copy freely — the original in `lib/` is untouched.
+
+### CLI reference
+
+| Command | Description |
+|---|---|
+| `zdot module user-list` | List loaded user modules |
+| `zdot module user-clone <name>` | Copy a built-in module to the user modules directory |
+
+### Public API
+
+| Function | Description |
+|---|---|
+| `zdot_user_module_load <name>` | Source a user module (dedup-safe) |
+| `zdot_user_module_list` | Print loaded user module names |
+| `zdot_user_module_path <name>` | Return the path to a user module's main file |
+
+---
 
 ## Core Functions Reference
 

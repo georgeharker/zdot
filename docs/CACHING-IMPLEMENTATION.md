@@ -328,11 +328,66 @@ zdot_cache_invalidate() {
 2. All `*.zwc` files in `core/` (core module bytecodes)
 3. All `*.zwc` files in each top-level directory under `lib/` (lib module and function bytecodes)
 
-### Module Loading (in `core/utils.zsh`)
+### Module Loading Pipeline (in `core/cache.zsh` and `core/modules.zsh`)
+
+The framework's named module loading follows a strict call chain:
+
+```
+zdot_module_load <name>           (core/modules.zsh — public entry point)
+  └── zdot_user_module_load <name>    OR
+      _zdot_load_module_file <name> <file>   (core/modules.zsh — dedup + existence check)
+            └── _zdot_source_module <name> <file>   (core/cache.zsh — compile + source)
+                      └── zdot_cache_compile_file <file>   (compile if stale)
+                      └── source <file>              (Zsh uses .zwc automatically)
+```
+
+> **Disambiguation**: `_zdot_source_module` (below) is the framework's private named-module
+> loader. It is distinct from `zdot_module_source` (in `core/utils.zsh`), which sources an
+> arbitrary relative path within the *current* module's directory and is used by module authors.
+
+#### `_zdot_source_module()` — Tier 1 Private Loader
+
+**Purpose**: Compile-if-needed and source a named module file. Sets context variables
+(`_ZDOT_CURRENT_MODULE_DIR`, `_ZDOT_CURRENT_MODULE_NAME`) so that helpers like
+`zdot_module_source` and `zdot_module_autoload_funcs` know which module is active.
+Does **not** touch `_ZDOT_MODULES_LOADED` — that is the caller's responsibility.
+
+**Location**: `~/.config/zsh/zdot/core/cache.zsh`
+
+```zsh
+# Usage: _zdot_source_module <module-name> <module-file>
+_zdot_source_module() {
+    local module="$1"
+    local module_file="$2"
+    if zdot_cache_is_enabled; then
+        zdot_cache_compile_file "$module_file"
+    fi
+    _ZDOT_CURRENT_MODULE_DIR="${module_file:h}"
+    _ZDOT_CURRENT_MODULE_NAME="$module"
+    source "$module_file"
+    unset _ZDOT_CURRENT_MODULE_DIR
+    unset _ZDOT_CURRENT_MODULE_NAME
+    return 0
+}
+```
+
+**Algorithm**:
+1. If caching is enabled, call `zdot_cache_compile_file` to compile `.zsh` → `.zwc` if stale or missing
+2. Set `_ZDOT_CURRENT_MODULE_DIR` and `_ZDOT_CURRENT_MODULE_NAME` so context is available during sourcing
+3. `source` the `.zsh` file — Zsh automatically prefers the co-located `.zwc` if present and newer
+4. Unset context variables after sourcing completes
+
+**Called by**: `_zdot_load_module_file` (in `core/modules.zsh`), never directly by user code.
+
+---
+
+### Module Authoring Helpers (in `core/utils.zsh`)
 
 #### `zdot_module_source()`
 
-**Purpose**: Source a module, using cached bytecode if available.
+**Purpose**: Source an arbitrary relative path within the *current* module's directory,
+using cached bytecode if available. Intended for module authors who need to source
+sub-files (e.g., `zdot_module_source helpers.zsh`).
 
 **Location**: `~/.config/zsh/zdot/core/utils.zsh`
 

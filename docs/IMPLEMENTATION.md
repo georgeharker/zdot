@@ -91,7 +91,7 @@ zdot/
 │   ├── functions.zsh                # Function autoloading setup
 │   ├── hooks.zsh                    # Hook system (528 lines)
 │   ├── logging.zsh                  # Logging functions (56 lines)
-│   ├── modules.zsh                  # Module loading
+│   ├── modules.zsh                  # Module loading pipeline (zdot_module_load, zdot_user_module_load, _zdot_load_module_file)
 │   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer)
 │   ├── utils.zsh                    # Utility functions (zdot_interactive, zdot_login, …)
 │   ├── functions/                   # Autoloaded functions (zdot, zdot_hooks_list, …)
@@ -284,6 +284,40 @@ zdot_login       || return 0    # skip in non-login shells
 zdot_has_tty     || return 0    # skip when no terminal I/O available
 ```
 
+#### core/modules.zsh (Module Loading System)
+
+**Responsibilities:**
+- Built-in module loading (`zdot_module_load`)
+- User module loading (`zdot_user_module_load`)
+- Deduplication and existence checking (`_zdot_load_module_file`)
+- User modules directory resolution (`_zdot_user_modules_dir`)
+- Module path helpers (`zdot_module_path`, `zdot_user_module_path`)
+- Module listing (`zdot_module_list`, `zdot_user_module_list`)
+
+**Key Functions:**
+
+##### `_zdot_load_module_file()` (private, lines 40–49)
+
+Internal entry point for loading any module file. Handles deduplication, existence checking, and marks `_ZDOT_MODULES_LOADED`. All extra per-category tracking (e.g. `_ZDOT_USER_MODULES_LOADED`) is the caller's responsibility.
+
+##### `zdot_module_load()` (lines 53–57)
+
+Public API for loading a named built-in module from `$_ZDOT_LIB_DIR/<name>/<name>.zsh`. Delegates to `_zdot_load_module_file`.
+
+##### `zdot_user_module_load()` (lines 114–124)
+
+Public API for loading a named user module. Resolves the user modules directory via `_zdot_user_modules_dir()`, delegates to `_zdot_load_module_file`, then sets `_ZDOT_USER_MODULES_LOADED[$module]=1`.
+
+##### `_zdot_user_modules_dir()` (private, lines 75–91)
+
+Resolves and caches the user modules directory. First checks `$_ZDOT_USER_MODULES_DIR`; if unset, reads the zstyle value for `':zdot:user-modules' path`, expands `~`, caches in `_ZDOT_USER_MODULES_DIR`, and prints it. Returns 1 if unconfigured.
+
+##### `zdot_user_module_list()` (lines 128–137)
+
+Lists all loaded user modules from `_ZDOT_USER_MODULES_LOADED`.
+
+**Design Note**: `zdot_module_dir()` is also defined here — it allows module authors to retrieve their own directory at load time via the `_ZDOT_CURRENT_MODULE_DIR` context variable set by `_zdot_source_module`.
+
 #### core/functions/zdot_hooks_list (Hook Inspection)
 
 **Responsibilities:**
@@ -389,6 +423,22 @@ typeset -gA _ZDOT_ON_DEMAND_PHASES
 # Hook ID → 1 when executed
 typeset -gA _ZDOT_HOOKS_EXECUTED
 # Example: _ZDOT_HOOKS_EXECUTED["_brew_init@interactive noninteractive"]=1
+
+# All loaded module names → 1 (both built-in and user modules; used for dedup)
+typeset -gA _ZDOT_MODULES_LOADED
+# Example: _ZDOT_MODULES_LOADED["xdg"]=1
+
+# User-loaded module names → 1 (subset of _ZDOT_MODULES_LOADED; user modules only)
+typeset -gA _ZDOT_USER_MODULES_LOADED
+# Example: _ZDOT_USER_MODULES_LOADED["my-custom"]=1
+
+# Cached resolved path to the user modules directory (set by _zdot_user_modules_dir)
+typeset -g _ZDOT_USER_MODULES_DIR
+# Example: _ZDOT_USER_MODULES_DIR="/Users/user/.config/zdot-user"
+
+# Transient: set during _zdot_source_module, unset immediately after sourcing
+typeset -g _ZDOT_CURRENT_MODULE_NAME   # e.g. "xdg"
+typeset -g _ZDOT_CURRENT_MODULE_DIR    # e.g. "/Users/user/.config/zdot/lib/xdg"
 ```
 
 ### Global Arrays
@@ -812,7 +862,135 @@ done
 
 ## Module Loading
 
+### Module Loading Pipeline
+
+The framework loads named modules through a three-layer call chain:
+
+```
+zdot_module_load <name>          # public — load a built-in module
+zdot_user_module_load <name>     # public — load a user module
+        │
+        ▼
+_zdot_load_module_file <name> <file>   # private — dedup + existence check + load
+        │
+        ▼
+_zdot_source_module <name> <file>      # private — compile if stale, set context vars, source
+        │
+        ▼
+zdot_cache_compile_file <file>         # compile .zsh → .zwc if needed (core/cache.zsh)
+source <compiled-or-original-file>
+```
+
+#### `_zdot_load_module_file` (core/modules.zsh)
+
+Central private helper. Both `zdot_module_load` and `zdot_user_module_load` delegate to it.
+
+```zsh
+_zdot_load_module_file() {
+    local module="$1" module_file="$2"
+    [[ -n "${_ZDOT_MODULES_LOADED[$module]}" ]] && return 0
+    if [[ ! -f "$module_file" ]]; then
+        zdot_error "_zdot_load_module_file: module file not found: $module_file"
+        return 1
+    fi
+    _zdot_source_module "$module" "$module_file"
+    _ZDOT_MODULES_LOADED[$module]=1
+}
+```
+
+Key properties:
+- **Dedup**: returns immediately if `_ZDOT_MODULES_LOADED[$module]` is set; safe to call multiple times
+- **Existence check**: errors with a descriptive message if the file is missing
+- **Shared registry**: built-in and user modules share `_ZDOT_MODULES_LOADED`, preventing name collisions
+
+#### `_zdot_source_module` (core/cache.zsh)
+
+Private loader called by `_zdot_load_module_file`. Sets per-module context variables so module authors can reference their own directory via `zdot_module_source`.
+
+```zsh
+_zdot_source_module() {
+    local module="$1"
+    local module_file="$2"
+    # compile if stale/missing...
+    _ZDOT_CURRENT_MODULE_DIR="${module_file:h}"
+    _ZDOT_CURRENT_MODULE_NAME="$module"
+    source "$module_file"
+    unset _ZDOT_CURRENT_MODULE_DIR
+    unset _ZDOT_CURRENT_MODULE_NAME
+    return 0
+}
+```
+
+> **Note**: Do not confuse `_zdot_source_module` (framework-private loader) with `zdot_module_source`
+> (public helper in `core/utils.zsh` for module authors to source sub-files relative to their module directory).
+
+---
+
+### User Module Loading
+
+User modules are community or personal modules that live outside the zdot library tree. They use the same structure as built-in modules and are loaded through the same pipeline.
+
+#### Configuration
+
+```zsh
+# In your .zshrc or zdot init file:
+zstyle ':zdot:user-modules' path ~/path/to/user-modules
+```
+
+The path is resolved once by `_zdot_user_modules_dir` and cached in `_ZDOT_USER_MODULES_DIR`.
+
+#### Module Structure
+
+```
+<user-modules-dir>/
+└── <name>/
+    └── <name>.zsh          # entry point (same convention as built-in modules)
+```
+
+#### Loading a User Module
+
+```zsh
+zdot_user_module_load my-custom
+```
+
+This calls `_zdot_load_module_file "my-custom" "${_ZDOT_USER_MODULES_DIR}/my-custom/my-custom.zsh"` and additionally sets `_ZDOT_USER_MODULES_LOADED[$module]=1` so user modules can be listed independently.
+
+#### Deduplication
+
+User modules share `_ZDOT_MODULES_LOADED` with built-in modules. If a built-in module named `foo` is already loaded, calling `zdot_user_module_load foo` is a no-op. Choose unique names for user modules.
+
+#### Cloning a Built-in Module
+
+The `user-clone` CLI command copies a built-in module into the user modules directory as a starting point for customisation:
+
+```zsh
+zdot module user-clone xdg
+# copies $_ZDOT_LIB_DIR/xdg/ → <user-modules-dir>/xdg/
+# fails if destination already exists
+```
+
+#### Public API
+
+| Function | Description |
+|---|---|
+| `zdot_user_module_load <name>` | Load a user module (deduped) |
+| `zdot_user_module_list` | Print names of all loaded user modules |
+| `zdot_user_module_path <name>` | Return the path to a user module's main file |
+
+#### CLI Reference
+
+| Command | Description |
+|---|---|
+| `zdot module user-list` | List loaded user modules |
+| `zdot module user-clone <name>` | Clone a built-in module into user modules dir |
+
+---
+
 ### Automatic Module Discovery
+
+> **Note**: For user configurations, explicit loading via `zdot_module_load` / `zdot_user_module_load`
+> is the preferred approach. `zdot_load_modules()` is used internally during framework initialisation
+> and is not intended for direct use in module or user init files.
 
 **Function**: `zdot_load_modules()` (core/hooks.zsh:364-397)
 

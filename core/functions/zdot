@@ -52,7 +52,9 @@ function zdot() {
     function _zdot_help_module() {
         zdot_info "zdot module — module management"
         zdot_info ""
-        zdot_info "  zdot module list  List all loaded modules and their status"
+        zdot_info "  zdot module list              List all loaded modules and their status"
+        zdot_info "  zdot module user-list         List loaded user modules"
+        zdot_info "  zdot module user-clone <name> Copy a built-in module to the user modules directory"
     }
 
     function _zdot_help_completion() {
@@ -108,7 +110,7 @@ function zdot() {
         zdot_info "  cache      status | invalidate | compile"
         zdot_info "  hook       list [-v] [-a] | plan"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
-        zdot_info "  module     list"
+        zdot_info "  module     list | user-list | user-clone <name>"
         zdot_info "  completion refresh"
         zdot_info "  secret     refresh"
         zdot_info "  info"
@@ -172,11 +174,40 @@ function zdot() {
         # ── module ────────────────────────────────────────────────────────
         module)
             case "$verb" in
-                list) zdot_module_list ;;
+                list)       zdot_module_list ;;
+                user-list)  zdot_user_module_list ;;
+                user-clone)
+                    local name="${3:-}"
+                    if [[ -z "$name" ]]; then
+                        zdot_error "zdot module user-clone: module name required"
+                        zdot_info "  usage: zdot module user-clone <built-in-module-name>"
+                        return 1
+                    fi
+                    local src_dir="${_ZDOT_LIB_DIR}/${name}"
+                    if [[ ! -d "$src_dir" ]]; then
+                        zdot_error "zdot module user-clone: built-in module not found: $name"
+                        return 1
+                    fi
+                    local user_dir
+                    if ! user_dir="$(_zdot_user_modules_dir)"; then
+                        zdot_error "zdot module user-clone: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
+                        return 1
+                    fi
+                    local dest_dir="${user_dir}/${name}"
+                    if [[ -d "$dest_dir" ]]; then
+                        zdot_error "zdot module user-clone: destination already exists: $dest_dir"
+                        return 1
+                    fi
+                    if ! cp -r "$src_dir" "$dest_dir"; then
+                        zdot_error "zdot module user-clone: failed to copy module"
+                        return 1
+                    fi
+                    zdot_info "Cloned module '${name}' to: ${dest_dir}"
+                    ;;
                 help|--help|-h) _zdot_help_module ;;
                 *)
                     zdot_error "zdot module: unknown verb '${verb}'"
-                    zdot_info "  verbs: list"
+                    zdot_info "  verbs: list | user-list | user-clone <name>"
                     return 1
                     ;;
             esac

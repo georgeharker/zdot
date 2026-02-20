@@ -4,7 +4,7 @@ function _zdot() {
         'cache:cache management (status, invalidate, compile)'
         'hook:hook and execution-plan management (list, plan)'
         'plugin:plugin management (list, update, clean, reclone)'
-        'module:module management (list)'
+        'module:module management (list, user-list, user-clone)'
         'completion:shell completion management (refresh)'
         'secret:secret management (refresh)'
         'info:show zdot environment and runtime state'
@@ -42,6 +42,8 @@ function _zdot() {
 
     verbs_module=(
         'list:list all loaded modules and their status'
+        'user-list:list loaded user modules'
+        'user-clone:copy a built-in module to the user modules directory'
         'help:show help for module'
     )
 
@@ -118,10 +120,15 @@ function _zdot() {
         # ── completing flags (word 4+) ───────────────────────────────────────
         *)
             case "${noun}:${verb}" in
-                hook:list)    _arguments -s "${flags_hook_list[@]}" ;;
-                plugin:list)  _arguments -s "${flags_plugin_list[@]}" ;;
-                plugin:clean) _arguments -s "${flags_plugin_clean[@]}" ;;
-                *)            ;;
+                hook:list)         _arguments -s "${flags_hook_list[@]}" ;;
+                plugin:list)       _arguments -s "${flags_plugin_list[@]}" ;;
+                plugin:clean)      _arguments -s "${flags_plugin_clean[@]}" ;;
+                module:user-clone)
+                    local -a builtin_modules
+                    builtin_modules=( ${_ZDOT_LIB_DIR}/*(N/:t) )
+                    _describe -t modules 'built-in module' builtin_modules
+                    ;;
+                *)                 ;;
             esac
             ;;
 

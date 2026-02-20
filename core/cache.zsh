@@ -169,34 +169,15 @@ zdot_cache_compile_all() {
     return 0
 }
 
-# Load a module from cache if available, otherwise load normally
-# Usage: load_cached_module <module-name>
+# Compile-if-needed and source a module file.
+# Sets/clears context vars (_ZDOT_CURRENT_MODULE_DIR, _ZDOT_CURRENT_MODULE_NAME).
+# Does NOT touch _ZDOT_MODULES_LOADED — caller is responsible for that.
+# Usage: _zdot_source_module <module-name> <module-file>
 # Returns: 0 on success, 1 on error
-# Load a module with caching support
-# Usage: load_cached_module <module-name>
-# Returns: 0 on success, 1 on error
-# Note: When caching is enabled and .zwc exists, zsh automatically uses it
-load_cached_module() {
+_zdot_source_module() {
     local module="$1"
+    local module_file="$2"
 
-    if [[ -z "$module" ]]; then
-        zdot_error "load_cached_module: module name required"
-        return 1
-    fi
-
-    # Check if already loaded
-    if [[ -n "${_ZDOT_MODULES_LOADED[$module]}" ]]; then
-        return 0
-    fi
-
-    local module_file=$(zdot_module_path "$module")
-
-    if [[ ! -f "$module_file" ]]; then
-        zdot_error "load_cached_module: module file not found: $module_file"
-        return 1
-    fi
-
-    # If caching is enabled, compile if needed
     if zdot_cache_is_enabled; then
         local compiled_path="${module_file}.zwc"
         if zdot_is_newer_or_missing "$module_file" "$compiled_path"; then
@@ -204,16 +185,12 @@ load_cached_module() {
         fi
     fi
 
-    # Set the module directory and name for the module being loaded
     _ZDOT_CURRENT_MODULE_DIR="${module_file:h}"
     _ZDOT_CURRENT_MODULE_NAME="$module"
 
-    # Always source the .zsh file - zsh will automatically use .zwc if it exists
+    # Source the .zsh file — zsh automatically uses .zwc if present
     source "$module_file"
 
-    _ZDOT_MODULES_LOADED[$module]=1
-
-    # Clear the module directory and name after loading
     unset _ZDOT_CURRENT_MODULE_DIR
     unset _ZDOT_CURRENT_MODULE_NAME
 
