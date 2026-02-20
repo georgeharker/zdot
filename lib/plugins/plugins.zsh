@@ -89,6 +89,7 @@ _plugins_load_omz() {
     # avoid "(eval):1: can't change option: zle" errors from fzf --zsh's
     # option-snapshot/restore blocks.
     zdot_has_tty && zdot_load_plugin omz:plugins/fzf
+    zdot_verify_tools fzf
     zdot_load_plugin omz:plugins/zoxide
     zdot_load_plugin omz:plugins/npm
     zdot_load_plugin omz:plugins/nvm
@@ -103,7 +104,8 @@ _plugins_load_omz() {
 # Note: _plugins_load_omz handles non-interactive gracefully (skips compinit)
 zdot_hook_register _plugins_load_omz interactive noninteractive \
     --requires plugins-cloned \
-    --provides omz-plugins-loaded
+    --provides omz-plugins-loaded \
+    --provides-tool fzf
 
 # ============================================================================
 # Deferred Plugins Loader

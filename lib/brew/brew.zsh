@@ -21,7 +21,7 @@ _brew_init() {
         eval "$(/usr/local/bin/brew shellenv)"
     fi
 
-    zdot_verify_tools op fzf eza oh-my-posh gh tailscale
+    zdot_verify_tools op eza oh-my-posh gh tailscale
 }
 
 # Register hooks - requires xdg-configured, provides brew-ready and tool availability
@@ -29,7 +29,6 @@ zdot_hook_register _brew_init interactive noninteractive \
     --requires xdg-configured \
     --provides brew-ready \
     --provides-tool op \
-    --provides-tool fzf \
     --provides-tool eza \
     --provides-tool oh-my-posh \
     --provides-tool gh \
