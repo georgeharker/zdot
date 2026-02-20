@@ -359,7 +359,7 @@ load_cache() {
     fi
 
     local zshrc_file="${ZDOTDIR:-$HOME}/.zshrc"
-    if [[ -f "$zshrc_file" ]] && zdot_is_newer_or_missing "${zshrc_file:A}" "$plan_file"; then
+    if [[ -f "$zshrc_file" ]] && zdot_is_newer_or_missing "$zshrc_file" "$plan_file"; then
         return 1
     fi
 

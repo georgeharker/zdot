@@ -209,7 +209,7 @@ zdot_compdump_write_meta() {
 zdot_compdump_recompile() {
     local compfile="$(_zdot_compdump_path)"
     {
-        if [[ -s "$compfile" && (! -s "${compfile}.zwc" || "$compfile" -nt "${compfile}.zwc") ]]; then
+        if [[ -s "$compfile" && (! -s "${compfile}.zwc" || "$compfile:A" -nt "${compfile}.zwc:A") ]]; then
             if command mkdir "${compfile}.lock" 2>/dev/null; then
                 autoload -U zrecompile
                 zrecompile -q -p "$compfile"

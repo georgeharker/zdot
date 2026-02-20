@@ -33,16 +33,18 @@ zdot_has_tty() {
 # Utility Functions
 # ============================================================================
 
-# Check if source file is newer than destination or destination is missing
+# Check if source file is newer than destination or destination is missing.
+# Resolves symlinks on both paths via :A (zsh builtin, faster than realpath)
+# so that mtime comparisons use the real file mtimes, not the symlink mtimes.
+# This is important because zsh's -nt uses lstat() and does not follow symlinks.
 # Usage: if zdot_is_newer_or_missing <source> <dest>; then ...; fi
-# Uses :A for symlink resolution (zsh builtin, faster than realpath)
 zdot_is_newer_or_missing() {
     local src="$1"
     local dst="$2"
     if [[ ! -f "$dst" ]]; then
         return 0
     fi
-    if [[ -f "$src" && "$src:A" -nt "$dst" ]]; then
+    if [[ -f "$src" && "$src:A" -nt "$dst:A" ]]; then
         return 0
     fi
     return 1

@@ -8,7 +8,13 @@
 
 # Self-discover zsh-base location using the currently sourced file
 # This file is at: .config/zsh/zdot/core/core.zsh
-# NOTE: Using :a (absolute path) instead of :A to preserve symlinks
+# NOTE: Using :a (absolute path without resolving symlinks) instead of :A
+# (which would follow symlinks to the real path). This is intentional:
+# _ZDOT_BASE_DIR must point at the linktree path (e.g. ~/.config/zdot)
+# rather than the backing store (e.g. ~/.dotfiles/.config/zdot), so that
+# any paths derived from it remain consistent with how the user addresses
+# the directory. Mtime comparisons that use _ZDOT_BASE_DIR pass through
+# zdot_is_newer_or_missing, which applies :A at comparison time.
 _zdot_this_script_file="${${(%):-%x}:a}"
 _zdot_base_dir="${_zdot_this_script_file:h:h}"     # .../zdot (go up twice from core/)
 typeset -g _ZDOT_BASE_DIR="${_zdot_base_dir}"              # Export as global

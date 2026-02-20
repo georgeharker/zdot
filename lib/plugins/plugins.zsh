@@ -142,7 +142,7 @@ _plugins_post_init() {
     # Fast-syntax-highlighting theme (after plugins load)
     if zdot_interactive; then
         if [[ -f ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini ]]; then
-            if [[ $(realpath ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini) -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh ]]; then
+            if [[ ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini:A -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh:A ]]; then
                 zdot_defer -q fast-theme -q ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
             fi
         fi

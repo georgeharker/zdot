@@ -24,7 +24,7 @@ _plugins_init() {
     # Ensure nvm.sh is compiled for faster loading
     if [[ -f "$NVM_DIR/nvm.sh" ]]; then
         # Compile if .zwc doesn't exist or is older than nvm.sh
-        if [[ ! -f "$NVM_DIR/nvm.sh.zwc" ]] || [[ "$NVM_DIR/nvm.sh" -nt "$NVM_DIR/nvm.sh.zwc" ]]; then
+        if [[ ! -f "$NVM_DIR/nvm.sh.zwc" ]] || [[ "$NVM_DIR/nvm.sh:A" -nt "$NVM_DIR/nvm.sh.zwc:A" ]]; then
             zcompile "$NVM_DIR/nvm.sh"
         fi
     fi
@@ -82,7 +82,7 @@ _antidote_load() {
 
 _plugins_post_init() {
     # Fast-syntax-highlighting theme (after plugins load)
-    if [[ $(realpath ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini) -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh ]]; then
+    if [[ ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini:A -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh:A ]]; then
         zdot_defer fast-theme ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
     fi
 }
