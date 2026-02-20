@@ -89,11 +89,18 @@ _op_init() {
         # Refresh shell secrets if needed
         if zdot_is_newer_or_missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
             refresh_shell_secrets
+        else
+            zdot_verbose "secrets: cache is up to date, skipping refresh"
         fi
-        
+
         # Source shell secrets if available
         if [[ -f "${secrets_cache}/${USER}.secrets.zsh" ]]; then
             source "${secrets_cache}/${USER}.secrets.zsh"
+        fi
+    else
+        # Warn if secrets template is stale but OP is not active to refresh it
+        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
+            zdot_warn "secrets: template is newer than cache but OP is not active — run refresh_shell_secrets manually once OP is available"
         fi
     fi
 
@@ -104,4 +111,4 @@ _op_init() {
 # Register hook - requires xdg-configured, provides secrets-loaded
 # Runs in both interactive and noninteractive modes
 # Interactive prompts only happen in interactive shells due to function guards
-zdot_hook_register _op_init interactive noninteractive --requires xdg-configured --provides secrets-loaded
+zdot_hook_register _op_init interactive noninteractive --requires xdg-configured --requires brew-ready --provides secrets-loaded
