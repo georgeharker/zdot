@@ -17,13 +17,12 @@ typeset -g _ZDOT_CACHE_VERSION="3"          # Cache format version (context-awar
 # Initialize cache system with zstyle configuration
 # Usage: zdot_cache_init
 zdot_cache_init() {
-    # Check if caching is enabled via zstyle
-    local enabled
-    zstyle -b ':zdot:cache' enabled enabled
-    if [[ "$enabled" == "yes" ]]; then
+    # Check if caching is enabled via zstyle (opt-out: enabled by default)
+    if zstyle -T ':zdot:cache' enabled; then
         _ZDOT_CACHE_ENABLED=1
     else
         _ZDOT_CACHE_ENABLED=0
+        zdot_verbose "zdot: cache: disabled"
         return 0
     fi
 
@@ -45,6 +44,7 @@ zdot_cache_init() {
         return 1
     fi
 
+    zdot_verbose "zdot: cache: enabled, dir: $_ZDOT_CACHE_DIR"
     return 0
 }
 
@@ -113,9 +113,11 @@ zdot_cache_compile_file() {
 
     # Check if compilation is needed (source newer than compiled)
     if [[ -f "$output_file" ]] && ! zdot_is_newer_or_missing "$source_file" "$output_file"; then
+        zdot_verbose "zdot: cache: compile skip (up to date): ${source_file:t}"
         return 0
     fi
 
+    zdot_verbose "zdot: cache: compiling: ${source_file:t}"
     # Compile source file (creates .zwc next to it)
     if ! zcompile "$output_file" "$source_file" 2>/dev/null; then
         zdot_error "zdot_cache_compile_file: compilation failed for: $source_file"
@@ -181,6 +183,7 @@ _zdot_source_module() {
     if zdot_cache_is_enabled; then
         local compiled_path="${module_file}.zwc"
         if zdot_is_newer_or_missing "$module_file" "$compiled_path"; then
+            zdot_verbose "zdot: cache: recompiling module: $module"
             zdot_cache_compile_file "$module_file"
         fi
     fi
@@ -188,6 +191,7 @@ _zdot_source_module() {
     _ZDOT_CURRENT_MODULE_DIR="${module_file:h}"
     _ZDOT_CURRENT_MODULE_NAME="$module"
 
+    zdot_verbose "zdot: cache: sourcing module: $module"
     # Source the .zsh file — zsh automatically uses .zwc if present
     source "$module_file"
 
@@ -241,6 +245,7 @@ zdot_cache_save_plan() {
         fi
     fi
 
+    zdot_verbose "zdot: cache: saving plan: ${plan_file:t}"
     # Write the execution plan to file
     {
         echo "# zdot execution plan cache v${_ZDOT_CACHE_VERSION}"
@@ -304,6 +309,7 @@ zdot_cache_save_plan() {
         return 1
     fi
 
+    zdot_verbose "zdot: cache: plan compiled ok"
     return 0
 }
 
@@ -312,6 +318,7 @@ zdot_cache_save_plan() {
 # Returns: 0 on success, 1 on error
 load_cache() {
     if [[ $_ZDOT_CACHE_ENABLED -eq 0 ]]; then
+        zdot_verbose "zdot: cache: disabled, skipping plan load"
         return 1
     fi
 
@@ -323,6 +330,7 @@ load_cache() {
 
     # Check if plan file exists
     if [[ ! -f "$plan_file" ]]; then
+        zdot_verbose "zdot: cache: no plan file: $plan_file"
         return 1
     fi
 
@@ -330,6 +338,7 @@ load_cache() {
     local cached_version
     cached_version=$(head -n 1 "$plan_file" | grep -oE 'v[0-9]+' | sed 's/v//')
     if [[ "$cached_version" != "$_ZDOT_CACHE_VERSION" ]]; then
+        zdot_verbose "zdot: cache: version mismatch (cached: $cached_version, current: $_ZDOT_CACHE_VERSION)"
         zdot_error "load_cache: cache version mismatch (cached: $cached_version, current: $_ZDOT_CACHE_VERSION)"
         return 1
     fi
@@ -341,6 +350,7 @@ load_cache() {
 
     for core_file in "$core_dir"/*.zsh(N); do
         if [[ -f "$core_file" ]] && zdot_is_newer_or_missing "$core_file" "$plan_file"; then
+            zdot_verbose "zdot: cache: invalidated — core file newer: ${core_file:t}"
             return 1
         fi
     done
@@ -349,17 +359,20 @@ load_cache() {
         local module_name="${module_dir:t}"
         local module_file="${module_dir}/${module_name}.zsh"
         if [[ -f "$module_file" ]] && zdot_is_newer_or_missing "$module_file" "$plan_file"; then
+            zdot_verbose "zdot: cache: invalidated — module newer: $module_name"
             return 1
         fi
     done
 
     local zdot_entry="${_ZDOT_BASE_DIR}/zdot.zsh"
     if [[ -f "$zdot_entry" ]] && zdot_is_newer_or_missing "$zdot_entry" "$plan_file"; then
+        zdot_verbose "zdot: cache: invalidated — zdot.zsh modified"
         return 1
     fi
 
     local zshrc_file="${ZDOTDIR:-$HOME}/.zshrc"
     if [[ -f "$zshrc_file" ]] && zdot_is_newer_or_missing "$zshrc_file" "$plan_file"; then
+        zdot_verbose "zdot: cache: invalidated — .zshrc modified"
         return 1
     fi
 
@@ -367,6 +380,7 @@ load_cache() {
     # runs, zdot_plugins_have_changed should be available,
     # this check is just defensive.
     if (( ${+functions[zdot_plugins_have_changed]} )) && zdot_plugins_have_changed; then
+        zdot_verbose "zdot: cache: invalidated — plugins changed"
         typeset -g _ZDOT_FORCE_COMPDUMP_REFRESH=1
         return 1
     fi
@@ -378,10 +392,12 @@ load_cache() {
     # An empty plan can be written when hooks aren't registered yet at save
     # time; treat it as a cache miss so the plan gets rebuilt.
     if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
+        zdot_verbose "zdot: cache: plan empty, forcing rebuild"
         zdot_error "load_cache: cached plan is empty, forcing rebuild"
         return 1
     fi
 
+    zdot_verbose "zdot: cache: plan loaded (${#_ZDOT_EXECUTION_PLAN} hooks): ${plan_file:t}"
     return 0
 }
 

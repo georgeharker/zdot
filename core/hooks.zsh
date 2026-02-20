@@ -391,12 +391,14 @@ _zdot_execute_hook() {
     
     # Execute the hook function
     if typeset -f "$func" > /dev/null; then
+        zdot_verbose "zdot: hooks: run: $func"
         if $func; then
             _ZDOT_HOOKS_EXECUTED[$hook_id]=1
             
             # Mark phase as provided
             if [[ -n $provides ]]; then
                 _ZDOT_PHASES_PROVIDED[$provides]=1
+                zdot_verbose "zdot: hooks: provided: $provides"
                 
                 # Call stop callback if provided
                 if [[ -n $stop_callback ]] && $stop_callback "$provides"; then
@@ -425,6 +427,7 @@ zdot_execute_all() {
     local executed=0
     local failed=0
     
+    zdot_verbose "zdot: hooks: executing plan (${#_ZDOT_EXECUTION_PLAN} hooks)"
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         # Skip if this hook was already executed
         if [[ -n ${_ZDOT_HOOKS_EXECUTED[$hook_id]} ]]; then
@@ -445,7 +448,8 @@ zdot_execute_all() {
         zdot_error "zdot_execute_all: Completed with $failed failed hook(s)"
         return 1
     fi
-    
+
+    zdot_verbose "zdot: hooks: done ($executed executed)"
     return 0
 }
 
@@ -467,13 +471,14 @@ zdot_run_until() {
     
     # Check if target phase has already been provided
     if [[ -n ${_ZDOT_PHASES_PROVIDED[$target_phase]} ]]; then
+        zdot_verbose "zdot: hooks: phase already provided: $target_phase"
         return 0
     fi
-    
+
     local executed=0
     local failed=0
-    
-    # Callback to check if we've reached the target phase
+
+    zdot_verbose "zdot: hooks: running until: $target_phase"
     _zdot_check_target_phase() {
         [[ $1 == $target_phase ]]
     }
@@ -492,6 +497,7 @@ zdot_run_until() {
         elif [[ $result -eq 2 ]]; then
             # Early termination - target phase reached
             (( executed++ ))
+            zdot_verbose "zdot: hooks: reached phase: $target_phase ($executed executed)"
             return 0
         else
             (( failed++ ))

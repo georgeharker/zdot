@@ -1,8 +1,13 @@
 #!/bin/zsh
 
 # Global quiet mode setting - defaults to not quiet
+# These can be overridden via zstyle before zdot.zsh is sourced:
+#   zstyle ':zdot:logging' quiet   true
+#   zstyle ':zdot:logging' verbose true
 zdot_quiet_mode=false
 zdot_verbose_mode=false
+zstyle -t ':zdot:logging' quiet   && zdot_quiet_mode=true
+zstyle -t ':zdot:logging' verbose && zdot_verbose_mode=true
 
 function zdot_cleanup_logging(){
     # Unset variables
