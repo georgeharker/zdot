@@ -6,7 +6,8 @@ zdot_module_dir
 
 zdot_info ""
 zdot_info "Functions directory would be:"
-zdot_info "$(zdot_module_dir)/functions"
+zdot_module_dir
+zdot_info "${REPLY}/functions"
 
 zdot_info ""
 zdot_info "Calling zsh_module_autoload_funcs..."

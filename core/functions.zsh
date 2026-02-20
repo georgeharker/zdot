@@ -51,7 +51,8 @@ zdot_cache_compile_functions() {
 # Note: Functions are lazy loaded (registered with autoload -Uz)
 # They will only be sourced when first called.
 zdot_module_autoload_funcs() {
-    local module_dir=$(zdot_module_dir)
+    zdot_module_dir
+    local module_dir="$REPLY"
     local func_dir="${module_dir}/functions"
 
     if [[ ! -d "$func_dir" ]]; then
@@ -90,7 +91,8 @@ zdot_module_autoload_funcs() {
 # Note: Functions are lazy loaded (registered with autoload -Uz)
 # They will only be sourced when first called.
 zdot_autoload_global_funcs() {
-    local functions_dir="$(_zdot_functions_dir)"
+    _zdot_functions_dir
+    local functions_dir="$REPLY"
 
     if [[ ! -d "$functions_dir" ]]; then
         return 0

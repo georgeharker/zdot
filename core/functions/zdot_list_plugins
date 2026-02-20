@@ -24,7 +24,8 @@ zdot_list_plugins() {
             zdot_report "Loaded Plugins"
             local spec plugin_path
             for spec in ${(k)_ZDOT_PLUGINS_LOADED}; do
-                plugin_path=$(zdot_plugin_path $spec)
+                zdot_plugin_path "$spec"
+                local plugin_path=$REPLY
                 if [[ -d "$plugin_path" ]]; then
                     zdot_info "  $spec (loaded)"
                 else
@@ -71,7 +72,8 @@ zdot_list_plugins() {
                 version=${_ZDOT_PLUGINS_VERSION[$spec]:-}
                 local loaded=""
                 [[ -n "${_ZDOT_PLUGINS_LOADED[$spec]}" ]] && loaded=" [loaded]"
-                plugin_path=$(zdot_plugin_path $spec)
+                zdot_plugin_path "$spec"
+                local plugin_path=$REPLY
                 local ver_str=""
                 [[ -n "$version" ]] && ver_str="@$version"
                 if [[ -d "$plugin_path" ]]; then

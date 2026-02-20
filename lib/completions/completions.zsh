@@ -8,8 +8,8 @@ zdot_module_autoload_funcs
 # Module initialization - Phase 1: Setup fpath and register file completions
 _completions_init() {
     # Add completion directories to fpath
-    local completions_dir="$(_zdot_completions_dir)"
-    
+    local completions_dir=$(zdot_get_completions_dir)
+
     # Add global completions directory to fpath
     if [[ -d "$completions_dir" ]]; then
         fpath=("$completions_dir" $fpath)

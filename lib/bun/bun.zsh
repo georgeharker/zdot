@@ -13,4 +13,4 @@ zdot_hook_register _bun_init interactive noninteractive \
     --provides bun-ready
 
 # Register completions
-zdot_completion_register_file "bub" "bun completions zsh > $(_zdot_completions_dir)/_bun"
+zdot_completion_register_file "bub" "bun completions zsh > $(zdot_get_completions_dir)/_bun"

@@ -12,5 +12,5 @@ zdot_hook_register _rust_init interactive noninteractive \
     --provides rust-ready
 
 # Register completions
-zdot_completion_register_file "rustup" "rustup completions zsh > $(_zdot_completions_dir)/_rustup"
-zdot_completion_register_file "cargo" "rustup completions zsh cargo > $(_zdot_completions_dir)/_cargo"
+zdot_completion_register_file "rustup" "rustup completions zsh > $(zdot_get_completions_dir)/_rustup"
+zdot_completion_register_file "cargo" "rustup completions zsh cargo > $(zdot_get_completions_dir)/_cargo"

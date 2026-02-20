@@ -139,7 +139,8 @@ zdot_compdump_meta_init() {
 # Uses _zdot_completions_dir() (defined in core/core.zsh) — bundle-agnostic.
 # Called at source time so the dir is ready before compinit runs.
 {
-    local _zdot_comp_dir="$(_zdot_completions_dir)"
+    _zdot_completions_dir
+    local _zdot_comp_dir="$REPLY"
     [[ -d "$_zdot_comp_dir" ]] || mkdir -p "$_zdot_comp_dir"
     (( ${fpath[(Ie)"$_zdot_comp_dir"]} )) || fpath=("$_zdot_comp_dir" $fpath)
 }

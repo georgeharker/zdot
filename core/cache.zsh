@@ -216,7 +216,7 @@ _zdot_cache_context_suffix() {
         login_str="login"
     fi
 
-    echo "${interactive_str}_${login_str}"
+    REPLY="${interactive_str}_${login_str}"
 }
 
 # Serialize the execution plan to cache
@@ -228,7 +228,8 @@ zdot_cache_save_plan() {
     fi
 
     # Generate context-specific filename
-    local context_suffix="$(_zdot_cache_context_suffix)"
+    _zdot_cache_context_suffix
+    local context_suffix="$REPLY"
     local plan_file="${_ZDOT_CACHE_DIR}/plans/execution_plan_${context_suffix}.zsh"
 
     # Create output directory if needed
@@ -315,7 +316,8 @@ load_cache() {
     fi
 
     # Generate context-specific filename
-    local context_suffix="$(_zdot_cache_context_suffix)"
+    _zdot_cache_context_suffix
+    local context_suffix="$REPLY"
     local plan_file="${_ZDOT_CACHE_DIR}/plans/execution_plan_${context_suffix}.zsh"
     local compiled_plan="${plan_file}.zwc"
 
@@ -448,7 +450,8 @@ zdot_cache_stats() {
     fi
 
     # Get current shell context
-    local context_suffix="$(_zdot_cache_context_suffix)"
+    _zdot_cache_context_suffix
+    local context_suffix="$REPLY"
     
     # Count co-located .zwc files in core/ and lib/
     local core_count=0

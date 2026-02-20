@@ -4,7 +4,7 @@
 zdot_clean_plugins() {
     local dry_run=0
     local remove_unused=0
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --dry-run) dry_run=1 ;;
@@ -18,18 +18,25 @@ zdot_clean_plugins() {
         esac
         shift
     done
-    
+
     local cache_dir
     zstyle -s ':zdot:plugins' directory cache_dir
     cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
     local cache=$cache_dir
-    
-    # Always keep these
+
+    # -------------------------------------------------------------------------
+    # 1. Remove unused top-level namespace dirs (--remove-unused mode)
+    # -------------------------------------------------------------------------
+    if [[ $remove_unused -eq 0 && $dry_run -eq 0 ]]; then
+        return 0
+    fi
+
+    # Always keep these top-level namespace dirs
     local -A keep
     keep[ohmyzsh]=1
     keep[romkatv]=1
-    
-    # Build set of declared plugins
+
+    # Build keep-set from declared plugin specs
     local spec
     for spec in $_ZDOT_PLUGINS_ORDER; do
         if [[ $spec == omz:* ]]; then
@@ -38,24 +45,51 @@ zdot_clean_plugins() {
             keep[${spec%%/*}]=1
         fi
     done
-    
+
+    # Also keep repos declared as bundle dependencies
+    local repo
+    for repo in $_ZDOT_BUNDLE_REPOS; do
+        keep[${repo%%/*}]=1
+    done
+
     local removed=0
     local dir
-    for dir in "$cache"/*; do
+    for dir in "$cache"/*(N); do
         [[ ! -d "$dir" ]] && continue
-        
+
         local name=${dir:t}
+
+        # Dirs with a colon in the name are corrupt/stale artifacts (e.g. omz:plugins/).
+        # They can never be valid user/repo namespace dirs, so remove them directly.
+        if [[ "$name" == *:* ]]; then
+            zdot_warn "zdot_clean_plugins: removing corrupt cache entry: $name"
+            rm -rf "$dir"
+            continue
+        fi
+
         [[ -n "${keep[$name]}" ]] && continue
-        
+
         if [[ $dry_run -eq 1 ]]; then
             zdot_info "Would remove: $name"
         elif [[ $remove_unused -eq 1 ]]; then
-            zdot_action "Removing: $name"
-            rm -rf "$dir"
-            ((removed++))
+            # Use zdot_plugin_remove for each user/repo inside the namespace dir
+            # so the git-safety guard and sentinel invalidation are applied.
+            local subdir
+            for subdir in "$dir"/*(N); do
+                [[ ! -d "$subdir" ]] && continue
+                local sub_spec="${name}/${subdir:t}"
+                zdot_action "Removing: ${sub_spec}"
+                if zdot_plugin_remove "$sub_spec"; then
+                    ((removed++))
+                fi
+            done
+            # If the namespace dir is now empty, remove it too
+            if [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+                rm -rf "$dir"
+            fi
         fi
     done
-    
+
     if [[ $dry_run -eq 1 ]]; then
         zdot_info "(dry run - no changes made)"
     elif [[ $remove_unused -eq 1 ]]; then

@@ -13,7 +13,11 @@
 zdot_completion_register_file() {
     local cmd="$1"
     local gen_cmd="$2"
-    local dest_dir="${3:-$(_zdot_completions_dir)}"  # Lazy eval default
+    local dest_dir="$3"
+    if [[ -z "$dest_dir" ]]; then
+        _zdot_completions_dir
+        dest_dir="$REPLY"
+    fi
 
     if [[ -z "$cmd" || -z "$gen_cmd" ]]; then
         zdot_error "zdot_completion_register_file: command and generate-command required"

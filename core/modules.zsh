@@ -7,21 +7,21 @@
 # ============================================================================
 
 # Get the directory of the calling module
-# Usage: local mydir=$(zdot_module_dir)
+# Usage: zdot_module_dir; local mydir="$REPLY"
 # Must be called from within a module file
 # Uses _ZDOT_CURRENT_MODULE_DIR if set (during module loading)
 zdot_module_dir() {
     if [[ -n "$_ZDOT_CURRENT_MODULE_DIR" ]]; then
-        echo "$_ZDOT_CURRENT_MODULE_DIR"
+        REPLY="$_ZDOT_CURRENT_MODULE_DIR"
     else
         # Fallback: Use ${(%):-%x} to get the path of the sourced file
         local module_file="${${(%):-%x}:A}"
-        echo "${module_file:h}"
+        REPLY="${module_file:h}"
     fi
 }
 
 # Get the path to a module's main file
-# Usage: zdot_module_path <module-name>
+# Usage: zdot_module_path <module-name>; local path="$REPLY"
 zdot_module_path() {
     local module="$1"
 
@@ -30,7 +30,7 @@ zdot_module_path() {
         return 1
     fi
 
-    echo "${_ZDOT_LIB_DIR}/${module}/${module}.zsh"
+    REPLY="${_ZDOT_LIB_DIR}/${module}/${module}.zsh"
 }
 
 # Internal: load a module from an explicit file path.
@@ -70,11 +70,11 @@ zdot_module_list() {
 # ============================================================================
 
 # Resolve the user modules directory from zstyle or cached global
-# Usage: _zdot_user_modules_dir
-# Prints the directory path, or prints nothing and returns 1 if unset
+# Usage: _zdot_user_modules_dir; local dir="$REPLY"
+# Sets REPLY to the directory path, or returns 1 if unset
 _zdot_user_modules_dir() {
     if [[ -n "$_ZDOT_USER_MODULES_DIR" ]]; then
-        echo "$_ZDOT_USER_MODULES_DIR"
+        REPLY="$_ZDOT_USER_MODULES_DIR"
         return 0
     fi
 
@@ -83,7 +83,7 @@ _zdot_user_modules_dir() {
     if [[ -n "$dir" ]]; then
         dir="${~dir}"
         _ZDOT_USER_MODULES_DIR="$dir"
-        echo "$dir"
+        REPLY="$dir"
         return 0
     fi
 
@@ -101,12 +101,13 @@ zdot_user_module_path() {
     fi
 
     local user_dir
-    if ! user_dir="$(_zdot_user_modules_dir)"; then
+    if ! _zdot_user_modules_dir; then
         zdot_error "zdot_user_module_path: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
         return 1
     fi
+    user_dir="$REPLY"
 
-    echo "${user_dir}/${module}/${module}.zsh"
+    REPLY="${user_dir}/${module}/${module}.zsh"
 }
 
 # Load a user module by name
@@ -115,10 +116,11 @@ zdot_user_module_load() {
     local module="$1"
     [[ -z "$module" ]] && { zdot_error "zdot_user_module_load: module name required"; return 1 }
     local user_dir
-    if ! user_dir="$(_zdot_user_modules_dir)"; then
+    if ! _zdot_user_modules_dir; then
         zdot_error "zdot_user_module_load: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
         return 1
     fi
+    user_dir="$REPLY"
     _zdot_load_module_file "$module" "${user_dir}/${module}/${module}.zsh" || return 1
     _ZDOT_USER_MODULES_LOADED[$module]=1
 }

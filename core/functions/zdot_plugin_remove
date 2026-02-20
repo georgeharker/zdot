@@ -1,0 +1,54 @@
+#!/usr/bin/env zsh
+# zdot_plugin_remove: Remove a previously-cloned plugin repo from disk.
+# Usage: zdot_plugin_remove <user/repo>
+# Resolves the destination via _ZDOT_PLUGINS_CACHE.  Verifies the directory
+# looks like a git repo (.git present) before running rm -rf, so that we never
+# blindly delete an arbitrary path.  Also removes the sentinel file so that
+# zdot_plugins_clone_all re-evaluates the full plugin set on next startup.
+#
+# Aborts with a warning if the repo has uncommitted or staged changes.
+#
+# Not called automatically — opt-in via: zstyle ':zdot:plugins' cleanup true
+
+zdot_plugin_remove() {
+    local spec=$1
+    if [[ -z "$spec" ]]; then
+        zdot_error "zdot_plugin_remove: plugin spec required"
+        return 1
+    fi
+
+    _zdot_plugins_init
+    local dest="${_ZDOT_PLUGINS_CACHE}/${spec}"
+
+    if [[ ! -d "$dest" ]]; then
+        return 0
+    fi
+
+    if [[ ! -e "$dest/.git" ]]; then
+        if [[ -d "$dest" ]] && [[ -z "$(ls -A "$dest")" ]]; then
+            zdot_info "zdot_plugin_remove: $dest is empty and has no .git, removing"
+            rm -rf "$dest"
+            return 0
+        fi
+        zdot_warn "zdot_plugin_remove: $dest does not look like a git repo, skipping"
+        return 1
+    fi
+
+    # Pending-changes guard: abort if the repo has uncommitted work
+    local _git_status
+    _git_status=$(git -C "$dest" status --porcelain 2>/dev/null)
+    if [[ -n "$_git_status" ]]; then
+        zdot_warn "zdot_plugin_remove: $spec has uncommitted changes, skipping removal"
+        zdot_warn "  Commit or stash changes in $dest before running zdot_clean_plugins."
+        return 1
+    fi
+
+    print "zdot-plugins: removing $spec..." >&2
+    rm -rf "$dest"
+
+    # Invalidate sentinel so zdot_plugins_clone_all re-evaluates on next startup
+    local sentinel="${_ZDOT_PLUGINS_CACHE}/.cloned"
+    [[ -f "$sentinel" ]] && rm -f "$sentinel"
+
+    return 0
+}

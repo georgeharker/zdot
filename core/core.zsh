@@ -25,13 +25,20 @@ unset _zdot_this_script_file _zdot_base_dir
 
 # Get functions directory (respects current XDG_CONFIG_HOME)
 _zdot_functions_dir() {
-    echo "${XDG_CONFIG_HOME:-${HOME}/.config}/zsh/functions"
+    REPLY="${XDG_CONFIG_HOME:-${HOME}/.config}/zsh/functions"
 }
 
 # Get completions directory (respects current XDG_CACHE_HOME)
 # Generated completions are cache data, not configuration
 _zdot_completions_dir() {
-    echo "${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/completions"
+    REPLY="${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/completions"
+}
+
+# Public stdout wrapper — for use in lib/ callsites where subshells are acceptable.
+# Usage: local dir="$(zdot_get_completions_dir)"
+zdot_get_completions_dir() {
+    _zdot_completions_dir
+    print -- "$REPLY"
 }
 
 # ============================================================================

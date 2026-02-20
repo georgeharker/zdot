@@ -12,9 +12,9 @@
 # ============================================================================
 
 local _zdot_pz_enabled
-zstyle -b ':zdot:plugins' pz _zdot_pz_enabled || _zdot_pz_enabled=true
+zstyle -b ':zdot:plugins' pz _zdot_pz_enabled
 
-if [[ "$_zdot_pz_enabled" == true ]]; then
+if [[ "$_zdot_pz_enabled" == yes ]]; then
     # Ensure cache dir is initialized before we use _ZDOT_PLUGINS_CACHE
     _zdot_plugins_init
 
@@ -39,7 +39,7 @@ zdot_bundle_pz_match() {
 zdot_bundle_pz_path() {
     local spec=$1
     local relpath=${spec#pz:}   # e.g. "modules/git"
-    print "${ZPREZTODIR}/${relpath}"
+    REPLY="${ZPREZTODIR}/${relpath}"
 }
 
 # Clone: no-op — Prezto is cloned at file-source time above.
@@ -67,8 +67,11 @@ zdot_bundle_pz_load() {
 # Plugin Bundle API
 # ============================================================================
 
-# Register this bundle handler with the registry
-zdot_bundle_register pz
+# Register this bundle handler with the registry — only when enabled
+if [[ "$_zdot_pz_enabled" == yes ]]; then
+    zdot_bundle_register pz
+    zdot_use_bundle sorin-ionescu/prezto
+fi
 
 # ============================================================================
 # Helpers
@@ -86,7 +89,7 @@ zdot_use_pz() {
 # ============================================================================
 
 _zdot_pz_load_init() {
-    [[ "$_zdot_pz_enabled" == true ]] || return 0
+    [[ "$_zdot_pz_enabled" == yes ]] || return 0
 
     # Create a minimal .zpreztorc stub if none exists.
     # Prezto's init.zsh unconditionally sources ${ZDOTDIR:-$HOME}/.zpreztorc.
@@ -110,6 +113,8 @@ _zdot_pz_load_init() {
     fi
 }
 
-zdot_hook_register _zdot_pz_load_init interactive noninteractive \
-    --requires plugins-cloned \
-    --provides pz-init-loaded
+if [[ "$_zdot_pz_enabled" == yes ]]; then
+    zdot_hook_register _zdot_pz_load_init interactive noninteractive \
+        --requires plugins-cloned \
+        --provides pz-init-loaded
+fi

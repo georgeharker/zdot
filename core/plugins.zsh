@@ -15,6 +15,7 @@ typeset -gA _ZDOT_PLUGINS_FILE   # plugin spec -> *.plugin.zsh path (populated a
 typeset -g  _ZDOT_PLUGINS_CACHE  # cache directory
 typeset -g  _ZDOT_PLUGINS_INITIALIZED=0
 typeset -ga _ZDOT_BUNDLE_HANDLERS # Ordered list of registered bundle handler names
+typeset -ga _ZDOT_BUNDLE_REPOS    # Repos cloned as bundle dependencies (not user plugins)
 
 # ============================================================================
 # Plugin Rev Stamp
@@ -96,13 +97,13 @@ zdot_bundle_register() {
 }
 
 # Find the registered bundle handler that owns <spec>.
-# Prints the handler name; returns 1 if none found.
+# Sets $REPLY to the handler name; returns 1 if none found.
 _zdot_bundle_handler_for() {
     local spec=$1
     local name
     for name in $_ZDOT_BUNDLE_HANDLERS; do
         if zdot_bundle_${name}_match "$spec" 2>/dev/null; then
-            print "$name"
+            REPLY=$name
             return 0
         fi
     done
@@ -157,6 +158,16 @@ zdot_use_path() {
     zdot_use "$1" path
 }
 
+# Register a repo cloned as a bundle dependency (not a user plugin).
+# Prevents zdot_clean_plugins from treating it as orphaned.
+zdot_use_bundle() {
+    local repo=$1
+    # Dedup: only append if not already present
+    if (( ! ${_ZDOT_BUNDLE_REPOS[(Ie)$repo]} )); then
+        _ZDOT_BUNDLE_REPOS+=( "$repo" )
+    fi
+}
+
 # ============================================================================
 # Path Resolution
 # ============================================================================
@@ -167,12 +178,12 @@ zdot_plugin_path() {
 
     # Delegate to bundle handler if one is registered for this spec
     local handler
-    handler=$(_zdot_bundle_handler_for "$spec") && {
+    _zdot_bundle_handler_for "$spec" && handler=$REPLY && {
         zdot_bundle_${handler}_path "$spec"
         return
     }
 
-    print "$cache/$spec"
+    REPLY="$cache/$spec"
 }
 
 # ============================================================================
@@ -185,7 +196,7 @@ zdot_plugin_clone() {
 
     # Delegate to bundle handler if one is registered for this spec
     local handler
-    handler=$(_zdot_bundle_handler_for "$spec") && {
+    _zdot_bundle_handler_for "$spec" && handler=$REPLY && {
         zdot_bundle_${handler}_clone "$spec"
         # Path is populated by the bundle handler's clone function
         return $?
@@ -286,20 +297,27 @@ zdot_load_plugin() {
 
     # Delegate to bundle handler if one is registered for this spec
     local handler
-    handler=$(_zdot_bundle_handler_for "$spec") && {
+    _zdot_bundle_handler_for "$spec" && handler=$REPLY && {
         zdot_bundle_${handler}_load "$spec"
         _ZDOT_PLUGINS_LOADED[$spec]=1
         return 0
     }
 
-    local plugin_path=$(zdot_plugin_path $spec)
-    
+    zdot_plugin_path "$spec"
+    local plugin_path=$REPLY
+
+    if [[ -z "$plugin_path" ]]; then
+        zdot_warn "zdot_load_plugin: could not resolve path for $spec"
+        return 1
+    fi
+
     local plugin_file
     local kind=${_ZDOT_PLUGINS[$spec]:-normal}
-    
+
     # Find plugin file
-    plugin_file=$(ls $plugin_path/*.plugin.zsh(N) 2>/dev/null | head -1)
-    
+    local -a _plugin_files=( "$plugin_path"/*.plugin.zsh(N) )
+    plugin_file=${_plugin_files[1]}
+
     if [[ -z "$plugin_file" ]]; then
         zdot_warn "zdot_load_plugin: no plugin file for $spec"
         return 1
@@ -315,9 +333,9 @@ zdot_load_plugin() {
     _ZDOT_PLUGINS_LOADED[$spec]=1
     
     # Optionally compile plugin to .zwc for faster loading
-    local compile_plugins
-    zstyle -b ':zdot:plugins' compile compile_plugins || compile_plugins=false
-    if [[ "$compile_plugins" == true ]]; then
+    local compile_plugins=no
+    zstyle -b ':zdot:plugins' compile compile_plugins
+    if [[ "$compile_plugins" == yes ]]; then
         zdot_plugin_compile "$spec"
     fi
     
@@ -328,8 +346,9 @@ zdot_load_plugin() {
 # Uses zdot_cache_compile_file for each file
 zdot_plugin_compile() {
     local spec=$1
-    local plugin_path=$(zdot_plugin_path $spec)
-    
+    zdot_plugin_path "$spec"
+    local plugin_path=$REPLY
+
     [[ -d "$plugin_path" ]] || return 1
     
     local -a zsh_files
@@ -405,10 +424,7 @@ zdot_load_deferred_plugins() {
 
 _zdot_plugins_init
 
-local _zdot_defer_enabled
-zstyle -b ':zdot:plugins' defer _zdot_defer_enabled || _zdot_defer_enabled=true
-
-if [[ "$_zdot_defer_enabled" == true ]]; then
+if zstyle -T ':zdot:plugins' defer; then
     # Register zsh-defer so it shows in plugin list
     zdot_use romkatv/zsh-defer
     

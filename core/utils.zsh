@@ -52,7 +52,8 @@ zdot_is_newer_or_missing() {
 # Usage: zdot_module_source <relative-path>
 zdot_module_source() {
     local rel_path="$1"
-    local module_dir=$(zdot_module_dir)
+    zdot_module_dir
+    local module_dir="$REPLY"
 
     if [[ -z "$rel_path" ]]; then
         zdot_error "zdot_module_source: relative path required"
