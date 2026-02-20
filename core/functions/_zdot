@@ -1,3 +1,5 @@
+#compdef zdot
+
 function _zdot() {
     local -a nouns
     nouns=(

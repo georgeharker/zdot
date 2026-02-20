@@ -58,8 +58,13 @@ fi
 # Autoload user functions
 zdot_autoload_global_funcs
 
-# Wire zdot completion — compdef stub queues this until after compinit runs
-compdef _zdot zdot
+# Explicitly autoload _zdot as a shell function.
+# The loop above skips _* files because compinit normally owns completion
+# function registration. However, compdef only maps a command to a completion
+# function name — it does NOT autoload the function itself. Without an explicit
+# autoload here, zsh cannot find _zdot when tab-completion fires.
+# (_zdot has a #compdef zdot header so compinit handles the mapping itself.)
+autoload -Uz _zdot
 
 unset zdot_core_dir core_functions_dir
 
