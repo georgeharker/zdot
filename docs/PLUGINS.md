@@ -47,6 +47,32 @@ zdot_use omz:lib          # Declare OMZ lib spec (libs are lazy-loaded via stubs
 zdot_use omz:plugins/nvm  # NVM with OMZ integration
 ```
 
+### Prezto Modules
+
+Access Prezto modules with the `pz:` prefix, or use the convenience wrapper:
+
+```zsh
+zdot_use pz:modules/git        # Load the Prezto git module
+zdot_use pz:modules/syntax-highlighting
+zdot_use pz:modules/autosuggestions
+
+# Convenience wrapper (equivalent to the above)
+zdot_use_pz git
+zdot_use_pz syntax-highlighting
+zdot_use_pz autosuggestions
+```
+
+Prezto is cloned automatically (with submodules) on first shell startup.
+A minimal `.zpreztorc` stub is created at `${ZDOTDIR:-$HOME}/.zpreztorc` if
+none exists, so that Prezto does not auto-load modules — zdot handles module
+loading exclusively via `zdot_use pz:modules/<name>`.
+
+To disable the Prezto bundle entirely:
+
+```zsh
+zstyle ':zdot:plugins' pz false
+```
+
 ## Plugin Management Commands
 
 ### List Plugins
