@@ -353,6 +353,11 @@ load_cache() {
         fi
     done
 
+    local zdot_entry="${_ZDOT_BASE_DIR}/zdot.zsh"
+    if [[ -f "$zdot_entry" ]] && zdot_is_newer_or_missing "$zdot_entry" "$plan_file"; then
+        return 1
+    fi
+
     local zshrc_file="${ZDOTDIR:-$HOME}/.zshrc"
     if [[ -f "$zshrc_file" ]] && zdot_is_newer_or_missing "${zshrc_file:A}" "$plan_file"; then
         return 1
