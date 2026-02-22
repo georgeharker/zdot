@@ -62,10 +62,11 @@ This document provides technical implementation details for the zdot system. It 
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. Manual Phase Triggering (zdot_provide_phase)             │
-│    - User triggers phase (e.g., "finalize")                  │
-│    - Execute waiting hooks                                   │
-│    - Mark phase as provided                                  │
+│ 6. Deferred Hook Dispatch (_zdot_run_deferred_phase_check)  │
+│    - Called once after zdot_execute_all completes            │
+│    - Checks each deferred hook's required phases             │
+│    - Dispatches hooks whose dependencies are now satisfied   │
+│    - Re-scans after each deferred hook completes (chain)     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -89,7 +90,7 @@ zdot/
 │   ├── cache.zsh                    # Cache invalidation & compilation
 │   ├── completions.zsh              # Completion helpers (compdump management)
 │   ├── functions.zsh                # Function autoloading setup
-│   ├── hooks.zsh                    # Hook system (528 lines)
+│   ├── hooks.zsh                    # Hook system (943 lines)
 │   ├── logging.zsh                  # Logging functions (56 lines)
 │   ├── modules.zsh                  # Module loading pipeline (zdot_module_load, zdot_user_module_load, _zdot_load_module_file)
 │   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer)
@@ -138,9 +139,12 @@ fi
 **Responsibilities:**
 - Global data structure initialization
 - Hook registration (`zdot_hook_register`)
+- Execution order constraints (`zdot_defer_order`)
 - Dependency resolution (`zdot_build_execution_plan`)
 - Hook execution (`zdot_execute_all`)
-- Phase management (`zdot_promise_phase`, `zdot_provide_phase`)
+- Deferred hook dispatch (`_zdot_run_deferred_phase_check`)
+- Phase management (`zdot_promise_phase`)
+- Intentional deferral acknowledgement (`zdot_accept_deferred`)
 - Module loading (`zdot_load_modules`)
 
 **Key Functions:**
@@ -151,10 +155,10 @@ Registers a hook with the system.
 
 **Algorithm:**
 1. Parse arguments (function name, contexts, flags)
-2. Generate unique hook ID: `<function>@<contexts>`
+2. Generate unique hook ID: `hook_N` (sequential integer, e.g. `hook_1`, `hook_2`)
 3. Store metadata in global associative arrays
 4. If `--on-demand`, populate `_ZDOT_ON_DEMAND_PHASES`
-5. If `--provides`, create reverse mapping in `_ZDOT_PHASE_PROVIDERS`
+5. If `--provides`, create reverse mapping in `_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` (key: `"context:phase"`)
 
 **Validation:**
 - Checks for duplicate hook IDs
@@ -165,21 +169,20 @@ Registers a hook with the system.
 
 Builds ordered execution plan via topological sort.
 
-**Algorithm:**
-1. Initialize empty execution plan and tracking sets
-2. For each registered hook:
-   - Skip if already processed
-   - Skip if contexts don't match current shell
-   - Recursively process dependencies via `_resolve_hook_dependencies()`
-   - Add to execution plan if all deps satisfied
-3. Store result in `_ZDOT_EXECUTION_PLAN` array
+**Algorithm** (Kahn's BFS topological sort):
+1. Build a dependency graph: for each registered hook, add an edge from each dependency hook to it
+2. Compute in-degree for every hook (count of dependencies not yet satisfied)
+3. Seed a queue with all hooks whose in-degree is zero (no unmet dependencies)
+4. While the queue is non-empty:
+   - Dequeue a hook; add it to `_ZDOT_EXECUTION_PLAN` (filtering by current context)
+   - For each hook that depended on the dequeued hook, decrement its in-degree; if it reaches zero, enqueue it
+5. If any hooks remain with non-zero in-degree, a cycle exists (circular dependency error)
 
-**Dependency Resolution** (`_resolve_hook_dependencies`, lines 200-271):
-- Recursive depth-first search
-- Detects circular dependencies
-- Handles optional vs required hooks
-- Respects promised phases
-- Skips hooks with unsatisfiable dependencies
+**Dependency Resolution:**
+- Handled inline during graph traversal — no separate recursive function
+- Missing optional dependencies: hook is skipped gracefully
+- Missing required dependencies: warning is issued, hook excluded
+- On-demand phases: not validated during planning; hooks included unconditionally
 
 **Edge Cases:**
 - Circular dependency detection via recursion tracking
@@ -205,22 +208,6 @@ Executes hooks in planned order.
 - Each hook runs in current shell context
 - Hook return value determines success (0 = success)
 - Provided phases are immediately available for downstream hooks
-
-##### `zdot_provide_phase()` (lines 316-362)
-
-Manually triggers a phase and executes waiting hooks.
-
-**Algorithm:**
-1. Check if phase is already provided
-2. Look up hooks that provide this phase
-3. For each matching hook:
-   - Check context matches
-   - Check all dependencies are satisfied
-   - Execute hook function
-   - Mark as executed
-4. Mark phase as provided
-
-**Use Case**: Cleanup hooks that run on shell exit (e.g., `finalize` phase)
 
 #### core/logging.zsh (Logging System)
 
@@ -339,7 +326,7 @@ Lists all loaded user modules from `_ZDOT_USER_MODULES_LOADED`.
 
 **Requirement Validation** (lines 77-92):
 A requirement is **satisfiable** if ANY of:
-1. Provided by a hook (`_ZDOT_PHASE_PROVIDERS[$req]`)
+1. Provided by a hook (`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx:$req]` for each active context)
 2. Promised via `zdot_promise_phase()` (`_ZDOT_PHASES_PROMISED[$req]`)
 3. Marked as on-demand (`_ZDOT_ON_DEMAND_PHASES[$req]`)
 
@@ -374,35 +361,35 @@ On-demand Hooks:
 ```zsh
 # Hook ID → Function name
 typeset -gA _ZDOT_HOOKS
-# Example: _ZDOT_HOOKS["_brew_init@interactive noninteractive"]="_brew_init"
+# Example: _ZDOT_HOOKS["hook_1"]="_brew_init"
 
 # Hook ID → Context string (space-separated)
 typeset -gA _ZDOT_HOOK_CONTEXTS
-# Example: _ZDOT_HOOK_CONTEXTS["_brew_init@interactive noninteractive"]="interactive noninteractive"
+# Example: _ZDOT_HOOK_CONTEXTS["hook_1"]="interactive noninteractive"
 
 # Hook ID → Required phases (space-separated)
 typeset -gA _ZDOT_HOOK_REQUIRES
-# Example: _ZDOT_HOOK_REQUIRES["_brew_init@interactive noninteractive"]="xdg-configured"
+# Example: _ZDOT_HOOK_REQUIRES["hook_1"]="xdg-configured"
 
 # Hook ID → Provided phase (single value)
 typeset -gA _ZDOT_HOOK_PROVIDES
-# Example: _ZDOT_HOOK_PROVIDES["_brew_init@interactive noninteractive"]="brew-ready"
+# Example: _ZDOT_HOOK_PROVIDES["hook_1"]="brew-ready"
 
 # Hook ID → 1 if optional
 typeset -gA _ZDOT_HOOK_OPTIONAL
-# Example: _ZDOT_HOOK_OPTIONAL["_brew_init@interactive noninteractive"]=1
+# Example: _ZDOT_HOOK_OPTIONAL["hook_1"]=1
 
 # Hook ID → 1 if on-demand
 typeset -gA _ZDOT_HOOK_ON_DEMAND
-# Example: _ZDOT_HOOK_ON_DEMAND["_xdg_cleanup@interactive noninteractive"]=1
+# Example: _ZDOT_HOOK_ON_DEMAND["hook_2"]=1
 ```
 
 #### Phase Tracking
 
 ```zsh
-# Phase name → Hook ID (reverse lookup for providers)
-typeset -gA _ZDOT_PHASE_PROVIDERS
-# Example: _ZDOT_PHASE_PROVIDERS["brew-ready"]="_brew_init@interactive noninteractive"
+# "context:phase" → Hook ID (reverse lookup for providers, scoped per context)
+typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT
+# Example: _ZDOT_PHASE_PROVIDERS_BY_CONTEXT["interactive:brew-ready"]="hook_1"
 
 # Phase name → 1 if promised
 typeset -gA _ZDOT_PHASES_PROMISED
@@ -422,7 +409,7 @@ typeset -gA _ZDOT_ON_DEMAND_PHASES
 ```zsh
 # Hook ID → 1 when executed
 typeset -gA _ZDOT_HOOKS_EXECUTED
-# Example: _ZDOT_HOOKS_EXECUTED["_brew_init@interactive noninteractive"]=1
+# Example: _ZDOT_HOOKS_EXECUTED["hook_2"]=1
 
 # All loaded module names → 1 (both built-in and user modules; used for dedup)
 typeset -gA _ZDOT_MODULES_LOADED
@@ -446,7 +433,7 @@ typeset -g _ZDOT_CURRENT_MODULE_DIR    # e.g. "/Users/user/.config/zdot/lib/xdg"
 ```zsh
 # Ordered list of hook IDs to execute
 typeset -ga _ZDOT_EXECUTION_PLAN
-# Example: _ZDOT_EXECUTION_PLAN=("_xdg_init@interactive" "_brew_init@interactive" ...)
+# Example: _ZDOT_EXECUTION_PLAN=("hook_1" "hook_2" ...)
 ```
 
 ### Data Structure Design Decisions
@@ -456,10 +443,10 @@ typeset -ga _ZDOT_EXECUTION_PLAN
 - Natural key-value mapping
 - Built-in existence checking via `${array[$key]:-}`
 
-**Why Composite Keys?**
-- Hook ID format: `<function>@<contexts>`
-- Ensures uniqueness (same function, different contexts = different hooks)
-- Contains all info needed for execution
+**Why Sequential Hook IDs?**
+- Hook IDs are assigned sequentially: `hook_1`, `hook_2`, etc.
+- IDs are stable references used as keys across all hook metadata arrays
+- Function names and contexts are stored separately in `_ZDOT_HOOK_FUNCS` and `_ZDOT_HOOK_CONTEXTS`
 
 **Why Separate Arrays vs Nested Structures?**
 - Zsh doesn't have native nested data structures
@@ -480,7 +467,7 @@ Module Loaded
       ↓
 zdot_hook_register() called
       ↓
-Generate hook_id = "<function>@<contexts>"
+Assign sequential hook_id = "hook_N"
       ↓
 Validate arguments
       ↓
@@ -488,7 +475,7 @@ Store in _ZDOT_HOOKS[hook_id]
       ↓
 Store metadata (contexts, requires, provides, optional, on-demand)
       ↓
-Update reverse mappings (_ZDOT_PHASE_PROVIDERS, _ZDOT_ON_DEMAND_PHASES)
+Update reverse mappings (_ZDOT_PHASE_PROVIDERS_BY_CONTEXT, _ZDOT_ON_DEMAND_PHASES)
       ↓
 Registration complete
 ```
@@ -504,7 +491,7 @@ For each registered hook:
   ↓
   Check if contexts match current shell
   ↓
-  Resolve dependencies recursively
+  Compute in-degree for each hook (count of unsatisfied required phases)
   ↓
   All dependencies satisfied? → Add to plan
   ↓
@@ -545,117 +532,62 @@ For each hook_id:
 All hooks executed
 ```
 
-### Manual Phase Triggering
-
-```
-zdot_provide_phase("finalize") called
-      ↓
-Check if phase already provided
-      ↓
-Look up hooks that provide this phase
-      ↓
-For each matching hook:
-  ↓
-  Check context matches
-  ↓
-  Check dependencies satisfied
-  ↓
-  Execute hook function
-  ↓
-  Mark as executed
-      ↓
-Mark phase as provided
-      ↓
-Phase trigger complete
-```
-
 ## Dependency Resolution
 
-### Algorithm: Topological Sort with DFS
+### Algorithm: Topological Sort (Kahn's BFS)
 
-The dependency resolution uses a **depth-first search (DFS)** with cycle detection.
+The dependency resolution uses **Kahn's algorithm** — a queue-based breadth-first topological sort — implemented in `zdot_build_execution_plan` (core/hooks.zsh).
 
-**Function**: `_resolve_hook_dependencies()` (core/hooks.zsh:200-271)
+**Overview:**
 
-**Input:**
-- `hook_id`: Hook to resolve dependencies for
-- `visiting`: Array of hooks currently in recursion stack (cycle detection)
-- `plan`: Current execution plan (array)
+1. Compute an in-degree for each hook: the number of its required phases that are not yet provided and have a known provider registered in the current context.
+2. Enqueue all hooks with in-degree 0 (no unsatisfied dependencies).
+3. Dequeue a hook, append it to the execution plan, mark its provided phases as satisfied, then decrement the in-degree of every hook that required one of those phases.
+4. Any hook whose in-degree reaches 0 is enqueued.
+5. Repeat until the queue is empty.
 
-**Output:**
-- Returns 0 if all dependencies satisfied
-- Returns 1 if any dependency cannot be satisfied
-- Modifies `plan` array by reference (adds hooks in dependency order)
+If hooks remain unprocessed after the queue drains, they either depend on unprovided phases (warning issued) or are part of a circular dependency (error issued).
 
-**Algorithm:**
+**Pseudocode:**
 
 ```
-function resolve_dependencies(hook_id):
-    # Already processed?
-    if hook_id in _ZDOT_HOOKS_EXECUTED:
-        return SUCCESS
-    
-    if hook_id in execution_plan:
-        return SUCCESS
-    
-    # Cycle detection
-    if hook_id in visiting:
-        ERROR: Circular dependency detected
-        return FAILURE
-    
-    # Mark as visiting (cycle detection)
-    visiting += hook_id
-    
-    # Get required phases
-    required_phases = _ZDOT_HOOK_REQUIRES[hook_id]
-    
-    # For each required phase:
-    for phase in required_phases:
-        # Already provided?
-        if phase in _ZDOT_PHASES_PROVIDED:
-            continue
-        
-        # Promised for later?
-        if phase in _ZDOT_PHASES_PROMISED:
-            continue
-        
-        # On-demand phase?
-        if phase in _ZDOT_ON_DEMAND_PHASES:
-            continue
-        
-        # Find provider hook
-        provider_hook = _ZDOT_PHASE_PROVIDERS[phase]
-        
-        if provider_hook not found:
-            if hook is optional:
-                VERBOSE: Skipping optional hook, missing phase
-                return FAILURE
-            else:
-                WARNING: Required phase not available
-                return FAILURE
-        
-        # Recursively resolve provider's dependencies
-        if resolve_dependencies(provider_hook) == FAILURE:
-            return FAILURE
-    
-    # All dependencies satisfied
-    # Remove from visiting set
-    visiting -= hook_id
-    
-    # Add to execution plan
+# Build in-degree map
+for each hook_id in registered hooks:
+    if contexts don't match current shell: skip
+    for each phase in _ZDOT_HOOK_REQUIRES[hook_id]:
+        if phase already in _ZDOT_PHASES_PROVIDED: continue
+        if phase in _ZDOT_PHASES_PROMISED: continue
+        if phase in _ZDOT_ON_DEMAND_PHASES: continue
+        provider = _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[ctx:phase]
+        if provider exists: in_degree[hook_id]++
+
+# Enqueue zero-degree hooks
+queue = [hook_id for hook_id if in_degree[hook_id] == 0]
+
+# Process queue (Kahn's BFS)
+while queue not empty:
+    hook_id = dequeue(queue)
     execution_plan += hook_id
-    
-    return SUCCESS
+    for each phase in _ZDOT_HOOK_PROVIDES[hook_id]:
+        _ZDOT_PHASES_PROVIDED += phase
+        for each dependent in hooks requiring phase:
+            in_degree[dependent]--
+            if in_degree[dependent] == 0:
+                enqueue(queue, dependent)
+
+# Remaining hooks: missing or circular deps
+for each hook_id not in execution_plan:
+    if optional: VERBOSE skip
+    else: WARNING required phase unavailable
 ```
 
-**Key Features:**
+**Key Properties:**
 
-1. **Cycle Detection**: Tracks hooks currently being visited via `visiting` set
-2. **Short-Circuit**: Returns immediately if hook already processed
-3. **Promised Phases**: Treats promised phases as satisfied
-4. **On-Demand Phases**: Doesn't validate on-demand phases
-5. **Optional Handling**: Gracefully skips optional hooks with missing deps
-6. **Recursive Resolution**: Recursively processes all dependencies
+1. **No Recursion**: BFS queue eliminates recursion depth limits
+2. **Deterministic Order**: Hooks at the same depth are processed in registration order
+3. **Promised/On-Demand Phases**: Treated as already satisfied; do not block enqueue
+4. **Optional Handling**: Hooks with unresolvable optional deps are silently skipped
+5. **Circular Detection**: Hooks still in the unprocessed set after BFS drains indicate a cycle
 
 ### Dependency Edge Cases
 
@@ -668,13 +600,15 @@ zdot_hook_register _hook_b interactive --requires phase-a --provides phase-b
 ```
 
 **Detection:**
-- `_resolve_hook_dependencies()` maintains `visiting` array
-- When recursion encounters a hook already in `visiting`, circular dependency detected
-- Error message issued, cycle broken
+- After Kahn's BFS drains, any hook not in the execution plan has an unsatisfied in-degree
+- If all unprocessed hooks have missing *required* (non-optional) dependencies and none of
+  those dependencies can ever be provided by another unprocessed hook, a circular dependency
+  is reported
+- Error message issued; affected hooks are skipped
 
 **Output:**
 ```
-✗ Circular dependency detected: _hook_a@interactive → _hook_b@interactive → _hook_a@interactive
+✗ Circular dependency detected involving hook_1 (_hook_a), hook_2 (_hook_b)
 ```
 
 #### Missing Optional Dependencies
@@ -732,25 +666,25 @@ zdot_hook_register _hook_a interactive --requires special-phase --provides phase
 
 **Risk**: Hook may fail at runtime if it truly depends on the phase
 
-**Mitigation**: Only promise phases you will actually provide via `zdot_provide_phase()`
+**Mitigation**: Only promise phases that will actually be provided (i.e. a hook with `--provides <phase>` will run before your hook)
 
 #### On-Demand Phases
 
 **Example:**
 ```zsh
-# In module
+# In module: register a hook that requires the "finalize" on-demand phase
 zdot_hook_register _cleanup interactive --requires finalize --on-demand
 
-# In .zshrc (much later)
-zdot_provide_phase finalize  # Manually trigger
+# Elsewhere (e.g. in .zshrc, after all modules are loaded):
+zdot_run_until finalize  # Execute all hooks up to and including finalize
 ```
 
 **Behavior:**
-- Hook is marked as on-demand
-- Phase `finalize` is added to `_ZDOT_ON_DEMAND_PHASES`
-- Dependency resolution doesn't validate `finalize` exists
-- Hook is categorized as "on-demand" (not error)
-- Hook only executes when `zdot_provide_phase finalize` is called
+- Hook is marked as on-demand; `finalize` is added to `_ZDOT_ON_DEMAND_PHASES`
+- Dependency resolution skips validation that `finalize` is provided by any eager hook
+- Hook is categorized as "on-demand" rather than an error
+- Hook only executes when `zdot_run_until finalize` is called, which runs all hooks
+  up to and including the `finalize` phase
 
 **Use Case**: Cleanup tasks that run on shell exit
 
@@ -1308,16 +1242,16 @@ print -l "${(k)_ZDOT_PHASES_PROVIDED[@]}"
 # Show executed hooks
 print -l "${(k)_ZDOT_HOOKS_EXECUTED[@]}"
 
-# Show phase providers
-for phase in "${(k)_ZDOT_PHASE_PROVIDERS[@]}"; do
-    echo "$phase -> ${_ZDOT_PHASE_PROVIDERS[$phase]}"
+# Show phase providers (key format: "context:phase")
+for key in "${(k)_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[@]}"; do
+    echo "$key -> ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$key]}"
 done
 ```
 
 **Hook Metadata:**
 ```zsh
-# Show specific hook details
-hook_id="_brew_init@interactive noninteractive"
+# Show specific hook details (hook IDs are sequential: hook_1, hook_2, ...)
+hook_id="hook_1"
 
 echo "Function: ${_ZDOT_HOOKS[$hook_id]}"
 echo "Contexts: ${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
@@ -1379,24 +1313,22 @@ echo "On-demand: ${_ZDOT_HOOK_ON_DEMAND[$hook_id]:-0}"
 - Easy to query and iterate
 - No parsing overhead
 
-### Why Composite Hook IDs?
+### Why Sequential Hook IDs?
 
-**Format**: `<function>@<contexts>`
+**Format**: `hook_N` (e.g., `hook_1`, `hook_2`, `hook_3`)
 
-**Example**: `_brew_init@interactive noninteractive`
-
-**Problem**: Same function registered for different contexts.
+**Problem**: Hooks need a stable, unique identity that is independent of the registering function's name or context list.
 
 **Alternatives Considered:**
-1. **Function name only**: Doesn't handle multiple contexts (rejected)
-2. **Sequential IDs**: `hook_1`, `hook_2` (loses semantic meaning)
-3. **Composite keys**: Chosen
+1. **Function name only**: `_brew_init` — breaks if the same function is registered twice, or renamed (rejected)
+2. **Composite keys**: `<function>@<contexts>` — encodes metadata in the key, fragile if contexts change, hard to use as an array key (rejected)
+3. **Sequential IDs**: Chosen
 
 **Why chosen:**
-- Unique identification
-- Embeds metadata in key
-- Human-readable
-- Sortable and filterable
+- Stable: ID is assigned at registration time and never changes
+- Simple: trivial to generate (`(( _ZDOT_HOOK_COUNTER++ ))`)
+- Decoupled: function name and contexts are stored separately in metadata arrays, not baked into the key
+- Safe as array keys: no special characters or spaces
 
 ### Why Optional Flag?
 
@@ -1588,15 +1520,15 @@ zdot_debug_phases() {
 
 ### Modifying Dependency Resolution
 
-**Location**: `core/hooks.zsh` `_resolve_hook_dependencies()` (lines 200-271)
+**Location**: `core/hooks.zsh`, inside `zdot_build_execution_plan()` (the dependency graph building and Kahn's BFS topological sort loop)
 
 **Caution**: This is core logic. Changes can break system.
 
 **Common modifications:**
 
-1. **Change skip behavior**: Modify how optional hooks are handled (lines 244-252)
-2. **Add new phase types**: Extend logic for promised/on-demand phases (lines 227-239)
-3. **Improve cycle detection**: Enhance error messages (lines 211-217)
+1. **Change skip behavior**: Modify how optional hooks are handled in the in-degree computation loop
+2. **Add new phase types**: Extend the logic that classifies promised vs. on-demand phases
+3. **Improve cycle detection**: Enhance the cycle-detected error path in `zdot_build_execution_plan()`
 
 **Testing**: After modifications, test with:
 - Circular dependencies
@@ -1612,26 +1544,27 @@ zdot_debug_phases() {
 
 **Implementation:**
 
-1. In `.zshrc`, promise phase:
+1. In `.zshrc`, promise phase and build execution plan:
 ```zsh
 zdot_promise_phase shutdown
+zdot_build_execution_plan
 ```
 
-2. In module, register hook:
+2. In module, register hook with `--on-demand`:
 ```zsh
 zdot_hook_register _mymodule_shutdown interactive noninteractive \
     --requires shutdown \
     --on-demand
 ```
 
-3. In `.zshrc`, trigger on exit:
+3. In `.zshrc`, trigger on exit using `zdot_run_until`:
 ```zsh
 zshexit() {
-    zdot_provide_phase shutdown
+    zdot_run_until shutdown
 }
 ```
 
-**Result**: `_mymodule_shutdown` runs automatically on shell exit.
+**Result**: `_mymodule_shutdown` runs when `shutdown` is reached via `zdot_run_until shutdown`.
 
 ---
 
@@ -2076,7 +2009,8 @@ When adding features:
 **Debug Steps:**
 1. Check if phase is provided by any hook:
    ```zsh
-   echo "${_ZDOT_PHASE_PROVIDERS[phase-name]}"
+   # Key format: "context:phase-name" (e.g., "interactive:brew-ready")
+   echo "${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[interactive:phase-name]}"
    ```
 
 2. Check if phase is promised:
@@ -2146,6 +2080,372 @@ When adding features:
 - File is in wrong directory
 - File has incorrect permissions
 - Double-load guard returning early
+
+---
+
+## Hook Naming: `--name` Flag and Name Registry
+
+### Overview
+
+Hooks can be assigned human-readable name labels at registration time using the
+`--name` flag on `zdot_hook_register`. Names are stored in a bidirectional
+registry and are used by `zdot_defer_order` to express ordering constraints
+without coupling to internal hook IDs.
+
+### Global Arrays
+
+```
+_ZDOT_HOOK_NAMES   (associative): hook_id → name label
+_ZDOT_HOOK_BY_NAME (associative): name label → hook_id
+```
+
+Both arrays are declared in `core/hooks.zsh`. They are populated during
+`zdot_hook_register` and are read-only after the execution plan is built.
+
+### Registration
+
+```zsh
+zdot_hook_register --name my-plugin my_plugin_init env network
+```
+
+- `--name <label>` is extracted in a pre-pass before positional argument
+  parsing. It does not affect the hook's function name or context list.
+- If `--name` is omitted, the function name is used as the label fallback for
+  `zdot_defer_order` lookups.
+- Duplicate name labels generate a warning and the second registration wins.
+
+### Internal Storage
+
+Hook IDs are sequential integers (`hook_1`, `hook_2`, ...). The name registry
+maps between these opaque IDs and the stable label strings used in ordering
+declarations:
+
+```
+_ZDOT_HOOK_NAMES[hook_3]="my-plugin"
+_ZDOT_HOOK_BY_NAME[my-plugin]="hook_3"
+```
+
+---
+
+## Deferred Hooks: `--deferred` Flag
+
+### Overview
+
+The `--deferred` flag on `zdot_hook_register` marks a hook as explicitly
+deferred. Deferred hooks are excluded from the main synchronous execution plan
+and are instead run after shell startup completes, triggered asynchronously.
+
+### Global Array
+
+```
+_ZDOT_DEFERRED_HOOKS (array): hook_ids explicitly marked --deferred
+```
+
+Declared in `core/hooks.zsh`. Populated during `zdot_hook_register`.
+
+### Registration
+
+```zsh
+zdot_hook_register --deferred my_slow_tool_init env
+```
+
+- The `--deferred` flag is extracted in the same pre-pass as `--name`.
+- The hook_id is appended to `_ZDOT_DEFERRED_HOOKS`.
+- The hook is **not** added to the main execution plan array
+  (`_ZDOT_EXECUTION_PLAN`). It is tracked separately in
+  `_ZDOT_EXECUTION_PLAN_DEFERRED`.
+
+### Interaction with Phase Providers
+
+If a deferred hook is the sole provider of a phase that another (non-deferred)
+hook requires, that dependent hook is **force-deferred** via the fixed-point
+propagation mechanism described in the Force-Deferral section below.
+
+---
+
+## Hook Ordering: `zdot_defer_order`
+
+### Overview
+
+`zdot_defer_order` declares that a set of hooks must execute in a specific
+order relative to one another within the deferred execution chain. It records
+ordering constraints by name label; the actual DAG edges are injected when
+`zdot_build_execution_plan` runs.
+
+### Global Arrays
+
+```
+_ZDOT_DEFER_ORDER_PAIRS    (array): flat list of name pairs [from to from to ...]
+_ZDOT_DEFER_ORDER_WARNINGS (array): warnings generated during edge injection
+```
+
+Both declared in `core/hooks.zsh`.
+
+### Usage
+
+```zsh
+zdot_defer_order name-A name-B name-C
+```
+
+Records all pairwise (i < j) ordering constraints: A→B, A→C, B→C. This means
+A must complete before B, and B before C.
+
+- Arguments are name labels (as assigned via `--name`, or function names as
+  fallback).
+- Pairs are stored in `_ZDOT_DEFER_ORDER_PAIRS` as flat adjacent elements.
+- No validation is done at call time; validation and edge injection occur inside
+  `zdot_build_execution_plan`.
+
+### Edge Injection (inside `zdot_build_execution_plan`)
+
+During plan construction:
+
+1. Each pair from `_ZDOT_DEFER_ORDER_PAIRS` is resolved to hook_ids via
+   `_ZDOT_HOOK_BY_NAME`.
+2. A synthetic DAG edge is added to the deferred dependency graph.
+3. A cycle check is run on the synthetic-edge-only subgraph (`_doo_adj`) using
+   DFS. If adding the edge would create a cycle, the edge is skipped and a
+   warning is appended to `_ZDOT_DEFER_ORDER_WARNINGS`.
+4. If either hook is not active (not registered or not deferred), the edge is
+   skipped with a warning.
+5. Contradictory edges (A→B when B→A already exists) are also rejected.
+
+The technique used is a **bridge-phase** injection: a synthetic intermediate
+phase is created to carry the ordering constraint through the existing
+topological sort machinery without altering real phase semantics.
+
+---
+
+## Suppressing Force-Deferral Warnings: `zdot_accept_deferred`
+
+### Overview
+
+When a hook is force-deferred (because its required phase is only provided by a
+deferred hook), the system emits a warning. `zdot_accept_deferred` silences
+these warnings for specific function+phase combinations where force-deferral is
+expected and intentional.
+
+### Global Array
+
+```
+_ZDOT_ACCEPTED_DEFERRED (associative): func_name → "all" | "phase1 phase2 ..."
+```
+
+Declared in `core/hooks.zsh`. Populated by `zdot_accept_deferred` at module
+load time, before the execution plan is built.
+
+### Usage
+
+```zsh
+# Accept force-deferral for all phases of a function:
+zdot_accept_deferred my_plugin_init
+
+# Accept force-deferral for specific phases only:
+zdot_accept_deferred my_plugin_init network tools
+```
+
+- With no phase arguments: sets `_ZDOT_ACCEPTED_DEFERRED[func]="all"`.
+- With phase arguments: appends each phase name to the space-separated value
+  for that function key. Multiple calls accumulate phases.
+
+### Suppression Logic
+
+During force-deferral propagation, after a hook is force-deferred, the system
+checks `_ZDOT_ACCEPTED_DEFERRED`:
+
+- If value is `"all"`: warning is suppressed entirely for that hook.
+- If value contains the specific phase that triggered force-deferral: warning
+  is suppressed for that phase.
+- Otherwise: the warning is appended to `_ZDOT_FORCED_DEFERRED_WARNINGS` and
+  printed at startup.
+
+---
+
+## Force-Deferral Propagation
+
+### Overview
+
+When `zdot_build_execution_plan` separates deferred hooks from the main plan,
+it must also identify any non-deferred hooks that cannot run synchronously
+because a phase they require is only provided by a deferred hook. These hooks
+are **force-deferred** via a fixed-point propagation loop.
+
+### Global Arrays
+
+```
+_ZDOT_FORCED_DEFERRED_WARNINGS (array): warning strings for unexpected force-deferrals
+```
+
+Declared in `core/hooks.zsh`.
+
+### Algorithm: Fixed-Point Propagation
+
+After the initial deferred set is established:
+
+1. Scan all remaining (non-deferred) hooks.
+2. For each hook, check whether every required phase has at least one provider
+   in the non-deferred set.
+3. If a required phase is only provided by a deferred hook → mark this hook as
+   force-deferred (`reason="forced"`).
+4. Set `changed=1` and restart the scan from step 1.
+5. Repeat until a full pass completes with `changed=0` (fixed point reached).
+
+This handles **transitive chains**: if hook C requires a phase provided only by
+hook B, and hook B gets force-deferred because it requires a phase provided only
+by explicit-deferred hook A, then hook C is also force-deferred on the next
+iteration.
+
+### Reason Classification
+
+Each deferred hook carries a reason tag:
+
+| Reason       | Meaning                                                    |
+|--------------|------------------------------------------------------------|
+| `"explicit"` | Registered with `--deferred`                               |
+| `"forced"`   | Force-deferred due to phase provider being deferred        |
+
+Tool-dependency force-deferral (via `--requires-tool`) is applied silently
+without generating a warning entry, regardless of `zdot_accept_deferred`.
+
+### Warnings
+
+For each force-deferred hook where the phase+function combo is not accepted via
+`zdot_accept_deferred`, a warning string is appended to
+`_ZDOT_FORCED_DEFERRED_WARNINGS` and printed during startup to alert the module
+author that an implicit deferral occurred.
+
+---
+
+## Deferred Chain Re-scanning: `_zdot_run_deferred_phase_check`
+
+### Overview
+
+`_zdot_run_deferred_phase_check` is an internal function in `core/hooks.zsh`
+that drives the deferred execution chain. It scans the list of outstanding
+deferred hooks and executes any whose required phases have now been satisfied.
+
+### When It Is Called
+
+| Trigger                              | Location                         |
+|--------------------------------------|----------------------------------|
+| After `zdot_execute_all` completes   | End of main synchronous sequence |
+| After each deferred hook completes   | Inside the deferred dispatch loop|
+
+The repeated call after each deferred hook completion allows **cascading
+satisfaction**: if hook A provides a phase that hook B requires, B becomes
+eligible immediately after A finishes, without waiting for a separate scan
+interval.
+
+### Algorithm
+
+1. Iterate `_ZDOT_EXECUTION_PLAN_DEFERRED`.
+2. For each hook that has not yet executed, check whether all required phases
+   are now in `_ZDOT_PROVIDED_PHASES`.
+3. If satisfied → execute the hook; mark it as done; set `changed=1`.
+4. After one full pass with `changed=1`, recurse / restart to catch newly
+   satisfied dependents.
+5. Stop when a full pass completes with no newly-satisfied hooks.
+
+This is the deferred-chain equivalent of the main plan's topological sort
+execution: it re-evaluates readiness after each completion rather than
+pre-computing a fixed ordering.
+
+---
+
+## Deferred Queue Display: `zdot_show_defer_queue`
+
+### Overview
+
+`zdot_show_defer_queue` is an autoloaded function (defined in
+`core/functions/zdot_show_defer_queue`) that prints a human-readable summary
+of all commands, hooks, and delays that have been recorded in the deferred
+dispatch log.
+
+### Global Arrays (declared in `core/plugins.zsh`)
+
+```
+_ZDOT_DEFER_CMDS  (array): command strings recorded for each deferred entry
+_ZDOT_DEFER_HOOKS (array): hook_id or label for each entry
+_ZDOT_DEFER_DELAYS(array): delay value (ms or descriptor) for each entry
+_ZDOT_DEFER_SPECS (array): full spec string for each entry
+```
+
+All four arrays are **parallel and index-aligned**: element `[i]` across all
+four arrays describes the same deferred dispatch event.
+
+### Recording: `_zdot_defer_record`
+
+```zsh
+_zdot_defer_record <cmd> <delay> <spec>
+```
+
+Called internally whenever a deferred command or hook is scheduled. Appends
+one element to each of the four parallel arrays. The hook label/name is
+determined from context at call time.
+
+If `_ZDOT_DEFER_SKIP_RECORD=1` is set, recording is suppressed (used during
+internal re-execution paths to avoid double-logging).
+
+### Display
+
+`zdot_show_defer_queue` iterates the parallel arrays and formats each entry
+as a table row. It is intended for diagnostic use (e.g. called from
+`zdot_debug` or interactively) to inspect what was deferred and in what order.
+
+---
+
+## On-Demand Phase Execution: `zdot_run_until`
+
+### Overview
+
+`zdot_run_until` triggers execution of hooks up to and including a target
+phase, but only for hooks registered with `--on-demand` for that phase.
+On-demand hooks are excluded from the main synchronous execution plan; they
+are only run when explicitly requested via `zdot_run_until`.
+
+### Global Array
+
+```
+_ZDOT_ON_DEMAND_PHASES (associative): phase_name → 1 (marks phase as on-demand)
+```
+
+Declared in `core/hooks.zsh`. Populated during `zdot_hook_register` when
+`--on-demand` is present.
+
+### Registration
+
+```zsh
+zdot_hook_register --on-demand my_lazy_init tools
+```
+
+- The `--on-demand` flag causes the hook's required phases to be recorded in
+  `_ZDOT_ON_DEMAND_PHASES` rather than added to the main execution plan.
+- On-demand hooks do not participate in the topological sort for the main plan.
+
+### Usage
+
+```zsh
+zdot_run_until <phase>
+```
+
+- Requires the execution plan to have been built (`zdot_build_execution_plan`
+  must have run first).
+- Runs all on-demand hooks whose required phases are satisfied up to and
+  including `<phase>`.
+- Skips hooks that have already executed (idempotent).
+- Useful for lazy initialization: a plugin can defer expensive setup until the
+  first time a feature is actually needed, then call `zdot_run_until` to
+  trigger it on demand.
+
+### Example
+
+```zsh
+# Register a hook that only runs when explicitly triggered:
+zdot_hook_register --on-demand --name lazy-db my_db_init tools network
+
+# Later, when the DB is actually needed:
+zdot_run_until tools
+```
 
 ---
 

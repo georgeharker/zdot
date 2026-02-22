@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="4"          # Cache format version (per-phase PHASE_PROVIDERS_BY_CONTEXT keys)
+typeset -g _ZDOT_CACHE_VERSION="8"          # Cache format version (unified DAG with deferred tagging)
 
 # ============================================================================
 # Cache Configuration
@@ -260,11 +260,21 @@ zdot_cache_save_plan() {
 
         echo ")"
         echo ""
+        echo "# Deferred plan entries (subset of execution plan)"
+        echo "typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED=("
+
+        for hook_id in "${_ZDOT_EXECUTION_PLAN_DEFERRED[@]}"; do
+            echo "    \"$hook_id\""
+        done
+
+        echo ")"
+        echo ""
         echo "# Hook metadata"
 
         # Serialize hook metadata
         for hook_id in "${_ZDOT_EXECUTION_PLAN[@]}"; do
             local func_name="${_ZDOT_HOOKS[$hook_id]}"
+            local name="${_ZDOT_HOOK_NAMES[$hook_id]}"
             local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
@@ -272,6 +282,7 @@ zdot_cache_save_plan() {
             local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
 
             echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
+            echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
             echo "_ZDOT_HOOK_CONTEXTS[$hook_id]='$contexts'"
             echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
@@ -305,6 +316,60 @@ zdot_cache_save_plan() {
                 fi
             done
         done
+
+        echo ""
+        echo "# Deferred hooks"
+        echo "typeset -ga _ZDOT_DEFERRED_HOOKS=("
+
+        for hook_id in "${_ZDOT_DEFERRED_HOOKS[@]}"; do
+            echo "    \"$hook_id\""
+        done
+
+        echo ")"
+        echo ""
+        echo "# Deferred hook metadata"
+
+        for hook_id in "${_ZDOT_DEFERRED_HOOKS[@]}"; do
+            local func_name="${_ZDOT_HOOKS[$hook_id]}"
+            local name="${_ZDOT_HOOK_NAMES[$hook_id]}"
+            local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+            local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
+            local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
+            local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+            local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
+
+            echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
+            echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
+            echo "_ZDOT_HOOK_CONTEXTS[$hook_id]='$contexts'"
+            echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
+            echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
+            echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
+            echo "_ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand"
+        done
+
+        echo ""
+        echo "# Defer order pairs"
+        echo "typeset -ga _ZDOT_DEFER_ORDER_PAIRS=("
+        for _dop in "${_ZDOT_DEFER_ORDER_PAIRS[@]}"; do
+            echo "    ${(q)_dop}"
+        done
+        echo ")"
+
+        echo ""
+        echo "# Defer order warnings"
+        echo "typeset -ga _ZDOT_DEFER_ORDER_WARNINGS=("
+        for _dow in "${_ZDOT_DEFER_ORDER_WARNINGS[@]}"; do
+            echo "    ${(q)_dow}"
+        done
+        echo ")"
+
+        echo ""
+        echo "# Forced-deferred warnings (re-emitted every shell start)"
+        echo "typeset -ga _ZDOT_FORCED_DEFERRED_WARNINGS=("
+        for _fdw in "${_ZDOT_FORCED_DEFERRED_WARNINGS[@]}"; do
+            echo "    ${(q)_fdw}"
+        done
+        echo ")"
     } > "$plan_file"
 
     # Compile the plan file for faster loading (co-located)
@@ -391,6 +456,16 @@ load_cache() {
 
     # Load the cached plan (zsh will automatically use .zwc if available)
     source "$plan_file"
+
+    # Re-emit defer order warnings (unsatisfiable orderings must be shown every invocation)
+    for _w in "${_ZDOT_DEFER_ORDER_WARNINGS[@]}"; do
+        zdot_warn "$_w"
+    done
+
+    # Re-emit forced-deferred warnings (hooks auto-deferred due to deferred dependency)
+    for _w in "${_ZDOT_FORCED_DEFERRED_WARNINGS[@]}"; do
+        zdot_warn "$_w"
+    done
 
     # Validate that the sourced plan actually populated the execution plan.
     # An empty plan can be written when hooks aren't registered yet at save

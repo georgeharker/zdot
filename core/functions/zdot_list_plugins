@@ -25,7 +25,7 @@ zdot_list_plugins() {
             local spec plugin_path
             for spec in ${(k)_ZDOT_PLUGINS_LOADED}; do
                 zdot_plugin_path "$spec"
-                local plugin_path=$REPLY
+                plugin_path=$REPLY
                 if [[ -d "$plugin_path" ]]; then
                     zdot_info "  $spec (loaded)"
                 else
@@ -38,30 +38,29 @@ zdot_list_plugins() {
             local dir subdir
             for dir in "$cache"/*; do
                 [[ ! -d "$dir" ]] && continue
-                
-                # For org directories (e.g., Aloxaf/), list subdirs
-                if [[ -d "$dir" && ! -d "$dir/.git" ]]; then
+
+                # Org directory (e.g., Aloxaf/): contains git repo subdirs, no .git of its own
+                if [[ ! -d "$dir/.git" ]]; then
+                    local has_repo=0
+                    for subdir in "$dir"/*(N/); do
+                        [[ -d "$subdir/.git" ]] && { has_repo=1; break }
+                    done
+                    (( has_repo )) || continue
                     for subdir in "$dir"/*; do
-                        [[ ! -d "$subdir" ]] && continue
-                        local name=${dir:t}/${subdir:t}
                         [[ -d "$subdir/.git" ]] || continue
+                        local name=${dir:t}/${subdir:t}
                         local branch=$(cd "$subdir" 2>/dev/null && git branch --show-current 2>/dev/null)
                         local ref=$(cd "$subdir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
                         zdot_info "  $name ($branch $ref)"
                     done
+                    continue
                 fi
-                
-                # Skip ohmyzsh and romkatv (core)
+
+                # Direct git repo
                 local name=${dir:t}
-                [[ $name == "ohmyzsh" ]] && continue
-                [[ $name == "romkatv" ]] && continue
-                
-                # Direct git repos
-                if [[ -d "$dir/.git" ]]; then
-                    local branch=$(cd "$dir" 2>/dev/null && git branch --show-current 2>/dev/null)
-                    local ref=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
-                    zdot_info "  $name ($branch $ref)"
-                fi
+                local branch=$(cd "$dir" 2>/dev/null && git branch --show-current 2>/dev/null)
+                local ref=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
+                zdot_info "  $name ($branch $ref)"
             done
             ;;
         --declared|*)
@@ -73,7 +72,7 @@ zdot_list_plugins() {
                 local loaded=""
                 [[ -n "${_ZDOT_PLUGINS_LOADED[$spec]}" ]] && loaded=" [loaded]"
                 zdot_plugin_path "$spec"
-                local plugin_path=$REPLY
+                plugin_path=$REPLY
                 local ver_str=""
                 [[ -n "$version" ]] && ver_str="@$version"
                 if [[ -d "$plugin_path" ]]; then

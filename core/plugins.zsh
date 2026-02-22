@@ -16,6 +16,80 @@ typeset -g  _ZDOT_PLUGINS_CACHE  # cache directory
 typeset -g  _ZDOT_PLUGINS_INITIALIZED=0
 typeset -ga _ZDOT_BUNDLE_HANDLERS # Ordered list of registered bundle handler names
 typeset -ga _ZDOT_BUNDLE_REPOS    # Repos cloned as bundle dependencies (not user plugins)
+typeset -ga _ZDOT_DEFER_CMDS        # [N] = command string submitted
+typeset -ga _ZDOT_DEFER_HOOKS       # [N] = hook_func that submitted it (or "?" if outside hook)
+typeset -ga _ZDOT_DEFER_DELAYS      # [N] = delay in seconds (0 if none)
+typeset -ga _ZDOT_DEFER_SPECS       # [N] = human-readable spec name (plugins), "__sentinel__", or ""
+typeset -ga _ZDOT_DEFER_LABELS      # [N] = explicit --label override (or "" if none)
+typeset -g  _ZDOT_DEFER_COUNTER=0
+typeset -g  _ZDOT_DEFER_SKIP_RECORD=0  # suppress generic recording when zdot_load_deferred_plugins records inline
+
+# _zdot_defer_record — append one deferred-command entry to the display log.
+#
+# This function does NOT schedule execution; it only records metadata for
+# inspection via `zdot_show_defer_queue`.  The four parallel arrays hold one
+# element per deferred item:
+#
+#   _ZDOT_DEFER_CMDS    — the command string that will be deferred
+#   _ZDOT_DEFER_HOOKS   — the hook_N id of the hook that submitted the defer
+#                         (captured from $_ZDOT_CURRENT_HOOK_FUNC at call time)
+#   _ZDOT_DEFER_DELAYS  — the delay value passed to zsh-defer (or "" for none)
+#   _ZDOT_DEFER_SPECS   — the plugin spec string (or "" if not inside a plugin)
+#
+# _ZDOT_DEFER_COUNTER tracks the total count (== length of each array).
+#
+# Callers set _ZDOT_DEFER_SKIP_RECORD=1 when they need to enqueue a command
+# via zdot_defer but have already called _zdot_defer_record manually (e.g. the
+# compinit special case), to prevent double-recording.
+_zdot_defer_record() {
+    (( _ZDOT_DEFER_COUNTER++ ))
+    _ZDOT_DEFER_CMDS+=( "$1" )
+    _ZDOT_DEFER_HOOKS+=( "${_ZDOT_CURRENT_HOOK_FUNC:-?}" )
+    _ZDOT_DEFER_DELAYS+=( "$2" )
+    _ZDOT_DEFER_SPECS+=( "$3" )
+    _ZDOT_DEFER_LABELS+=( "${4:-}" )
+}
+
+# Display the Defer Order Constraints section (shared by hooks_list and phases_list).
+_zdot_defer_order_display() {
+    if [[ ${#_ZDOT_DEFER_ORDER_PAIRS[@]} -gt 0 ]]; then
+        zdot_info "Defer Order Constraints:"
+        zdot_info ""
+        local _pi=1
+        while [[ $_pi -lt ${#_ZDOT_DEFER_ORDER_PAIRS[@]} ]]; do
+            local _fn="${_ZDOT_DEFER_ORDER_PAIRS[$_pi]}"
+            local _tn="${_ZDOT_DEFER_ORDER_PAIRS[$(( _pi + 1 ))]}"
+            (( _pi += 2 ))
+            zdot_info "  $_fn → $_tn"
+        done
+        zdot_info ""
+    fi
+}
+
+# Set _name_mark and _deferred_mark for a given hook_id/func pair.
+# Usage: _zdot_hook_display_marks <hook_id> <func>
+# Sets: _name_mark, _deferred_mark (in caller's scope, no local)
+_zdot_hook_display_marks() {
+    local _hname="${_ZDOT_HOOK_NAMES[$1]:-$2}"
+    _name_mark=""
+    [[ "$_hname" != "$2" ]] && _name_mark=" [name: $_hname]"
+    _deferred_mark=""
+    [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]] && _deferred_mark=" [deferred]"
+}
+
+# Set defer_mark based on whether any hook in the id list ran deferred work.
+# Usage: _zdot_ran_deferred_mark "${id_list[@]}"
+# Sets: defer_mark (in caller's scope, no local)
+_zdot_ran_deferred_mark() {
+    local _rd=0
+    local _id
+    for _id in "$@"; do
+        local _f="${_ZDOT_HOOKS[$_id]}"
+        [[ " ${_ZDOT_DEFER_HOOKS[@]} " =~ " ${_f} " ]] && _rd=1 && break
+    done
+    defer_mark=""
+    [[ $_rd -eq 1 ]] && defer_mark=" [ran deferred]"
+}
 
 # ============================================================================
 # Plugin Rev Stamp
@@ -29,6 +103,24 @@ _zdot_plugins_rev_stamp_init() {
     _ZDOT_PLUGINS_REV_STAMP="${cache_dir}/plugin-revs.zsh"
 }
 
+# zdot_plugins_have_changed — check whether any git-sourced plugin has a new HEAD.
+#
+# Algorithm:
+#   1. Load the previously saved per-plugin HEAD revisions from the stamp file
+#      ($zdot_plugin_revs_file, typically plugin-revs.zsh inside the cache dir).
+#      The stamp file is a sourced zsh snippet that populates _ZDOT_PLUGINS_SAVED_REV.
+#   2. Iterate every plugin spec in _ZDOT_PLUGINS_PATH.  For specs that point to
+#      a git repository, run `git rev-parse HEAD` to get the current commit.
+#   3. Compare each current rev against the saved rev for that spec.
+#      If any differ, the function:
+#        a. Overwrites the stamp file atomically with the new set of revisions.
+#        b. Returns 0 (changed).
+#   4. If all revisions match, returns 1 (unchanged).
+#
+# This is used by the cache layer to decide whether plugin-generated cache
+# entries (e.g. fpath fragments, completion scripts) need to be regenerated.
+# Non-git plugins (local paths without a .git dir) are skipped — they are
+# assumed to be managed externally and not tracked by revision.
 zdot_plugins_have_changed() {
     _zdot_plugins_rev_stamp_init
     typeset -gA _ZDOT_PLUGINS_SAVED_REV
@@ -222,7 +314,25 @@ zdot_plugin_clone() {
     fi
 }
 
-# Clone all declared plugins
+# zdot_plugins_clone_all — ensure all plugin repositories are cloned locally.
+#
+# Fast-path (sentinel check):
+#   Builds a canonical string from all plugin specs and versions, then compares
+#   it against the contents of the sentinel file ($cache_dir/.cloned).
+#   If the string matches AND every expected plugin directory already exists on
+#   disk, the function returns 0 immediately without touching git at all.
+#   This makes the common case (nothing changed) essentially free.
+#
+# Slow path:
+#   Triggered when the sentinel string differs from the file (a spec was added,
+#   removed, or pinned to a different version) or when any plugin directory is
+#   missing (e.g. after a fresh checkout).  In the slow path, zdot_plugin_clone
+#   is called for each spec individually.  After all clones succeed, the sentinel
+#   file is rewritten with the current spec string so future runs hit the fast
+#   path again.
+#
+# The sentinel file is stored inside the plugins cache directory and is not
+# version-controlled — it is purely a local optimisation artefact.
 zdot_plugins_clone_all() {
     _zdot_plugins_init
 
@@ -383,6 +493,11 @@ zdot_load_all_plugins() {
 
 # Load deferred plugins using zdot_defer wrapper
 zdot_load_deferred_plugins() {
+    # Sentinel: record that zdot_load_deferred_plugins fired and at what queue depth
+    _zdot_defer_record \
+        "--- zdot_load_deferred_plugins fired (queue depth: $_ZDOT_DEFER_COUNTER) ---" \
+        "0" "__sentinel__"
+
     # Load deferred plugins - zdot_defer wrapper handles defer vs immediate
     local spec kind
     for spec in $_ZDOT_PLUGINS_ORDER; do
@@ -402,8 +517,13 @@ zdot_load_deferred_plugins() {
         # Add to fpath if needed
         [[ -d "$plugin_path/functions" ]] && fpath+=( "$plugin_path" )
 
-        # Load deferred - zdot_defer wrapper handles defer vs immediate
+        # Load deferred - zdot_defer wrapper handles defer vs immediate;
+        # suppress generic recording so we can record with spec label inline.
+        _ZDOT_DEFER_SKIP_RECORD=1
         zdot_defer source "$plugin_file"
+        _ZDOT_DEFER_SKIP_RECORD=0
+        _zdot_defer_record "source $plugin_file" "0" "$spec"
+
         _ZDOT_PLUGINS_LOADED[$spec]=1
     done
 
@@ -413,7 +533,10 @@ zdot_load_deferred_plugins() {
     # $fpath is fully populated.  zdot_compinit_defer simply sets
     # _ZDOT_FPATH_READY=1; the actual compinit runs in precmd context (phase 2)
     # via zdot_ensure_compinit_during_precmd, avoiding the ZLE-callback hang.
+    _ZDOT_DEFER_SKIP_RECORD=1
     zdot_defer -q zdot_compinit_defer
+    _ZDOT_DEFER_SKIP_RECORD=0
+    _zdot_defer_record "zdot_compinit_defer" "0" ""
 }
 
 # ============================================================================
@@ -440,22 +563,59 @@ if zstyle -T ':zdot:plugins' defer; then
     # zsh-defer option syntax: '-' prefix removes a letter from opts (disables),
     # '+' prefix adds a letter (enables). Default opts already include 'm' and
     # 'p', so we need '-mp' to disable them, not '+mp' which is a no-op.
+    # zdot_defer / zdot_defer_until — schedule a command to run after shell startup.
+    #
+    # Two implementations are compiled into one of two branches at load time,
+    # selected by the 'defer' zstyle (`:zdot:plugins`):
+    #
+    # zsh-defer path (defer enabled):
+    #   Wraps the `zsh-defer` utility.  The -q flag is passed by default, which
+    #   disables zsh-defer's own -m (mark prompt) and -p (precmd) options.
+    #   This prevents spurious blank lines with newline-style prompts: without -q,
+    #   zsh-defer triggers `zle reset-prompt` after each deferred chunk, which
+    #   inserts an extra newline when the prompt ends with a literal newline.
+    #
+    # Passthrough path (defer disabled):
+    #   zdot_defer and zdot_defer_until become thin wrappers that execute their
+    #   argument immediately (equivalent to `eval "$@"`).  Useful for testing or
+    #   environments where deferred loading causes problems.
+    #
+    # Both paths call _zdot_defer_record to log the command into the display queue
+    # (visible via `zdot show defer-queue`), UNLESS the caller has set
+    # _ZDOT_DEFER_SKIP_RECORD=1 to suppress double-recording.
     zdot_defer() {
-        local extra_opts=''
+        local extra_opts='' _label=''
         [[ $1 == -q ]] && { extra_opts='-mp'; shift }
+        [[ $1 == --label ]] && { _label="$2"; shift 2 }
+        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "0" "" "$_label"
         zsh-defer ${extra_opts:+$extra_opts} "$@"
     }
     zdot_defer_until() {
-        local extra_opts=''
+        local extra_opts='' _label=''
         [[ $1 == -q ]] && { extra_opts='-mp'; shift }
+        [[ $1 == --label ]] && { _label="$2"; shift 2 }
         local delay=$1; shift
+        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "$delay" "" "$_label"
         zsh-defer ${extra_opts:+$extra_opts} -t "$delay" "$@"
     }
 else
     # Define passthrough wrappers - run immediately.
     # -q is accepted for API compatibility but is a no-op here (no ZLE).
-    zdot_defer() { [[ $1 == -q ]] && shift; "$@" }
-    zdot_defer_until() { [[ $1 == -q ]] && shift; local delay=$1; shift; "$@"; }
+    zdot_defer() {
+        local _label=''
+        [[ $1 == -q ]] && shift
+        [[ $1 == --label ]] && { _label="$2"; shift 2 }
+        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "0" "" "$_label"
+        "$@"
+    }
+    zdot_defer_until() {
+        local _label=''
+        [[ $1 == -q ]] && shift
+        [[ $1 == --label ]] && { _label="$2"; shift 2 }
+        local delay=$1; shift
+        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "$delay" "" "$_label"
+        "$@"
+    }
 fi
 
 # ============================================================================

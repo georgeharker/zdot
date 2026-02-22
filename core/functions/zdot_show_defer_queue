@@ -1,0 +1,70 @@
+#!/usr/bin/env zsh
+# Show the deferred task queue in submission order.
+# Populated at runtime when an interactive shell starts; run this after startup.
+# Usage: zdot_show_defer_queue
+
+function zdot_show_defer_queue() {
+    if (( _ZDOT_DEFER_COUNTER == 0 )); then
+        zdot_info "(no deferred tasks recorded — run an interactive shell first)"
+        return 0
+    fi
+
+    zdot_info "Deferred Queue (submission order):"
+    zdot_info ""
+
+    local i task_num=0 sentinel_num=0
+    for (( i = 1; i <= ${#_ZDOT_DEFER_CMDS[@]}; i++ )); do
+        local cmd="${_ZDOT_DEFER_CMDS[$i]}"
+        local hook="${_ZDOT_DEFER_HOOKS[$i]}"
+        local delay="${_ZDOT_DEFER_DELAYS[$i]}"
+        local spec="${_ZDOT_DEFER_SPECS[$i]}"
+        local explicit_label="${_ZDOT_DEFER_LABELS[$i]}"
+
+        if [[ "$spec" == "__sentinel__" ]]; then
+            (( sentinel_num++ ))
+            zdot_info "  ── $cmd ──"
+            continue
+        fi
+
+        (( task_num++ ))
+
+        # Label priority: explicit --label > spec name > raw command
+        local label
+        if [[ -n "$explicit_label" ]]; then
+            label="$explicit_label"
+        elif [[ -n "$spec" ]]; then
+            label="$spec"
+        else
+            label="$cmd"
+        fi
+
+        # Truncate label to 50 chars for alignment
+        if (( ${#label} > 50 )); then
+            label="${label[1,47]}..."
+        fi
+
+        # Build suffix: hook attribution + delay annotation
+        local suffix=""
+        if [[ "$hook" != "?" ]]; then
+            suffix+="← $hook"
+        fi
+        if (( delay > 0 )); then
+            local delay_str="+${delay}s ⚠"
+            if [[ -n "$suffix" ]]; then
+                suffix+="  $delay_str"
+            else
+                suffix="$delay_str"
+            fi
+        fi
+
+        local line
+        printf -v line "  [defer #%-2d] %-50s" "$task_num" "$label"
+        if [[ -n "$suffix" ]]; then
+            line+="  $suffix"
+        fi
+        zdot_info "$line"
+    done
+
+    zdot_info ""
+    zdot_info "Total: $task_num deferred task(s) + $sentinel_num sentinel(s)"
+}

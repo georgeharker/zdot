@@ -78,16 +78,16 @@ zstyle ':zdot:plugins' pz false
 ### List Plugins
 
 ```bash
-zdot_list_plugins --declared    # Show plugins declared in config
-zdot_list_plugins --loaded      # Show plugins that were loaded
-zdot_list_plugins --installed  # Show plugins in cache
+zdot plugin list --declared    # Show plugins declared in config
+zdot plugin list --loaded      # Show plugins that were loaded
+zdot plugin list --installed  # Show plugins in cache
 ```
 
 ### Update Plugins
 
 ```bash
-zdot_update_plugin              # Update all plugins
-zdot_update_plugin Aloxaf/fzf-tab  # Update specific plugin
+zdot plugin update              # Update all plugins
+zdot plugin update Aloxaf/fzf-tab  # Update specific plugin
 ```
 
 Aliases: `zdot-update`, `zdot-update <plugin>`
@@ -95,8 +95,8 @@ Aliases: `zdot-update`, `zdot-update <plugin>`
 ### Clean Plugins
 
 ```bash
-zdot_clean_plugins --dry-run        # Show what would be removed
-zdot_clean_plugins --remove-unused # Remove unused plugins
+zdot plugin clean --dry-run        # Show what would be removed
+zdot plugin clean --remove-unused # Remove unused plugins
 ```
 
 Alias: `zdot-clean`

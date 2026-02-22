@@ -8,15 +8,14 @@ function zdot_phases_list() {
     local filter_ctx=""
 
     # Parse arguments
-    local i=1
-    while [[ $i -le $# ]]; do
-        case "${(P)i}" in
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
             --context)
-                (( i++ ))
-                filter_ctx="${(P)i}"
+                shift
+                filter_ctx="$1"
                 ;;
         esac
-        (( i++ ))
+        shift
     done
 
     zdot_info "Phases:"
@@ -62,7 +61,7 @@ function zdot_phases_list() {
 
     # ── regular phases ──────────────────────────────────────────────────────
     if [[ ${#regular_phases[@]} -gt 0 ]]; then
-        zdot_report "Regular Phases:"
+        zdot_info "Regular Phases:"
         zdot_info ""
 
         local -a sorted=("${(@ko)regular_phases}")
@@ -70,16 +69,38 @@ function zdot_phases_list() {
             local hook_ids="${regular_phases[$phase]}"
             local -a id_list=(${=hook_ids})
             local conflict=""
-            [[ ${#id_list[@]} -gt 1 ]] && conflict=" [conflict]"
+            if [[ ${#id_list[@]} -gt 1 ]]; then
+                # Only flag a real conflict if two providers share a context.
+                # Providers in mutually exclusive contexts (e.g. interactive vs
+                # noninteractive) are never both active — no conflict.
+                local -A _seen_ctx=()
+                local _real_conflict=0
+                for _hid in "${id_list[@]}"; do
+                    for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_hid]}; do
+                        if [[ -n "${_seen_ctx[$_ctx]}" ]]; then
+                            _real_conflict=1
+                            break 2
+                        fi
+                        _seen_ctx[$_ctx]=1
+                    done
+                done
+                [[ $_real_conflict -eq 1 ]] && conflict=" [conflict]"
+            fi
 
-            zdot_info "  ${phase}${conflict}"
+            # Check if any hook providing this phase submitted deferred work
+            local defer_mark=""
+            _zdot_ran_deferred_mark "${id_list[@]}"
+
+            zdot_info "  ${phase}${conflict}${defer_mark}"
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
                 local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
                 local on_demand_mark=""
                 [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
-                zdot_info "    • $func${on_demand_mark}"
+                local _name_mark="" _deferred_mark=""
+                _zdot_hook_display_marks "$hook_id" "$func"
+                zdot_info "    • $func${on_demand_mark}${_name_mark}${_deferred_mark}"
             done
         done
         zdot_info ""
@@ -90,7 +111,7 @@ function zdot_phases_list() {
 
     # ── tool phases ─────────────────────────────────────────────────────────
     if [[ ${#tool_phases[@]} -gt 0 ]]; then
-        zdot_report "Tool Phases:"
+        zdot_info "Tool Phases:"
         zdot_info ""
 
         local -a sorted_tools=("${(@ko)tool_phases}")
@@ -103,14 +124,20 @@ function zdot_phases_list() {
             local available=""
             command -v "$tool_name" > /dev/null 2>&1 && available=" [available]"
 
-            zdot_info "  ${phase}${available}"
+            # Check if any hook providing this phase submitted deferred work
+            local defer_mark=""
+            _zdot_ran_deferred_mark "${id_list[@]}"
+
+            zdot_info "  ${phase}${available}${defer_mark}"
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
                 local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
                 local on_demand_mark=""
                 [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
-                zdot_info "    • $func${on_demand_mark}"
+                local _name_mark="" _deferred_mark=""
+                _zdot_hook_display_marks "$hook_id" "$func"
+                zdot_info "    • $func${on_demand_mark}${_name_mark}${_deferred_mark}"
             done
         done
         zdot_info ""
@@ -118,6 +145,12 @@ function zdot_phases_list() {
         zdot_info "  (no tool phases registered)"
         zdot_info ""
     fi
+
+    # Defer Order Constraints
+    _zdot_defer_order_display
+
+    zdot_info "Run 'zdot_show_defer_queue' to see deferred task submission order."
+    zdot_info ""
 
     # ── summary ─────────────────────────────────────────────────────────────
     local total=$(( ${#regular_phases[@]} + ${#tool_phases[@]} ))

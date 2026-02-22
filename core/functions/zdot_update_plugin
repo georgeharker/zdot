@@ -47,7 +47,7 @@ zdot_update_plugin() {
         fi
     else
         # Update all declared plugins
-        zdot_report "Updating all declared plugins..."
+        zdot_info "Updating all declared plugins..."
         
         local updated=0
         

@@ -10,7 +10,7 @@ zdot_reclone_plugins() {
     rm -rf "$cache_dir"
     
     # Reset plugin state so they'll be re-cloned on next shell start
-    unset _ZDOT_PLUGINS_INITIALIZED 2>/dev/null
+    unset _ZDOT_PLUGINS_INITIALIZED
     
     zdot_info "Cache removed. Plugins will be re-cloned on next shell start."
 }

@@ -43,7 +43,7 @@ zdot_plugin_remove() {
         return 1
     fi
 
-    print "zdot-plugins: removing $spec..." >&2
+    zdot_action "Removing $spec..."
     rm -rf "$dest"
 
     # Invalidate sentinel so zdot_plugins_clone_all re-evaluates on next startup

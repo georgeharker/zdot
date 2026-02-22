@@ -12,5 +12,6 @@ _prompt_init() {
 # Register hook: requires plugins to be loaded (for zdot_defer function), runs late
 # Prompt only needed in interactive shells
 zdot_hook_register _prompt_init interactive \
+    --name prompt \
     --requires plugins-loaded \
     --provides prompt-ready

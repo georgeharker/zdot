@@ -62,8 +62,12 @@ zdot_clean_plugins() {
         # Dirs with a colon in the name are corrupt/stale artifacts (e.g. omz:plugins/).
         # They can never be valid user/repo namespace dirs, so remove them directly.
         if [[ "$name" == *:* ]]; then
-            zdot_warn "zdot_clean_plugins: removing corrupt cache entry: $name"
-            rm -rf "$dir"
+            if [[ $dry_run -eq 1 ]]; then
+                zdot_info "Would remove corrupt cache entry: $name"
+            else
+                zdot_warn "zdot_clean_plugins: removing corrupt cache entry: $name"
+                rm -rf "$dir"
+            fi
             continue
         fi
 

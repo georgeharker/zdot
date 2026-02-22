@@ -74,6 +74,7 @@ zdot_use Aloxaf/fzf-tab
 
 # Register hook that provides plugins-declared (after declarations are made)
 zdot_hook_register _plugins_configure interactive noninteractive \
+    --name plugins-configure \
     --requires xdg-configured \
     --provides plugins-declared
 
@@ -103,9 +104,11 @@ _plugins_load_omz() {
 # Register phase for when OMZ lib is ready
 # Note: _plugins_load_omz handles non-interactive gracefully (skips compinit)
 zdot_hook_register _plugins_load_omz interactive noninteractive \
+    --name omz-loader \
     --requires plugins-cloned \
     --provides omz-plugins-loaded \
-    --provides-tool fzf
+    --provides-tool fzf \
+    --provides-tool nvm
 
 # ============================================================================
 # Deferred Plugins Loader
@@ -117,6 +120,8 @@ _plugins_load_deferred() {
 }
 
 zdot_hook_register _plugins_load_deferred interactive noninteractive \
+    --name deferred-loader \
+    --deferred \
     --requires omz-plugins-loaded \
     --provides plugins-loaded
 
@@ -133,6 +138,7 @@ _plugins_load_fzf_tab() {
 }
 
 zdot_hook_register _plugins_load_fzf_tab interactive \
+    --name fzf-tab-loader \
     --requires plugins-loaded \
     --provides fzf-tab-loaded
 
@@ -152,6 +158,8 @@ _plugins_post_init() {
 }
 
 zdot_hook_register _plugins_post_init interactive noninteractive \
+    --name plugins-post \
+    --deferred \
     --requires plugins-loaded \
     --provides plugins-post-configured
 
@@ -174,9 +182,13 @@ _nvm_noninteractive_init() {
 }
 
 zdot_hook_register _nvm_interactive_init interactive \
-    --requires prompt-ready \
+    --name nvm \
+    --deferred \
+    --requires plugins-post-configured \
+    --requires-tool nvm \
     --provides nvm-ready
 
 zdot_hook_register _nvm_noninteractive_init noninteractive \
+    --name nvm-noninteractive \
     --requires plugins-loaded \
     --provides nvm-ready

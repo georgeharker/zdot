@@ -136,16 +136,23 @@ function zdot_hooks_list() {
                     else
                         zdot_info "  ✗ $func (NOT defined)"
                     fi
+                    zdot_info "    name: ${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
                     zdot_info "    contexts: $contexts"
                     zdot_info "    requires: $requires"
                     if [[ "$optional" == 1 ]]; then
                         zdot_info "    optional: yes"
                     fi
+                    local _deferred="${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]}"
+                    if [[ "$_deferred" -gt 0 ]]; then
+                        zdot_info "    deferred: yes"
+                    fi
                 else
                     # Normal mode: just list the hook
                     local optional_mark=""
                     [[ "$optional" == 1 ]] && optional_mark=" [optional]"
-                    zdot_info "  • $func ($contexts)$optional_mark"
+                    local _name_mark="" _deferred_mark=""
+                    _zdot_hook_display_marks "$hook_id" "$func"
+                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark"
                 fi
             done
             zdot_info ""
@@ -154,7 +161,7 @@ function zdot_hooks_list() {
 
     # Display on-demand hooks
     if [[ ${#on_demand_hooks[@]} -gt 0 ]]; then
-        zdot_report "On-demand Hooks:"
+        zdot_info "On-demand Hooks:"
         zdot_info ""
 
         for hook_id in "${on_demand_hooks[@]}"; do
@@ -183,7 +190,9 @@ function zdot_hooks_list() {
                 [[ "$optional" == 1 ]] && optional_mark=" [optional]"
                 local on_demand_mark=""
                 [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
-                zdot_info "  • $func ($contexts)$optional_mark$on_demand_mark"
+                local _name_mark="" _deferred_mark=""
+                _zdot_hook_display_marks "$hook_id" "$func"
+                zdot_info "  • $func ($contexts)$optional_mark$on_demand_mark$_name_mark$_deferred_mark"
             fi
         done
         zdot_info ""
@@ -219,9 +228,19 @@ function zdot_hooks_list() {
         zdot_info ""
     fi
 
+    # Defer Order Constraints
+    _zdot_defer_order_display
+
+    zdot_info "Run 'zdot_show_defer_queue' to see deferred task submission order."
+    zdot_info ""
+
     # Summary
     local total_hooks=${#_ZDOT_HOOKS[@]}
-    local shown_hooks=$((${#phases_to_hooks[@]} + ${#hooks_without_phase[@]}))
+    local shown_hooks=0
+    for phase in "${(@k)phases_to_hooks}"; do
+        shown_hooks=$(( shown_hooks + ${#${=phases_to_hooks[$phase]}[@]} ))
+    done
+    shown_hooks=$(( shown_hooks + ${#on_demand_hooks[@]} ))
 
     if [[ $show_all -eq 1 ]]; then
         zdot_info "Total: $total_hooks registered hook(s)"
