@@ -9,6 +9,7 @@
 typeset -ga _ZDOT_PLUGINS_ORDER   # Ordered list of plugin specs
 typeset -gA _ZDOT_PLUGINS        # plugin spec -> kind (normal/defer/fpath/path)
 typeset -gA _ZDOT_PLUGINS_LOADED # plugin spec -> 1 (already loaded)
+typeset -gA _ZDOT_PLUGIN_COMPILE_EXTRA # plugin spec -> space-separated list of extra files to compile
 typeset -gA _ZDOT_PLUGINS_VERSION # plugin spec -> version/rev (optional)
 typeset -gA _ZDOT_PLUGINS_PATH   # plugin spec -> filesystem path (populated at clone time)
 typeset -gA _ZDOT_PLUGINS_FILE   # plugin spec -> *.plugin.zsh path (populated at load time)
@@ -458,18 +459,36 @@ zdot_plugin_compile() {
     local plugin_path=$REPLY
 
     [[ -d "$plugin_path" ]] || return 1
-    
+
     local -a zsh_files
-    
+    local file
+
     # Find .zsh files to compile
     zsh_files=($plugin_path/*.zsh(N) $plugin_path/**/*.plugin.zsh(N))
-    
-    [[ ${#zsh_files[@]} -eq 0 ]] && return 0
-    
+
     # Compile each file individually using shared cache function
-    local file
     for file in $zsh_files; do
         zdot_cache_compile_file "$file" 2>/dev/null || true
+    done
+
+    # Also compile any extra files registered via zdot_plugin_compile_extra
+    for file in ${=_ZDOT_PLUGIN_COMPILE_EXTRA[$spec]:-}; do
+        [[ -f "$file" ]] && zdot_cache_compile_file "$file" 2>/dev/null || true
+    done
+}
+
+# Register extra files to be compiled alongside a plugin's auto-discovered .zsh files.
+# Useful for files that live outside the plugin directory (e.g. nvm.sh, theme files).
+#
+# Usage: zdot_plugin_compile_extra <spec> <file> [<file> ...]
+#
+# Example:
+#   zdot_plugin_compile_extra "ohmyzsh/ohmyzsh" "$NVM_DIR/nvm.sh"
+zdot_plugin_compile_extra() {
+    local spec=$1; shift
+    local file
+    for file in "$@"; do
+        _ZDOT_PLUGIN_COMPILE_EXTRA[$spec]+="${_ZDOT_PLUGIN_COMPILE_EXTRA[$spec]:+ }$file"
     done
 }
 
