@@ -226,10 +226,6 @@ zdot_bundle_omz_match() {
     [[ $1 == omz:* ]]
 }
 
-zdot_use_omz() {
-    zdot_use omz:lib
-}
-
 # ============================================================================
 # Enabled-gated side effects
 # Everything below this point has observable side effects (variable setup,
