@@ -137,198 +137,6 @@ _zdot_load_omz_lib() {
     mkdir -p "$ZSH_CACHE_DIR/completions"
     (( ${fpath[(Ie)"$ZSH_CACHE_DIR/completions"]} )) || fpath=( "$ZSH_CACHE_DIR/completions" $fpath )
 
-    # No lib files are eagerly sourced here:
-    #  - functions, compfix, git, async_prompt, nvm, etc. are lazy-stubbed above
-    #  - completion, key-bindings, termsupport, history, etc. are left to the user
-    # This matches the use-omz.zsh model exactly.
-
-    _ZDOT_PLUGINS_LOADED[omz:lib]=1
-}
-
-zdot_load_omz_lib() {
-    # Check if OMZ was disabled (re-check zstyle; local _zdot_omz_enabled is gone at call time)
-    if ! zstyle -T ':zdot:plugins' omz; then
-        return 0
-    fi
-    _zdot_load_omz_lib
-}
-
-# ============================================================================
-# OMZ Plugin Cloning (delegated from core/plugins.zsh)
-# ============================================================================
-
-# OMZ plugins are cloned at file source time (see early setup above)
-# This is a no-op - OMZ already cloned
-zdot_bundle_omz_clone() {
-    local spec=$1
-    # Populate path cache so zdot_load_deferred_plugins avoids a subshell
-    local relpath=${spec#omz:}
-    _ZDOT_PLUGINS_PATH[$spec]="${_ZDOT_PLUGINS_CACHE}/ohmyzsh/ohmyzsh/${relpath}"
-    return 0
-}
-
-# ============================================================================
-# OMZ Plugin Loading (delegated from core/plugins.zsh)
-# ============================================================================
-
-# Path resolution for OMZ specs
-zdot_bundle_omz_path() {
-    local spec=$1
-    local cache=$_ZDOT_PLUGINS_CACHE
-
-    # omz:lib -> ohmyzsh/ohmyzsh/lib
-    # omz:plugins/git -> ohmyzsh/ohmyzsh/plugins/git
-    local relpath=${spec#omz:}  # "lib" or "plugins/git"
-    REPLY="$cache/ohmyzsh/ohmyzsh/$relpath"
-}
-
-# Load OMZ plugin (handles both lib and plugins/*)
-zdot_bundle_omz_load() {
-    local spec=$1
-    zdot_bundle_omz_path "$spec"
-    local plugin_path=$REPLY
-
-    # Check if it's omz:lib
-    if [[ $spec == "omz:lib" ]]; then
-        if typeset -f zdot_load_omz_lib > /dev/null; then
-            zdot_load_omz_lib
-        else
-            _zdot_load_omz_lib
-        fi
-        return 0
-    fi
-
-    # Otherwise it's omz:plugins/<name>
-    local plugin_name=${spec#omz:plugins/}
-    local plugin_file="$plugin_path/$plugin_name.plugin.zsh"
-
-    [[ -d "$plugin_path" ]] || return 1
-    [[ -f "$plugin_file" ]] || return 1
-
-    # Mark as loaded
-    _ZDOT_PLUGINS_LOADED[$spec]=1
-
-    fpath+=( "$plugin_path" )
-    source "$plugin_file"
-
-    # Optionally compile to .zwc for faster loading (opt-out: enabled by default)
-    if zstyle -T ':zdot:plugins' compile; then
-        zdot_cache_compile_file "$plugin_file" 2>/dev/null || true
-    fi
-
-    return 0
-}
-
-zdot_load_omz_plugins() {
-    local plugin
-    for plugin in "$@"; do
-        zdot_bundle_omz_load "$plugin" 2>/dev/null || true
-    done
-}
-
-# ============================================================================
-# Plugin Bundle API
-# ============================================================================
-
-# Match function: returns 0 if this handler owns the spec
-zdot_bundle_omz_match() {
-    [[ $1 == omz:* ]]
-}
-
-# ============================================================================
-# Enabled-gated side effects
-# Everything below this point has observable side effects (variable setup,
-# hook/bundle registration, lazy-load stubs) and must only run when OMZ is
-# enabled.  When disabled, optionally remove the cloned repo from disk.
-# ============================================================================
-
-if [[ "$_zdot_omz_enabled" == yes ]]; then
-
-    # ------------------------------------------------------------------
-    # Bundle init function: called by zdot_init during bundle init pass
-    # ------------------------------------------------------------------
-
-    # Real OMZ setup work — registered as a hook so that all hooks in the
-    # omz-configure group (user-space zstyle calls, etc.) are guaranteed to
-    # have run before this fires.
-    _zdot_bundle_omz_setup() {
-        # Step 1: OMZ self-update check
-        zdot_omz_check_for_upgrade
-
-        # Step 2: Set OMZ environment variables and state
-        # Bugfix: OMZ has a regression where async-prompt can cause issues.
-        if ! zstyle -t ':omz:alpha:lib:git' async-prompt; then
-            zstyle ':omz:alpha:lib:git' async-prompt no
-        fi
-
-        # Set ZSH to the OMZ installation directory (required by OMZ plugins/themes)
-        [[ -n "$ZSH" ]] || ZSH="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-
-        # Set ZSH_CUSTOM to the path where custom config files and plugins exist
-        [[ -n "$ZSH_CUSTOM" ]] || ZSH_CUSTOM="$ZSH/custom"
-
-        # Set ZSH_CACHE_DIR for cache files (use zdot-specific prefix)
-        [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zdot"
-
-        typeset -g _ZDOT_THEME_LOADED=0
-        typeset -g ZSH_THEME
-
-        # Step 3: Register lib loader; --provides-group omz-plugins means any
-        # hook tagged --group omz-plugins gets --requires omz-lib-loaded injected.
-        zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
-            --provides omz-lib-loaded \
-            --provides-group omz-plugins
-
-        # Step 4: Register theme init hook
-        zdot_hook_register zdot_omz_theme_init interactive noninteractive \
-            --requires omz-lib-loaded \
-            --provides omz-theme-ready
-    }
-
-    # Bundle init function: called directly by _zdot_init_bundles.
-    # Does NOT do OMZ setup inline — instead registers _zdot_bundle_omz_setup
-    # as a hook so that all omz-configure group hooks (user-space zstyle calls)
-    # run first via the normal hook resolution pass.
-    zdot_bundle_omz_init() {
-        zdot_hook_register _zdot_bundle_omz_setup interactive noninteractive \
-            --provides omz-bundle-initialized \
-            --requires-group omz-configure
-    }
-
-    # ------------------------------------------------------------------
-    # Plugin Bundle API registration
-    # ------------------------------------------------------------------
-
-    # Register this bundle handler with the registry
-    zdot_bundle_register omz \
-        --init-fn zdot_bundle_omz_init \
-        --provides omz-bundle-initialized
-    zdot_use_bundle ohmyzsh/ohmyzsh
-
-    # Bundle-specific compdump stamp: OMZ git HEAD revision.
-    # Overrides the default stub in core/compinit.zsh.
-    _zdot_compdump_bundle_stamp() {
-        local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-        cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null
-    }
-
-    # ------------------------------------------------------------------
-    # Hook Registration
-    # ------------------------------------------------------------------
-
-    # Load omz:lib so downstream hooks (theme, prompt funcs) don't need to
-    # depend on the user-space omz-plugins-loaded phase.
-    _zdot_omz_load_lib() {
-        zdot_load_plugin omz:lib
-    }
-
-    # OMZ theme hook: loads theme during precmd if ZSH_THEME is set
-    # Depends on omz-lib-loaded (omz:lib sourced), provides omz-theme-ready
-    zdot_omz_theme_init() {
-        autoload -Uz add-zsh-hook
-        add-zsh-hook precmd zdot_omz_theme_hook
-    }
-
     # ------------------------------------------------------------------
     # Lazy-loaded OMZ Libs (from use-omz)
     # These are left for user to decide to load or not:
@@ -444,6 +252,196 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     {
         zdot_omz_lazy_load_lib prompt_info_functions
         "$0" "$@"
+    }
+
+    _ZDOT_PLUGINS_LOADED[omz:lib]=1
+}
+
+zdot_load_omz_lib() {
+    # Check if OMZ was disabled (re-check zstyle; local _zdot_omz_enabled is gone at call time)
+    if ! zstyle -T ':zdot:plugins' omz; then
+        return 0
+    fi
+    _zdot_load_omz_lib
+}
+
+# ============================================================================
+# OMZ Plugin Cloning (delegated from core/plugins.zsh)
+# ============================================================================
+
+# OMZ plugins are cloned at file source time (see early setup above)
+# This is a no-op - OMZ already cloned
+zdot_bundle_omz_clone() {
+    local spec=$1
+    # Populate path cache so zdot_load_deferred_plugins avoids a subshell
+    local relpath=${spec#omz:}
+    _ZDOT_PLUGINS_PATH[$spec]="${_ZDOT_PLUGINS_CACHE}/ohmyzsh/ohmyzsh/${relpath}"
+    return 0
+}
+
+# ============================================================================
+# OMZ Plugin Loading (delegated from core/plugins.zsh)
+# ============================================================================
+
+# Path resolution for OMZ specs
+zdot_bundle_omz_path() {
+    local spec=$1
+    local cache=$_ZDOT_PLUGINS_CACHE
+
+    # omz:lib -> ohmyzsh/ohmyzsh/lib
+    # omz:plugins/git -> ohmyzsh/ohmyzsh/plugins/git
+    local relpath=${spec#omz:}  # "lib" or "plugins/git"
+    REPLY="$cache/ohmyzsh/ohmyzsh/$relpath"
+}
+
+# Load OMZ plugin (handles both lib and plugins/*)
+zdot_bundle_omz_load() {
+    local spec=$1
+    zdot_bundle_omz_path "$spec"
+    local plugin_path=$REPLY
+
+    # Check if it's omz:lib
+    if [[ $spec == "omz:lib" ]]; then
+        zdot_load_omz_lib
+        return 0
+    fi
+
+    # Otherwise it's omz:plugins/<name>
+    local plugin_name=${spec#omz:plugins/}
+    local plugin_file="$plugin_path/$plugin_name.plugin.zsh"
+
+    [[ -d "$plugin_path" ]] || return 1
+    [[ -f "$plugin_file" ]] || return 1
+
+    # Mark as loaded
+    _ZDOT_PLUGINS_LOADED[$spec]=1
+
+    fpath+=( "$plugin_path" )
+    source "$plugin_file"
+
+    # Optionally compile to .zwc for faster loading (opt-out: enabled by default)
+    if zstyle -T ':zdot:plugins' compile; then
+        zdot_cache_compile_file "$plugin_file" 2>/dev/null || true
+    fi
+
+    return 0
+}
+
+zdot_load_omz_plugins() {
+    local plugin
+    for plugin in "$@"; do
+        zdot_bundle_omz_load "$plugin" 2>/dev/null || true
+    done
+}
+
+# ============================================================================
+# Plugin Bundle API
+# ============================================================================
+
+# Match function: returns 0 if this handler owns the spec
+zdot_bundle_omz_match() {
+    [[ $1 == omz:* ]]
+}
+
+# ============================================================================
+# Enabled-gated side effects
+# Everything below this point has observable side effects (variable setup,
+# hook/bundle registration, lazy-load stubs) and must only run when OMZ is
+# enabled.  When disabled, optionally remove the cloned repo from disk.
+# ============================================================================
+
+if [[ "$_zdot_omz_enabled" == yes ]]; then
+
+    # ------------------------------------------------------------------
+    # Bundle init function: called by zdot_init during bundle init pass
+    # ------------------------------------------------------------------
+
+    # Real OMZ setup work — registered as a hook so that all hooks in the
+    # omz-configure group (user-space zstyle calls, etc.) are guaranteed to
+    # have run before this fires.
+    _zdot_bundle_omz_setup() {
+        # Step 1: OMZ self-update check
+        zdot_omz_check_for_upgrade
+
+        # Step 2: Set OMZ environment variables and state
+        # Bugfix: OMZ has a regression where async-prompt can cause issues.
+        if ! zstyle -t ':omz:alpha:lib:git' async-prompt; then
+            zstyle ':omz:alpha:lib:git' async-prompt no
+        fi
+
+        # Set ZSH to the OMZ installation directory (required by OMZ plugins/themes)
+        [[ -n "$ZSH" ]] || ZSH="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+
+        # Set ZSH_CUSTOM to the path where custom config files and plugins exist
+        [[ -n "$ZSH_CUSTOM" ]] || ZSH_CUSTOM="$ZSH/custom"
+
+        # Set ZSH_CACHE_DIR for cache files (use zdot-specific prefix)
+        [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/ohmyzsh"
+
+        typeset -g _ZDOT_THEME_LOADED=0
+        typeset -g ZSH_THEME
+    }
+
+    # Bundle init function: called directly by _zdot_init_bundles.
+    # Does NOT do OMZ setup inline — instead registers _zdot_bundle_omz_setup
+    # as a hook so that all omz-configure group hooks (user-space zstyle calls)
+    # run first via the normal hook resolution pass.
+    #
+    # All three hooks are registered here (before plan build) so that their
+    # dep edges are visible to the topological sort:
+    #   omz-configure group → _zdot_bundle_omz_setup
+    #                       → _zdot_omz_load_lib
+    #                       → omz-plugins group members
+    #                       → zdot_omz_theme_init
+    zdot_bundle_omz_init() {
+        zdot_hook_register _zdot_bundle_omz_setup interactive noninteractive \
+            --provides omz-bundle-initialized \
+            --requires-group omz-configure
+
+        # Load omz:lib; --provides-group omz-plugins means any hook tagged
+        # --group omz-plugins gets --requires omz-lib-loaded injected.
+        zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
+            --requires omz-bundle-initialized \
+            --provides omz-lib-loaded \
+            --provides-group omz-plugins
+
+        # Theme init runs after all omz-plugins group members have loaded.
+        zdot_hook_register zdot_omz_theme_init interactive noninteractive \
+            --requires omz-lib-loaded \
+            --provides omz-theme-ready
+    }
+
+    # ------------------------------------------------------------------
+    # Plugin Bundle API registration
+    # ------------------------------------------------------------------
+
+    # Register this bundle handler with the registry
+    zdot_bundle_register omz \
+        --init-fn zdot_bundle_omz_init
+    zdot_use_bundle ohmyzsh/ohmyzsh
+
+    # Bundle-specific compdump stamp: OMZ git HEAD revision.
+    # Overrides the default stub in core/compinit.zsh.
+    _zdot_compdump_bundle_stamp() {
+        local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+        cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null
+    }
+
+    # ------------------------------------------------------------------
+    # Hook Registration
+    # ------------------------------------------------------------------
+
+    # Load omz:lib so downstream hooks (theme, prompt funcs) don't need to
+    # depend on the user-space omz-plugins-loaded phase.
+    _zdot_omz_load_lib() {
+        zdot_load_plugin omz:lib
+    }
+
+    # OMZ theme hook: loads theme during precmd if ZSH_THEME is set
+    # Depends on omz-lib-loaded (omz:lib sourced), provides omz-theme-ready
+    zdot_omz_theme_init() {
+        autoload -Uz add-zsh-hook
+        add-zsh-hook precmd zdot_omz_theme_hook
     }
 
 fi

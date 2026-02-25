@@ -32,4 +32,5 @@ zdot_hook_register _brew_init interactive noninteractive \
     --provides-tool eza \
     --provides-tool oh-my-posh \
     --provides-tool gh \
+    --provides-tool tmux \
     --provides-tool tailscale

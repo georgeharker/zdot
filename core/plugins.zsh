@@ -398,41 +398,136 @@ _zdot_init_bundles() {
     done
 }
 
-# Resolve group annotations into concrete dependency edges.
+# Resolve group annotations into concrete dependency edges by synthesising
+# barrier hooks at resolve-time.
+#
+# For each group G (referenced by --group, --provides-group, or --requires-group):
+#
+#   1. Synthesise two no-op barrier hooks:
+#        _zdot_group_begin_G  →  provides phase  _group_begin_G
+#        _zdot_group_end_G    →  provides phase  _group_end_G
+#      Both are given the union of all member contexts so they survive the DAG
+#      context filter.
+#
+#   2. For every member M of group G:
+#        • inject _group_begin_G into _ZDOT_HOOK_REQUIRES[M]   (M runs after begin)
+#        • synthesise phase _group_member_G_<hid_m>, append to _ZDOT_HOOK_PROVIDES[M]
+#        • inject _group_member_G_<hid_m> into _ZDOT_HOOK_REQUIRES of _zdot_group_end_G
+#          (end runs only after every member has provided its member phase)
+#
+#   3. For every hook H with --requires-group G:
+#        • inject _group_end_G into _ZDOT_HOOK_REQUIRES[H]
+#
+# All synthetic phases are registered into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT for
+# every context in the union so the DAG provider-check passes.
 _zdot_init_resolve_groups() {
-    local _hid _rg _mid _mg _pp _phase
+    local _grp _hid _ctx _member _phase _hid_begin _hid_end
 
-    # Loop A: --requires-group X  →  inject requires from every hook tagged --group X
+    # ── Collect all group names ──────────────────────────────────────────────
+    local -A _all_groups
+    for _grp in "${(k)_ZDOT_GROUP_MEMBERS[@]}"; do
+        _all_groups[$_grp]=1
+    done
     for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
-        _rg="${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}"
-        [[ -z $_rg ]] && continue
-        for _mid in "${(k)_ZDOT_HOOKS[@]}"; do
-            _mg="${_ZDOT_HOOK_GROUP[$_mid]:-}"
-            [[ $_mg == $_rg ]] || continue
-            _pp="${_ZDOT_HOOK_PROVIDES[$_mid]:-}"
-            for _phase in ${(z)_pp}; do
-                if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid]:-} " != *" $_phase "* ]]; then
-                    _ZDOT_HOOK_REQUIRES[$_hid]+="${_ZDOT_HOOK_REQUIRES[$_hid]:+ }$_phase"
-                fi
-            done
-        done
+        _grp="${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}"
+        [[ -n $_grp ]] && _all_groups[$_grp]=1
     done
 
-    # Loop B: --provides-group X  →  inject this hook's provides into every hook tagged --group X
-    local _pg
-    for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
-        _pg="${_ZDOT_HOOK_PROVIDES_GROUP[$_hid]:-}"
-        [[ -z $_pg ]] && continue
-        _pp="${_ZDOT_HOOK_PROVIDES[$_hid]:-}"
-        for _phase in ${(z)_pp}; do
-            for _mid in "${(k)_ZDOT_HOOKS[@]}"; do
-                _mg="${_ZDOT_HOOK_GROUP[$_mid]:-}"
-                [[ $_mg == $_pg ]] || continue
-                if [[ " ${_ZDOT_HOOK_REQUIRES[$_mid]:-} " != *" $_phase "* ]]; then
-                    _ZDOT_HOOK_REQUIRES[$_mid]+="${_ZDOT_HOOK_REQUIRES[$_mid]:+ }$_phase"
-                fi
+    # ── Process each group ───────────────────────────────────────────────────
+    local -A _ctx_union
+    for _grp in "${(k)_all_groups[@]}"; do
+
+        # 'finally' members are dispatched directly by the deferred drain;
+        # skip DAG barrier synthesis entirely for this group.
+        [[ $_grp == finally ]] && continue
+
+        # -- Compute union of member AND requiring-hook contexts -------------
+        _ctx_union=()
+        for _member in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+            for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
+                _ctx_union[$_ctx]=1
             done
         done
+        # Always include contexts from hooks that require this group, so that
+        # the synthetic barriers are visible to the DAG context filter even
+        # when the requiring hook runs in a wider context than the members.
+        for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_hid]:-}; do
+                _ctx_union[$_ctx]=1
+            done
+        done
+        local _ctx_list="${(j: :)${(k)_ctx_union}}"
+
+        # -- Allocate barrier hook IDs ---------------------------------------
+        (( _ZDOT_HOOK_COUNTER++ ))
+        _hid_begin="hook_${_ZDOT_HOOK_COUNTER}"
+        (( _ZDOT_HOOK_COUNTER++ ))
+        _hid_end="hook_${_ZDOT_HOOK_COUNTER}"
+
+        local _fn_begin="_zdot_group_begin_${_grp}"
+        local _fn_end="_zdot_group_end_${_grp}"
+        local _phase_begin="_group_begin_${_grp}"
+        local _phase_end="_group_end_${_grp}"
+
+        # -- Define barrier shell functions (no-ops; ordering is DAG-enforced) -
+        eval "${_fn_begin}() { return 0; }"
+        eval "${_fn_end}() { return 0; }"
+
+        # -- Register begin barrier ------------------------------------------
+        _ZDOT_HOOKS[$_hid_begin]=$_fn_begin
+        _ZDOT_HOOK_NAMES[$_hid_begin]="group-begin:${_grp}"
+        _ZDOT_HOOK_BY_NAME["group-begin:${_grp}"]=$_hid_begin
+        _ZDOT_HOOK_CONTEXTS[$_hid_begin]="$_ctx_list"
+        _ZDOT_HOOK_REQUIRES[$_hid_begin]=""
+        _ZDOT_HOOK_PROVIDES[$_hid_begin]="$_phase_begin"
+        _ZDOT_HOOK_OPTIONAL[$_hid_begin]=1
+
+        # -- Register end barrier --------------------------------------------
+        _ZDOT_HOOKS[$_hid_end]=$_fn_end
+        _ZDOT_HOOK_NAMES[$_hid_end]="group-end:${_grp}"
+        _ZDOT_HOOK_BY_NAME["group-end:${_grp}"]=$_hid_end
+        _ZDOT_HOOK_CONTEXTS[$_hid_end]="$_ctx_list"
+        _ZDOT_HOOK_REQUIRES[$_hid_end]=""
+        _ZDOT_HOOK_PROVIDES[$_hid_end]="$_phase_end"
+        _ZDOT_HOOK_OPTIONAL[$_hid_end]=1
+
+        # -- Register begin/end phases into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT -
+        for _ctx in ${(k)_ctx_union}; do
+            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_begin}]=$_hid_begin
+            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_end}]=$_hid_end
+        done
+
+        # -- Wire each member through the barriers ---------------------------
+        for _member in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+            # M must run after the begin barrier
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_member]:-} " != *" ${_phase_begin} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_member]+="${_ZDOT_HOOK_REQUIRES[$_member]:+ }${_phase_begin}"
+            fi
+
+            # Synthesise per-member phase and register it
+            local _phase_member="_group_member_${_grp}_${_member}"
+            if [[ " ${_ZDOT_HOOK_PROVIDES[$_member]:-} " != *" ${_phase_member} "* ]]; then
+                _ZDOT_HOOK_PROVIDES[$_member]+="${_ZDOT_HOOK_PROVIDES[$_member]:+ }${_phase_member}"
+            fi
+            for _ctx in ${(k)_ctx_union}; do
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_member}]=$_member
+            done
+
+            # End barrier must run after this member's phase
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid_end]:-} " != *" ${_phase_member} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_hid_end]+="${_ZDOT_HOOK_REQUIRES[$_hid_end]:+ }${_phase_member}"
+            fi
+        done
+
+        # -- Wire requires-group hooks to run after the end barrier ----------
+        for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid]:-} " != *" ${_phase_end} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_hid]+="${_ZDOT_HOOK_REQUIRES[$_hid]:+ }${_phase_end}"
+            fi
+        done
+
     done
 }
 

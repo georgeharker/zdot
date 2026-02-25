@@ -214,7 +214,11 @@ zdot_hook_register() {
             _ZDOT_GROUP_MEMBERS[$_hg]="${_ZDOT_GROUP_MEMBERS[$_hg]# }"
         done
     fi
-    [[ -n $hook_provides_group ]] && _ZDOT_HOOK_PROVIDES_GROUP[$hook_id]="$hook_provides_group"
+    if [[ -n $hook_provides_group ]]; then
+        _ZDOT_HOOK_PROVIDES_GROUP[$hook_id]="$hook_provides_group"
+        _ZDOT_GROUP_MEMBERS[$hook_provides_group]+=" $hook_id"
+        _ZDOT_GROUP_MEMBERS[$hook_provides_group]="${_ZDOT_GROUP_MEMBERS[$hook_provides_group]# }"
+    fi
     [[ -n $hook_requires_group ]] && _ZDOT_HOOK_REQUIRES_GROUP[$hook_id]="$hook_requires_group"
 
     # Register phase provider (context-aware)
@@ -293,14 +297,13 @@ _zdot_has_provider_in_contexts() {
     local phase="$1"
     shift
     local -a contexts=("$@")
-    
     for ctx in ${contexts[@]}; do
         local ctx_key="${ctx}:${phase}"
-        if [[ -n ${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]} ]]; then
+        local val="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}"
+        if [[ -n $val ]]; then
             return 0
         fi
     done
-    
     return 1
 }
 
@@ -376,10 +379,6 @@ zdot_build_execution_plan() {
         fi
         
         in_degree[$hook_id]=$degree
-        
-        if [[ $degree -eq 0 ]]; then
-            zero_in_degree+=($hook_id)
-        fi
     done
 
     # ── Defer-order edge injection ──
@@ -502,6 +501,17 @@ zdot_build_execution_plan() {
         zdot_warn "$_w"
     done
 
+    # Seed zero_in_degree from final in_degree values.
+    # This pass is intentionally placed AFTER both injection blocks
+    # (requires-group and defer-order) so that any in_degree increments
+    # performed by those blocks are already reflected before we decide
+    # which hooks are immediately schedulable.
+    for _zid in ${(k)in_degree}; do
+        if [[ ${in_degree[$_zid]} -eq 0 ]]; then
+            zero_in_degree+=($_zid)
+        fi
+    done
+
     # Kahn's algorithm for topological sort
     # This processes all hooks that have dependencies on provider hooks
     while [[ ${#zero_in_degree} -gt 0 ]]; do
@@ -554,6 +564,17 @@ zdot_build_execution_plan() {
                 fi
             done
         fi
+
+        # Drain synthetic group-member bridge phase.
+        #
+        # _zdot_init_resolve_groups (plugins.zsh) synthesises barrier hooks
+        # that provide `_group_begin_G` and `_group_end_G` phases and injects
+        # `_group_member_G_<hid_m>` into each member's _ZDOT_HOOK_PROVIDES.
+        # Because those phases are in _ZDOT_HOOK_PROVIDES they are processed
+        # by the real-phase loop above — no extra drain is needed here.
+        #
+        # This comment is kept to explain the absence of such a drain block;
+        # see _zdot_init_resolve_groups for the full group-ordering design.
     done
     
     # Check for cycles
@@ -626,7 +647,15 @@ zdot_build_execution_plan() {
     #
     # On each pass we scan every non-deferred hook.  If any of its
     # required phases appears in `phase_provider_reason` (i.e., will be
-    # provided late by some deferred hook), that hook is force-deferred:
+    # provided only at deferred-execution time), the hook itself must be
+    # deferred.
+    #
+    # Group requirements (--requires-group G) are handled implicitly:
+    # _zdot_init_resolve_groups injects `_group_end_G` into each requiring
+    # hook's _ZDOT_HOOK_REQUIRES, so the phase check below naturally covers
+    # group membership without any direct _ZDOT_GROUP_MEMBERS lookup here.
+    #
+    # When a hook is force-deferred:
     #   • its own provided phases are added to `phase_provider_reason`
     #     with reason "forced"
     #   • `changed` is set to 1 so the loop reruns
@@ -647,39 +676,47 @@ zdot_build_execution_plan() {
             # Already deferred — skip
             [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -gt 0 ]] && continue
             # Check if any required phase is provided only by a deferred hook
+            local _force_deferred=0
+            local _force_reason=""
+            local _force_phase=""
             for phase in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
                 if [[ ${phase_provider_reason[$phase]+x} ]]; then
-                    local reason="${phase_provider_reason[$phase]}"
-                    # Force-defer this hook
-                    _ZDOT_EXECUTION_PLAN_DEFERRED+=($hook_id)
-                    # Propagate: phases this hook provides are now "forced" (transitively)
-                    for provided in ${=_ZDOT_HOOK_PROVIDES[$hook_id]}; do
-                        phase_provider_reason[$provided]="forced"
-                    done
-                    # Only warn if the triggering phase came from a force-deferred hook
-                    # (not an explicit --deferred tool dependency — that is expected/silent)
-                    if [[ $reason == "forced" ]]; then
-                        local func_name="${_ZDOT_HOOKS[$hook_id]}"
-                        # Check if the user has accepted this force-deferral
-                        local _accepted=0
-                        if [[ ${_ZDOT_ACCEPTED_DEFERRED[$func_name]+x} ]]; then
-                            local _acceptance="${_ZDOT_ACCEPTED_DEFERRED[$func_name]}"
-                            if [[ $_acceptance == "all" ]] || [[ " $_acceptance " == *" $phase "* ]]; then
-                                _accepted=1
-                            fi
-                        fi
-                        if [[ $_accepted -eq 0 ]]; then
-                            local msg="zdot: WARNING: Hook '$func_name' requires deferred phase '$phase'; it has been force-deferred"
-                            zdot_warn "$msg"
-                            if [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]} -eq 0 ]]; then
-                                _ZDOT_FORCED_DEFERRED_WARNINGS+=("$msg")
-                            fi
-                        fi
-                    fi
-                    changed=1
+                    _force_deferred=1
+                    _force_reason="${phase_provider_reason[$phase]}"
+                    _force_phase="$phase"
                     break
                 fi
             done
+
+            if [[ $_force_deferred -eq 1 ]]; then
+                # Force-defer this hook
+                _ZDOT_EXECUTION_PLAN_DEFERRED+=($hook_id)
+                # Propagate: phases this hook provides are now "forced" (transitively)
+                for provided in ${=_ZDOT_HOOK_PROVIDES[$hook_id]}; do
+                    phase_provider_reason[$provided]="forced"
+                done
+                # Only warn if the triggering phase came from a force-deferred hook
+                # (not an explicit --deferred tool dependency — that is expected/silent)
+                if [[ $_force_reason == "forced" ]]; then
+                    local func_name="${_ZDOT_HOOKS[$hook_id]}"
+                    # Check if the user has accepted this force-deferral
+                    local _accepted=0
+                    if [[ ${_ZDOT_ACCEPTED_DEFERRED[$func_name]+x} ]]; then
+                        local _acceptance="${_ZDOT_ACCEPTED_DEFERRED[$func_name]}"
+                        if [[ $_acceptance == "all" ]] || [[ " $_acceptance " == *" $_force_phase "* ]]; then
+                            _accepted=1
+                        fi
+                    fi
+                    if [[ $_accepted -eq 0 ]]; then
+                        local msg="zdot: WARNING: Hook '$func_name' requires deferred phase '$_force_phase'; it has been force-deferred"
+                        zdot_warn "$msg"
+                        if [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]} -eq 0 ]]; then
+                            _ZDOT_FORCED_DEFERRED_WARNINGS+=("$msg")
+                        fi
+                    fi
+                fi
+                changed=1
+            fi
         done
     done
 
@@ -931,7 +968,7 @@ _zdot_run_deferred_phase_check() {
     # the deferred queue has fully drained.
     if [[ $dispatched -eq 0 && ${#pending_hooks} -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
         # Auto-dispatch the 'finally' group on first full drain.
-        # Hooks that declared --requires-group finally are collected in
+        # Hooks that declared --group finally are collected in
         # _ZDOT_GROUP_MEMBERS[finally]; execute any that haven't run yet.
         if [[ -n "${_ZDOT_GROUP_MEMBERS[finally]}" ]]; then
             local _finally_hook_id

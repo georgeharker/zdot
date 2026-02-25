@@ -6,8 +6,15 @@
 # Plugin Configuration (zstyles for OMZ plugins)
 # ============================================================================
 
-_plugins_configure() {
+_omz_configure_update() {
     zstyle ':omz:update' mode prompt
+}
+
+zdot_hook_register _omz_configure_update interactive noninteractive \
+    --name omz-configure-update \
+    --group omz-configure
+
+_plugins_configure() {
     zstyle ':omz:plugins:eza' 'dirs-first' yes
     zstyle ':omz:plugins:eza' 'git-status' yes
     zstyle ':omz:plugins:eza' 'icons' yes
@@ -126,7 +133,9 @@ zdot_hook_register _plugins_load_omz interactive noninteractive \
     --name omz-loader \
     --group omz-plugins \
     --requires plugins-cloned \
+    --requires omz-bundle-initialized \
     --provides omz-plugins-loaded \
+    --requires-tool tmux \
     --provides-tool fzf \
     --provides-tool nvm
 

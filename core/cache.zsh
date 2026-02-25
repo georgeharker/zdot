@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="12"         # Cache format version (plugins-cloned-sentinel hook)
+typeset -g _ZDOT_CACHE_VERSION="16"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
