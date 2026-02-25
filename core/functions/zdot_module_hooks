@@ -1,0 +1,75 @@
+#! /bin/zsh
+
+# Print a summary of registered hooks grouped by the module that registered
+# them.  Intended as a human-readable introspection tool, not a runtime
+# primitive — it is called interactively or from debug/test scripts.
+#
+# Module membership is read from `_ZDOT_HOOK_MODULES`, which is populated by
+# `zdot_hook_register` when hooks are declared.  For each hook the output
+# shows the function name, its `provides` set, and its `requires` set so the
+# reader can quickly audit what a module contributes to the dependency graph.
+#
+# An optional module-name argument narrows output to a single module; without
+# it every module is printed in alphabetical order.
+#
+# Usage: zdot_module_hooks [module-name]
+zdot_module_hooks() {
+    local target_module="$1"
+
+    # Build a map of module -> hooks
+    local -A module_hooks
+
+    for hook_id in ${(k)_ZDOT_HOOKS}; do
+        local func=${_ZDOT_HOOKS[$hook_id]}
+        local module="${_ZDOT_HOOK_MODULES[$func]}"
+
+        # Filter by module if specified
+        if [[ -n "$target_module" && "$module" != "$target_module" ]]; then
+            continue
+        fi
+
+        if [[ -z "${module_hooks[$module]}" ]]; then
+            module_hooks[$module]="$func"
+        else
+            module_hooks[$module]="${module_hooks[$module]} $func"
+        fi
+    done
+
+    if [[ -n "$target_module" ]]; then
+        zdot_info "Hooks registered by module: $target_module"
+    else
+        zdot_info "Hooks registered by each module:"
+    fi
+    zdot_info ""
+
+    # Sort modules alphabetically
+    for module in ${(ko)module_hooks}; do
+        zdot_info "Module: $module"
+
+        local hooks="${module_hooks[$module]}"
+        for func in ${=hooks}; do
+            # Find hook_id for this function
+            local hook_id=""
+            for hid in ${(k)_ZDOT_HOOKS}; do
+                if [[ ${_ZDOT_HOOKS[$hid]} == $func ]]; then
+                    hook_id=$hid
+                    break
+                fi
+            done
+
+            if [[ -n $hook_id ]]; then
+                local provides=${_ZDOT_HOOK_PROVIDES[$hook_id]:-"(none)"}
+                local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
+                zdot_info "  • $func"
+                zdot_info "    provides: $provides"
+                zdot_info "    requires: $requires"
+            fi
+        done
+        zdot_info ""
+    done
+
+    if [[ -z "$target_module" ]]; then
+        local total_modules=${#module_hooks[@]}
+        zdot_info "Total: $total_modules module(s) with registered hooks"
+    fi
+}

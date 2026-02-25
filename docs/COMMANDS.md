@@ -158,7 +158,7 @@ zdot debug
 **Output includes:**
 - `_ZDOT_EXECUTION_PLAN` — ordered list of hook IDs in dependency-resolved order
 - `_ZDOT_HOOKS_EXECUTED` — hooks that have run this session
-- `_ZDOT_PHASES_PROVIDED` / `_ZDOT_PHASES_PROMISED` — phase lifecycle state
+- `_ZDOT_PHASES_PROVIDED` — phase lifecycle state
 - `_ZDOT_PLUGINS_ORDER` — all declared plugins with loaded/not-loaded status
 - `_ZDOT_MODULES_LOADED` — all loaded modules
 

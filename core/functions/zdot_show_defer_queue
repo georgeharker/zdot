@@ -9,7 +9,7 @@ function zdot_show_defer_queue() {
         return 0
     fi
 
-    zdot_info "Deferred Queue (submission order):"
+    zdot_report "Deferred Queue (submission order):"
     zdot_info ""
 
     local i task_num=0 sentinel_num=0
@@ -56,6 +56,13 @@ function zdot_show_defer_queue() {
                 suffix="$delay_str"
             fi
         fi
+        if [[ ${_ZDOT_HOOK_DEFER_ARGS[$hook]+set} == set ]]; then
+            if [[ -n "$suffix" ]]; then
+                suffix+="  [noquiet]"
+            else
+                suffix="[noquiet]"
+            fi
+        fi
 
         local line
         printf -v line "  [defer #%-2d] %-50s" "$task_num" "$label"
@@ -66,5 +73,5 @@ function zdot_show_defer_queue() {
     done
 
     zdot_info ""
-    zdot_info "Total: $task_num deferred task(s) + $sentinel_num sentinel(s)"
+    zdot_report "Total: $task_num deferred task(s) + $sentinel_num sentinel(s)"
 }

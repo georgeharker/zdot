@@ -59,24 +59,43 @@ zdot_use omz:plugins/ssh
 zdot_use omz:plugins/debian
 
 # Abbreviations support
-zdot_use_defer olets/zsh-abbr
+zdot_use olets/zsh-abbr defer \
+    --name zsh-abbr-load \
+    --provides abbr-ready \
+    --requires omz-plugins-loaded
 
 # Syntax highlighting (deferred for faster startup)
-zdot_use_defer zdharma-continuum/fast-syntax-highlighting
-zdot_use_defer 5A6F65/fast-abbr-highlighting
+zdot_use zdharma-continuum/fast-syntax-highlighting defer \
+    --name fsh-load \
+    --provides fsh-ready \
+    --requires omz-plugins-loaded
+
+# fast-abbr highlighting (requires FSH)
+zdot_use 5A6F65/fast-abbr-highlighting defer \
+    --name fast-abbr-load \
+    --provides fast-abbr-ready \
+    --requires fsh-ready
 
 # Autosuggestions (deferred)
-zdot_use_defer zsh-users/zsh-autosuggestions
-zdot_use_defer olets/zsh-autosuggestions-abbreviations-strategy
+zdot_use zsh-users/zsh-autosuggestions defer \
+    --name autosuggest-load \
+    --provides autosuggest-ready \
+    --requires omz-plugins-loaded
+
+# autosuggest abbreviations strategy
+zdot_use olets/zsh-autosuggestions-abbreviations-strategy defer \
+    --name autosuggest-abbr-load \
+    --provides autosuggest-abbr-ready \
+    --requires autosuggest-ready
 
 # fzf tab completion (must be last)
 zdot_use Aloxaf/fzf-tab
 
-# Register hook that provides plugins-declared (after declarations are made)
+# Register plugin configuration hook
 zdot_hook_register _plugins_configure interactive noninteractive \
     --name plugins-configure \
-    --requires xdg-configured \
-    --provides plugins-declared
+    --requires xdg-configured
+
 
 # OMZ Library Loader (called when needed)
 # Uses omz.zsh bundle for compdef queue and compinit deferral
@@ -105,25 +124,21 @@ _plugins_load_omz() {
 # Note: _plugins_load_omz handles non-interactive gracefully (skips compinit)
 zdot_hook_register _plugins_load_omz interactive noninteractive \
     --name omz-loader \
+    --group omz-plugins \
     --requires plugins-cloned \
     --provides omz-plugins-loaded \
     --provides-tool fzf \
     --provides-tool nvm
 
 # ============================================================================
-# Deferred Plugins Loader
+# Compinit (deferred, after all deferred plugins are fpath-registered)
 # ============================================================================
 
-_plugins_load_deferred() {
-    # Load zsh-defer and all deferred plugins
-    zdot_load_deferred_plugins
-}
-
-zdot_hook_register _plugins_load_deferred interactive noninteractive \
-    --name deferred-loader \
+zdot_hook_register zdot_compinit_defer interactive noninteractive \
+    --name compinit-defer \
     --deferred \
-    --requires omz-plugins-loaded \
-    --provides plugins-loaded
+    --requires autosuggest-abbr-ready \
+    --provides compinit-done
 
 # ============================================================================
 # Non-deferred plugins (fzf-tab)
@@ -139,7 +154,7 @@ _plugins_load_fzf_tab() {
 
 zdot_hook_register _plugins_load_fzf_tab interactive \
     --name fzf-tab-loader \
-    --requires plugins-loaded \
+    --requires autosuggest-abbr-ready \
     --provides fzf-tab-loaded
 
 # ============================================================================
@@ -160,7 +175,7 @@ _plugins_post_init() {
 zdot_hook_register _plugins_post_init interactive noninteractive \
     --name plugins-post \
     --deferred \
-    --requires plugins-loaded \
+    --requires autosuggest-abbr-ready \
     --provides plugins-post-configured
 
 # ============================================================================
@@ -190,5 +205,16 @@ zdot_hook_register _nvm_interactive_init interactive \
 
 zdot_hook_register _nvm_noninteractive_init noninteractive \
     --name nvm-noninteractive \
-    --requires plugins-loaded \
+    --requires omz-plugins-loaded \
     --provides nvm-ready
+
+# Accept intentional force-deferral for hooks whose required phases are
+# provided by explicitly --deferred hooks
+zdot_accept_deferred _fzf_post_plugin
+zdot_accept_deferred _plugins_load_fzf_tab
+zdot_accept_deferred _completions_finalize
+zdot_accept_deferred _keybinds_init
+zdot_accept_deferred _aliases_init
+zdot_accept_deferred _prompt_init
+
+# zdot_init is called from .zshenv after all modules have loaded

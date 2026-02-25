@@ -1,13 +1,15 @@
 #!/usr/bin/env zsh
 # List all registered hooks organized by the phases they provide
-# Usage: zdot_hooks_list [--verbose|-v] [--all|-a|all]
+# Usage: zdot_hooks_list [--verbose|-v] [--all|-a|all] [--ordered|-o]
 # Options:
 #   --verbose, -v    Show whether functions are defined and show dependencies
 #   --all, -a, all   Show all contexts (default: only show current shell context)
+#   --ordered, -o    Show hooks in execution-plan order (eager → deferred → unplanned)
 
 function zdot_hooks_list() {
     local verbose=0
     local show_all=0
+    local ordered=0
 
     # Parse arguments
     for arg in "$@"; do
@@ -18,8 +20,117 @@ function zdot_hooks_list() {
             --all|-a|all)
                 show_all=1
                 ;;
+            --ordered|-o)
+                ordered=1
+                ;;
         esac
     done
+
+    # --ordered mode: show hooks in execution-plan order (mirrors zdot_show_hooks)
+    if [[ $ordered -eq 1 ]]; then
+        zdot_report "Registered hooks (execution order):"
+        zdot_info ""
+
+        local -A _shown
+        local _pos=1
+
+        # Eager execution plan
+        if (( ${#_ZDOT_EXECUTION_PLAN[@]} > 0 )); then
+            for hook_id in "${_ZDOT_EXECUTION_PLAN[@]}"; do
+                local func="${_ZDOT_HOOKS[$hook_id]}"
+                local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
+                local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
+                zdot_info "  [$_pos] $func"
+                zdot_info "       name:     $name"
+                zdot_info "       provides: $provides"
+                zdot_info "       deferred: no"
+                if [[ $verbose -eq 1 ]]; then
+                    local ctx="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+                    local req="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+                    zdot_info "       contexts: $ctx"
+                    zdot_info "       requires: $req"
+                fi
+                local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+                local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+                local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+                [[ -n $_grp  ]] && zdot_info "       group:         $_grp"
+                [[ -n $_rgrp ]] && zdot_info "       requires-group: $_rgrp"
+                [[ -n $_pgrp ]] && zdot_info "       provides-group: $_pgrp"
+                zdot_info ""
+                _shown[$hook_id]=1
+                (( _pos++ ))
+            done
+        fi
+
+        # Deferred execution plan
+        if (( ${#_ZDOT_EXECUTION_PLAN_DEFERRED[@]} > 0 )); then
+            for hook_id in "${_ZDOT_EXECUTION_PLAN_DEFERRED[@]}"; do
+                local func="${_ZDOT_HOOKS[$hook_id]}"
+                local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
+                local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
+                zdot_info "  [$_pos] $func"
+                zdot_info "       name:     $name"
+                zdot_info "       provides: $provides"
+                zdot_info "       deferred: yes"
+                if [[ ${_ZDOT_HOOK_DEFER_ARGS[$hook_id]+set} == set ]]; then
+                    local _flag_key="${_ZDOT_HOOK_DEFER_ARGS[$hook_id]}"
+                    zdot_info "       defer-args: ${_ZDOT_DEFER_FLAG_NAMES[$_flag_key]:-$_flag_key}"
+                fi
+                if [[ $verbose -eq 1 ]]; then
+                    local ctx="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+                    local req="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+                    zdot_info "       contexts: $ctx"
+                    zdot_info "       requires: $req"
+                fi
+                local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+                local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+                local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+                [[ -n $_grp  ]] && zdot_info "       group:         $_grp"
+                [[ -n $_rgrp ]] && zdot_info "       requires-group: $_rgrp"
+                [[ -n $_pgrp ]] && zdot_info "       provides-group: $_pgrp"
+                zdot_info ""
+                _shown[$hook_id]=1
+                (( _pos++ ))
+            done
+        fi
+
+        # Unplanned hooks (registered but not in either plan)
+        local _unplanned=0
+        for hook_id in ${(k)_ZDOT_HOOKS}; do
+            [[ -n "${_shown[$hook_id]}" ]] && continue
+            if (( _unplanned == 0 )); then
+                zdot_info "  (unplanned — zdot_init not yet called or hook excluded)"
+                zdot_info ""
+                _unplanned=1
+            fi
+            local func="${_ZDOT_HOOKS[$hook_id]}"
+            local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
+            local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
+            local is_deferred="no"
+            [[ -n "${_ZDOT_DEFERRED_HOOKS[$hook_id]}" ]] && is_deferred="yes"
+            zdot_info "  [?] $func"
+            zdot_info "       name:     $name"
+            zdot_info "       provides: $provides"
+            zdot_info "       deferred: $is_deferred"
+            if [[ $verbose -eq 1 ]]; then
+                local ctx="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
+                local req="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
+                zdot_info "       contexts: $ctx"
+                zdot_info "       requires: $req"
+            fi
+            local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+            local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+            local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+            [[ -n $_grp  ]] && zdot_info "       group:         $_grp"
+            [[ -n $_rgrp ]] && zdot_info "       requires-group: $_rgrp"
+            [[ -n $_pgrp ]] && zdot_info "       provides-group: $_pgrp"
+            zdot_info ""
+        done
+
+        local _total=${#_ZDOT_HOOKS[@]}
+        zdot_info "Total: $_total hook(s) registered"
+        return 0
+    fi
 
     zdot_info "Registered Hooks:"
     zdot_info ""
@@ -48,13 +159,12 @@ function zdot_hooks_list() {
 
     # Group hooks by the phase they provide
     local -A phases_to_hooks=()
-    local -a on_demand_hooks=()
+    local -a unplanned_hooks=()
     local -a error_hooks=()
 
     for hook_id in ${(k)_ZDOT_HOOKS}; do
         local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
         local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
-        local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
 
         # Check if this hook matches any of the contexts we want to show
         local matches_context=0
@@ -79,33 +189,24 @@ function zdot_hooks_list() {
                         phases_to_hooks[$phase]="${phases_to_hooks[$phase]} $hook_id"
                     fi
                 done
-            elif [[ "$on_demand" -eq 1 ]]; then
-                # Hook is explicitly marked as on-demand
-                on_demand_hooks+=("$hook_id")
             else
-                # Hook without phase and not on-demand - check for errors
+                # Hook without a provided phase — check for unsatisfiable requirements
                 local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
                 local has_error=0
-                
-                # Check if any required phase is unsatisfiable
+
                 for required_phase in ${=requires}; do
-                    # Phase is satisfiable if it's:
-                    # 1. Provided by a hook (in the hook's declared contexts)
-                    # 2. Promised via zdot_promise_phase
-                    # 3. Marked as on-demand
-                    if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts} && \
-                       [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
-                       [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                    # Phase is satisfiable if at least one hook provides it in the
+                    # hook's declared contexts.
+                    if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts}; then
                         has_error=1
                         break
                     fi
                 done
-                
+
                 if [[ $has_error -eq 1 ]]; then
                     error_hooks+=("$hook_id")
                 else
-                    # No errors, treat as on-demand (legacy behavior)
-                    on_demand_hooks+=("$hook_id")
+                    unplanned_hooks+=("$hook_id")
                 fi
             fi
         fi
@@ -139,37 +240,46 @@ function zdot_hooks_list() {
                     zdot_info "    name: ${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
                     zdot_info "    contexts: $contexts"
                     zdot_info "    requires: $requires"
+                    local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+                    local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+                    local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+                    [[ -n $_grp  ]] && zdot_info "    group:          $_grp"
+                    [[ -n $_rgrp ]] && zdot_info "    requires-group: $_rgrp"
+                    [[ -n $_pgrp ]] && zdot_info "    provides-group: $_pgrp"
                     if [[ "$optional" == 1 ]]; then
                         zdot_info "    optional: yes"
                     fi
                     local _deferred="${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]}"
                     if [[ "$_deferred" -gt 0 ]]; then
                         zdot_info "    deferred: yes"
+                        if [[ ${_ZDOT_HOOK_DEFER_ARGS[$hook_id]+set} == set ]]; then
+                            local _flag_key="${_ZDOT_HOOK_DEFER_ARGS[$hook_id]}"
+                            zdot_info "    defer-args: ${_ZDOT_DEFER_FLAG_NAMES[$_flag_key]:-$_flag_key}"
+                        fi
                     fi
                 else
                     # Normal mode: just list the hook
                     local optional_mark=""
                     [[ "$optional" == 1 ]] && optional_mark=" [optional]"
-                    local _name_mark="" _deferred_mark=""
+                    local _name_mark="" _deferred_mark="" _noquiet_mark=""
                     _zdot_hook_display_marks "$hook_id" "$func"
-                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark"
+                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark"
                 fi
             done
             zdot_info ""
         done
     fi
 
-    # Display on-demand hooks
-    if [[ ${#on_demand_hooks[@]} -gt 0 ]]; then
-        zdot_info "On-demand Hooks:"
+    # Display unplanned hooks (no provided phase, but requirements satisfiable)
+    if [[ ${#unplanned_hooks[@]} -gt 0 ]]; then
+        zdot_info "Unplanned Hooks:"
         zdot_info ""
 
-        for hook_id in "${on_demand_hooks[@]}"; do
+        for hook_id in "${unplanned_hooks[@]}"; do
             local func="${_ZDOT_HOOKS[$hook_id]}"
             local contexts="${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]:-none}"
             local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
-            local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
 
             if [[ $verbose -eq 1 ]]; then
                 if typeset -f "$func" > /dev/null 2>&1; then
@@ -179,20 +289,29 @@ function zdot_hooks_list() {
                 fi
                 zdot_info "    contexts: $contexts"
                 zdot_info "    requires: $requires"
-                if [[ "$on_demand" -eq 1 ]]; then
-                    zdot_info "    on-demand: yes"
-                fi
+                local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+                local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+                local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+                [[ -n $_grp  ]] && zdot_info "    group:          $_grp"
+                [[ -n $_rgrp ]] && zdot_info "    requires-group: $_rgrp"
+                [[ -n $_pgrp ]] && zdot_info "    provides-group: $_pgrp"
                 if [[ "$optional" == 1 ]]; then
                     zdot_info "    optional: yes"
+                fi
+                local _deferred_up="${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]}"
+                if [[ "$_deferred_up" -gt 0 ]]; then
+                    zdot_info "    deferred: yes"
+                    if [[ ${_ZDOT_HOOK_DEFER_ARGS[$hook_id]+set} == set ]]; then
+                        local _flag_key="${_ZDOT_HOOK_DEFER_ARGS[$hook_id]}"
+                        zdot_info "    defer-args: ${_ZDOT_DEFER_FLAG_NAMES[$_flag_key]:-$_flag_key}"
+                    fi
                 fi
             else
                 local optional_mark=""
                 [[ "$optional" == 1 ]] && optional_mark=" [optional]"
-                local on_demand_mark=""
-                [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
-                local _name_mark="" _deferred_mark=""
+                local _name_mark="" _deferred_mark="" _noquiet_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "  • $func ($contexts)$optional_mark$on_demand_mark$_name_mark$_deferred_mark"
+                zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark"
             fi
         done
         zdot_info ""
@@ -211,12 +330,16 @@ function zdot_hooks_list() {
 
             zdot_warn "  ✗ $func ($contexts)"
             zdot_info "    requires: $requires"
+            local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
+            local _rgrp="${_ZDOT_HOOK_REQUIRES_GROUP[$hook_id]:-}"
+            local _pgrp="${_ZDOT_HOOK_PROVIDES_GROUP[$hook_id]:-}"
+            [[ -n $_grp  ]] && zdot_info "    group:          $_grp"
+            [[ -n $_rgrp ]] && zdot_info "    requires-group: $_rgrp"
+            [[ -n $_pgrp ]] && zdot_info "    provides-group: $_pgrp"
             
             # Show which requirements are unsatisfiable
             for required_phase in ${=requires}; do
-                if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts} && \
-                   [[ -z "${_ZDOT_PHASES_PROMISED[$required_phase]}" ]] && \
-                   [[ -z "${_ZDOT_ON_DEMAND_PHASES[$required_phase]}" ]]; then
+                if ! _zdot_has_provider_in_contexts "$required_phase" ${=contexts}; then
                     zdot_error "      ⚠ '$required_phase' is not provided by any hook"
                 fi
             done
@@ -240,7 +363,7 @@ function zdot_hooks_list() {
     for phase in "${(@k)phases_to_hooks}"; do
         shown_hooks=$(( shown_hooks + ${#${=phases_to_hooks[$phase]}[@]} ))
     done
-    shown_hooks=$(( shown_hooks + ${#on_demand_hooks[@]} ))
+    shown_hooks=$(( shown_hooks + ${#unplanned_hooks[@]} ))
 
     if [[ $show_all -eq 1 ]]; then
         zdot_info "Total: $total_hooks registered hook(s)"

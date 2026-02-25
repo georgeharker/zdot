@@ -64,12 +64,26 @@ zdot_bundle_pz_load() {
 }
 
 # ============================================================================
+# Bundle Init
+# ============================================================================
+
+zdot_bundle_pz_init() {
+    # Step 1: environment / state setup (nothing extra needed; ZPREZTODIR is
+    # set at file-source time so that zdot_plugin_clone can reference it early)
+
+    # Step 2: register the Prezto init hook
+    zdot_hook_register _zdot_pz_load_init interactive noninteractive \
+        --requires plugins-cloned \
+        --provides pz-init-loaded
+}
+
+# ============================================================================
 # Plugin Bundle API
 # ============================================================================
 
 # Register this bundle handler with the registry — only when enabled
 if [[ "$_zdot_pz_enabled" == yes ]]; then
-    zdot_bundle_register pz
+    zdot_bundle_register pz --init-fn zdot_bundle_pz_init --provides pz-bundle-initialized
     zdot_use_bundle sorin-ionescu/prezto
 fi
 
@@ -113,8 +127,3 @@ _zdot_pz_load_init() {
     fi
 }
 
-if [[ "$_zdot_pz_enabled" == yes ]]; then
-    zdot_hook_register _zdot_pz_load_init interactive noninteractive \
-        --requires plugins-cloned \
-        --provides pz-init-loaded
-fi

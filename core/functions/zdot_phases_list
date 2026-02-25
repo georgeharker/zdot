@@ -18,7 +18,7 @@ function zdot_phases_list() {
         shift
     done
 
-    zdot_info "Phases:"
+    zdot_report "Phases:"
     zdot_info ""
 
     # ── build phase → hook_id mapping ──────────────────────────────────────
@@ -95,12 +95,9 @@ function zdot_phases_list() {
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
-                local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
-                local on_demand_mark=""
-                [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
-                local _name_mark="" _deferred_mark=""
+                local _name_mark="" _deferred_mark="" _noquiet_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "    • $func${on_demand_mark}${_name_mark}${_deferred_mark}"
+                zdot_info "    • $func${_name_mark}${_deferred_mark}${_noquiet_mark}"
             done
         done
         zdot_info ""
@@ -132,12 +129,9 @@ function zdot_phases_list() {
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
-                local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
-                local on_demand_mark=""
-                [[ "$on_demand" -eq 1 ]] && on_demand_mark=" [on-demand]"
                 local _name_mark="" _deferred_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "    • $func${on_demand_mark}${_name_mark}${_deferred_mark}"
+                zdot_info "    • $func${_name_mark}${_deferred_mark}"
             done
         done
         zdot_info ""

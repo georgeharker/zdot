@@ -17,13 +17,14 @@ typeset -g  _ZDOT_PLUGINS_CACHE  # cache directory
 typeset -g  _ZDOT_PLUGINS_INITIALIZED=0
 typeset -ga _ZDOT_BUNDLE_HANDLERS # Ordered list of registered bundle handler names
 typeset -ga _ZDOT_BUNDLE_REPOS    # Repos cloned as bundle dependencies (not user plugins)
+typeset -gA _ZDOT_BUNDLE_INIT_FN  # bundle name -> init function name
+typeset -gA _ZDOT_BUNDLE_PROVIDES # bundle name -> phase token published after bundle init
 typeset -ga _ZDOT_DEFER_CMDS        # [N] = command string submitted
 typeset -ga _ZDOT_DEFER_HOOKS       # [N] = hook_func that submitted it (or "?" if outside hook)
 typeset -ga _ZDOT_DEFER_DELAYS      # [N] = delay in seconds (0 if none)
 typeset -ga _ZDOT_DEFER_SPECS       # [N] = human-readable spec name (plugins), "__sentinel__", or ""
 typeset -ga _ZDOT_DEFER_LABELS      # [N] = explicit --label override (or "" if none)
 typeset -g  _ZDOT_DEFER_COUNTER=0
-typeset -g  _ZDOT_DEFER_SKIP_RECORD=0  # suppress generic recording when zdot_load_deferred_plugins records inline
 
 # _zdot_defer_record — append one deferred-command entry to the display log.
 #
@@ -38,10 +39,6 @@ typeset -g  _ZDOT_DEFER_SKIP_RECORD=0  # suppress generic recording when zdot_lo
 #   _ZDOT_DEFER_SPECS   — the plugin spec string (or "" if not inside a plugin)
 #
 # _ZDOT_DEFER_COUNTER tracks the total count (== length of each array).
-#
-# Callers set _ZDOT_DEFER_SKIP_RECORD=1 when they need to enqueue a command
-# via zdot_defer but have already called _zdot_defer_record manually (e.g. the
-# compinit special case), to prevent double-recording.
 _zdot_defer_record() {
     (( _ZDOT_DEFER_COUNTER++ ))
     _ZDOT_DEFER_CMDS+=( "$1" )
@@ -54,14 +51,14 @@ _zdot_defer_record() {
 # Display the Defer Order Constraints section (shared by hooks_list and phases_list).
 _zdot_defer_order_display() {
     if [[ ${#_ZDOT_DEFER_ORDER_PAIRS[@]} -gt 0 ]]; then
-        zdot_info "Defer Order Constraints:"
+        zdot_report "Defer Order Constraints:"
         zdot_info ""
         local _pi=1
         while [[ $_pi -lt ${#_ZDOT_DEFER_ORDER_PAIRS[@]} ]]; do
             local _fn="${_ZDOT_DEFER_ORDER_PAIRS[$_pi]}"
             local _tn="${_ZDOT_DEFER_ORDER_PAIRS[$(( _pi + 1 ))]}"
             (( _pi += 2 ))
-            zdot_info "  $_fn → $_tn"
+            zdot_info "  %F{cyan}${_fn}%f → %F{cyan}${_tn}%f"
         done
         zdot_info ""
     fi
@@ -69,13 +66,19 @@ _zdot_defer_order_display() {
 
 # Set _name_mark and _deferred_mark for a given hook_id/func pair.
 # Usage: _zdot_hook_display_marks <hook_id> <func>
-# Sets: _name_mark, _deferred_mark (in caller's scope, no local)
+# Sets: _name_mark, _deferred_mark, _noquiet_mark (in caller's scope, no local)
 _zdot_hook_display_marks() {
     local _hname="${_ZDOT_HOOK_NAMES[$1]:-$2}"
     _name_mark=""
-    [[ "$_hname" != "$2" ]] && _name_mark=" [name: $_hname]"
+    [[ "$_hname" != "$2" ]] && _name_mark=" %F{blue}[name: $_hname]%f"
     _deferred_mark=""
-    [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]] && _deferred_mark=" [deferred]"
+    [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]] && _deferred_mark=" %F{magenta}[deferred]%f"
+    _noquiet_mark=""
+    local _defer_arg="${_ZDOT_HOOK_DEFER_ARGS[$1]:-}"
+    if [[ -n "$_defer_arg" ]]; then
+        local _flag_label="${_ZDOT_DEFER_FLAG_NAMES[$_defer_arg]:-$_defer_arg}"
+        _noquiet_mark=" %F{yellow}[${_flag_label}]%f"
+    fi
 }
 
 # Set defer_mark based on whether any hook in the id list ran deferred work.
@@ -89,7 +92,7 @@ _zdot_ran_deferred_mark() {
         [[ " ${_ZDOT_DEFER_HOOKS[@]} " =~ " ${_f} " ]] && _rd=1 && break
     done
     defer_mark=""
-    [[ $_rd -eq 1 ]] && defer_mark=" [ran deferred]"
+    [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"
 }
 
 # ============================================================================
@@ -181,12 +184,27 @@ _zdot_plugins_init() {
 zdot_bundle_register() {
     local name=$1
     [[ -z "$name" ]] && return 1
+    shift
+
+    # Parse optional flags: --init-fn <fn>  --provides <phase>
+    local init_fn='' provides_phase=''
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --init-fn)   init_fn=$2;       shift 2 ;;
+            --provides)  provides_phase=$2; shift 2 ;;
+            *) zdot_error "zdot_bundle_register: unknown option: $1"; return 1 ;;
+        esac
+    done
+
     # Avoid duplicates
     local h
     for h in $_ZDOT_BUNDLE_HANDLERS; do
         [[ $h == $name ]] && return 0
     done
     _ZDOT_BUNDLE_HANDLERS+=( "$name" )
+
+    [[ -n "$init_fn" ]]       && _ZDOT_BUNDLE_INIT_FN[$name]=$init_fn
+    [[ -n "$provides_phase" ]] && _ZDOT_BUNDLE_PROVIDES[$name]=$provides_phase
 }
 
 # Find the registered bundle handler that owns <spec>.
@@ -207,39 +225,134 @@ _zdot_bundle_handler_for() {
 # Public API: zdot_use
 # ============================================================================
 
-# Declare a plugin to be available (clone if needed, but don't load)
-# Usage: zdot_use <spec> [kind]
-#   spec: "omz:lib", "omz:plugins/git", "user/repo", "user/repo@v1.0.0"
-#   kind: normal (default), defer, fpath, path
+# Declare a plugin and register a load hook.
+#
+# New forms (preferred):
+#   zdot_use <spec> hook  [--name <n>] [--provides <p>] [--config <fn>] [--context <c>]
+#                         [--group <g>] [--requires-group <g>] [--provides-group <g>]
+#   zdot_use <spec> defer [--name <n>] [--provides <p>] [--config <fn>] [--context <c>]
+#                         [--requires <r>]
+#                         [--group <g>] [--requires-group <g>] [--provides-group <g>]
+#
+# Legacy forms (still accepted):
+#   zdot_use <spec>              # kind=normal — record for cloning only
+#   zdot_use <spec> normal|defer|fpath|path
 zdot_use() {
     local spec=$1
-    local kind=${2:-normal}
-    
     if [[ -z "$spec" ]]; then
         zdot_error "zdot_use: plugin spec required"
         return 1
     fi
-    
-    # Parse version from spec (user/repo@v1.0.0)
-    local version=""
+    shift
+
+    # ── Determine subcommand ────────────────────────────────────────────────
+    local subcommand=''
+    case ${1:-} in
+        hook|defer|defer-prompt) subcommand=$1; shift ;;
+        # Legacy positional kind argument
+        normal|defer|fpath|path) subcommand=_legacy_$1; shift ;;
+        '') subcommand=_legacy_normal ;;
+        *) zdot_error "zdot_use: unknown subcommand: $1"; return 1 ;;
+    esac
+
+    # ── Parse version from spec (user/repo@v1.0.0) ──────────────────────────
+    local version=''
     if [[ $spec == *@* ]]; then
         version=${spec##*@}
         spec=${spec%@*}
     fi
-    
-    # Store with version info if specified
-    if [[ -n "$version" ]]; then
-        _ZDOT_PLUGINS_VERSION[$spec]=$version
+    [[ -n "$version" ]] && _ZDOT_PLUGINS_VERSION[$spec]=$version
+
+    # ── Legacy path: just record the spec ───────────────────────────────────
+    if [[ $subcommand == _legacy_* ]]; then
+        local kind=${subcommand#_legacy_}
+        if [[ -z "${_ZDOT_PLUGINS[$spec]}" ]]; then
+            _ZDOT_PLUGINS_ORDER+=$spec
+        fi
+        _ZDOT_PLUGINS[$spec]=$kind
+        return 0
     fi
-    
-    # Only add to order if not already present
+
+    # ── New hook / defer path ───────────────────────────────────────────────
+    # Parse options
+    local opt_name='' opt_provides='' opt_config='' opt_context=''
+    local opt_requires='' opt_requires_group='' opt_provides_group=''
+    local -a opt_groups=()
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --name)           opt_name=$2;           shift 2 ;;
+            --provides)       opt_provides=$2;        shift 2 ;;
+            --config)         opt_config=$2;          shift 2 ;;
+            --context)        opt_context=$2;         shift 2 ;;
+            --requires)
+                [[ $subcommand == hook ]] && {
+                    zdot_error "zdot_use: --requires is only valid with defer"
+                    return 1
+                }
+                opt_requires=$2; shift 2 ;;
+            --group)          opt_groups+=("$2");    shift 2 ;;
+            --requires-group) opt_requires_group=$2;  shift 2 ;;
+            --provides-group) opt_provides_group=$2;  shift 2 ;;
+            *) zdot_error "zdot_use: unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    # Derive a safe function-name segment from spec (replace / : @ with _)
+    local safe_spec=${spec//[\/\:\@]/_}
+    local loader_name=_zdot_autoload_${opt_name:-$safe_spec}
+
+    # Record spec for cloning (legacy map doubles as the clone list)
     if [[ -z "${_ZDOT_PLUGINS[$spec]}" ]]; then
         _ZDOT_PLUGINS_ORDER+=$spec
     fi
+    local kind=normal
+    [[ $subcommand == defer || $subcommand == defer-prompt ]] && kind=defer
     _ZDOT_PLUGINS[$spec]=$kind
+
+    # Auto-inject --requires from bundle's provides phase if not already set
+    if [[ ($subcommand == defer || $subcommand == defer-prompt) && -z "$opt_requires" ]]; then
+        local handler
+        if _zdot_bundle_handler_for "$spec"; then
+            handler=$REPLY
+            local bundle_provides=${_ZDOT_BUNDLE_PROVIDES[$handler]:-}
+            [[ -n "$bundle_provides" ]] && opt_requires=$bundle_provides
+        fi
+    fi
+
+    # Build the private loader function
+    local _def
+    IFS= read -r -d '' _def << EOD
+${loader_name}() {
+    local _spec=${(q)spec}
+    # Optional config callback — resolve dir only when a callback is set
+    ${opt_config:+zdot_plugin_path "\$_spec" && ${opt_config} "\$REPLY" "\$_spec"}
+    zdot_load_plugin "\$_spec"
+}
+EOD
+    eval "$_def"
+
+    # Build zdot_hook_register argument list
+    local -a hook_args=( "$loader_name" interactive noninteractive )
+    [[ -n "$opt_provides" ]]       && hook_args+=( --provides        "$opt_provides" )
+    [[ -n "$opt_context" ]]        && hook_args+=( --context         "$opt_context" )
+    local _og
+    for _og in "${opt_groups[@]}"; do
+        hook_args+=( --group "$_og" )
+    done
+    [[ -n "$opt_requires_group" ]] && hook_args+=( --requires-group  "$opt_requires_group" )
+    [[ -n "$opt_provides_group" ]] && hook_args+=( --provides-group  "$opt_provides_group" )
+    if [[ $subcommand == defer || $subcommand == defer-prompt ]]; then
+        [[ $subcommand == defer ]]         && hook_args+=( --deferred )
+        [[ $subcommand == defer-prompt ]] && hook_args+=( --defer-prompt )
+        [[ -n "$opt_requires" ]] && hook_args+=( --requires "$opt_requires" )
+    fi
+
+    zdot_hook_register "${hook_args[@]}"
 }
 
+# Deprecated: use  zdot_use <spec> defer  instead.
 zdot_use_defer() {
+    zdot_warn "zdot_use_defer is deprecated; use: zdot_use <spec> defer"
     zdot_use "$1" defer
 }
 
@@ -259,6 +372,91 @@ zdot_use_bundle() {
     if (( ! ${_ZDOT_BUNDLE_REPOS[(Ie)$repo]} )); then
         _ZDOT_BUNDLE_REPOS+=( "$repo" )
     fi
+}
+
+# ============================================================================
+# Initialization
+# ============================================================================
+
+# Clone all plugin repos synchronously and mark the plugins-cloned phase.
+_zdot_init_clone() {
+    zdot_plugins_clone_all
+}
+zdot_hook_register _zdot_init_clone interactive noninteractive \
+    --name plugins-cloned-init \
+    --provides plugins-cloned
+typeset -g _ZDOT_INIT_CLONE_HOOK_ID=$REPLY
+
+# Run each bundle's init function (registered via zdot_bundle_register --init).
+_zdot_init_bundles() {
+    local _bundle_name
+    for _bundle_name in "${_ZDOT_BUNDLE_HANDLERS[@]}"; do
+        local _init_fn="${_ZDOT_BUNDLE_INIT_FN[$_bundle_name]:-}"
+        if [[ -n $_init_fn ]] && (( ${+functions[$_init_fn]} )); then
+            "$_init_fn"
+        fi
+    done
+}
+
+# Resolve group annotations into concrete dependency edges.
+_zdot_init_resolve_groups() {
+    local _hid _rg _mid _mg _pp _phase
+
+    # Loop A: --requires-group X  →  inject requires from every hook tagged --group X
+    for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+        _rg="${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}"
+        [[ -z $_rg ]] && continue
+        for _mid in "${(k)_ZDOT_HOOKS[@]}"; do
+            _mg="${_ZDOT_HOOK_GROUP[$_mid]:-}"
+            [[ $_mg == $_rg ]] || continue
+            _pp="${_ZDOT_HOOK_PROVIDES[$_mid]:-}"
+            for _phase in ${(z)_pp}; do
+                if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid]:-} " != *" $_phase "* ]]; then
+                    _ZDOT_HOOK_REQUIRES[$_hid]+="${_ZDOT_HOOK_REQUIRES[$_hid]:+ }$_phase"
+                fi
+            done
+        done
+    done
+
+    # Loop B: --provides-group X  →  inject this hook's provides into every hook tagged --group X
+    local _pg
+    for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+        _pg="${_ZDOT_HOOK_PROVIDES_GROUP[$_hid]:-}"
+        [[ -z $_pg ]] && continue
+        _pp="${_ZDOT_HOOK_PROVIDES[$_hid]:-}"
+        for _phase in ${(z)_pp}; do
+            for _mid in "${(k)_ZDOT_HOOKS[@]}"; do
+                _mg="${_ZDOT_HOOK_GROUP[$_mid]:-}"
+                [[ $_mg == $_pg ]] || continue
+                if [[ " ${_ZDOT_HOOK_REQUIRES[$_mid]:-} " != *" $_phase "* ]]; then
+                    _ZDOT_HOOK_REQUIRES[$_mid]+="${_ZDOT_HOOK_REQUIRES[$_mid]:+ }$_phase"
+                fi
+            done
+        done
+    done
+}
+
+# Build the execution plan (cache-aware), fire all hooks, then compile to bytecode.
+_zdot_init_plan_and_execute() {
+    if ! load_cache; then
+        zdot_build_execution_plan
+        zdot_cache_save_plan
+    fi
+    zdot_execute_all
+
+    # Compile all modules to bytecode for faster loading.
+    # Must run after zdot_execute_all: plugin execution may generate new .zsh
+    # files on disk (init scripts, lazy loaders, etc.) that don't exist until
+    # sourcing completes. Compiling first would miss those files.
+    zdot_cache_compile_all
+}
+
+# Single entry point: clone → bundle init → group resolution → plan → execute → compile.
+zdot_init() {
+    _zdot_execute_hook "$_ZDOT_INIT_CLONE_HOOK_ID" "_zdot_init_clone"
+    _zdot_init_bundles
+    _zdot_init_resolve_groups
+    _zdot_init_plan_and_execute
 }
 
 # ============================================================================
@@ -500,64 +698,6 @@ zdot_compile_plugins() {
     done
 }
 
-# Load all normal-kind plugins in declaration order
-zdot_load_all_plugins() {
-    local spec kind
-    for spec in $_ZDOT_PLUGINS_ORDER; do
-        kind=${_ZDOT_PLUGINS[$spec]}
-        [[ $kind != normal ]] && continue
-        zdot_load_plugin "$spec"
-    done
-}
-
-# Load deferred plugins using zdot_defer wrapper
-zdot_load_deferred_plugins() {
-    # Sentinel: record that zdot_load_deferred_plugins fired and at what queue depth
-    _zdot_defer_record \
-        "--- zdot_load_deferred_plugins fired (queue depth: $_ZDOT_DEFER_COUNTER) ---" \
-        "0" "__sentinel__"
-
-    # Load deferred plugins - zdot_defer wrapper handles defer vs immediate
-    local spec kind
-    for spec in $_ZDOT_PLUGINS_ORDER; do
-        kind=${_ZDOT_PLUGINS[$spec]}
-        [[ $kind != defer ]] && continue
-
-        # Use cached path (populated by zdot_plugin_clone / sentinel fast-path);
-        # fall back to computing it inline without a subshell for user/repo specs.
-        local plugin_path=${_ZDOT_PLUGINS_PATH[$spec]:-${_ZDOT_PLUGINS_CACHE}/${spec}}
-
-        # Glob into an array — no ls subprocess, no head subprocess
-        local -a _plugin_files=( $plugin_path/*.plugin.zsh(N) )
-        local plugin_file=${_plugin_files[1]}
-
-        [[ -z "$plugin_file" ]] && continue
-
-        # Add to fpath if needed
-        [[ -d "$plugin_path/functions" ]] && fpath+=( "$plugin_path" )
-
-        # Load deferred - zdot_defer wrapper handles defer vs immediate;
-        # suppress generic recording so we can record with spec label inline.
-        _ZDOT_DEFER_SKIP_RECORD=1
-        zdot_defer source "$plugin_file"
-        _ZDOT_DEFER_SKIP_RECORD=0
-        _zdot_defer_record "source $plugin_file" "0" "$spec"
-
-        _ZDOT_PLUGINS_LOADED[$spec]=1
-    done
-
-    # Phase 1 of two-phase compinit: enqueue zdot_compinit_defer via zsh-defer
-    # *after* all deferred plugin sources above.  zsh-defer executes callbacks
-    # in FIFO order, so this runs only after every plugin has been sourced and
-    # $fpath is fully populated.  zdot_compinit_defer simply sets
-    # _ZDOT_FPATH_READY=1; the actual compinit runs in precmd context (phase 2)
-    # via zdot_ensure_compinit_during_precmd, avoiding the ZLE-callback hang.
-    _ZDOT_DEFER_SKIP_RECORD=1
-    zdot_defer -q zdot_compinit_defer
-    _ZDOT_DEFER_SKIP_RECORD=0
-    _zdot_defer_record "zdot_compinit_defer" "0" ""
-}
-
 # ============================================================================
 # Setup: Clone and load zsh-defer if enabled
 # ============================================================================
@@ -600,48 +740,45 @@ if zstyle -T ':zdot:plugins' defer; then
     #   environments where deferred loading causes problems.
     #
     # Both paths call _zdot_defer_record to log the command into the display queue
-    # (visible via `zdot show defer-queue`), UNLESS the caller has set
-    # _ZDOT_DEFER_SKIP_RECORD=1 to suppress double-recording.
+    # (visible via `zdot show defer-queue`).
     zdot_defer() {
-        local extra_opts='' _label=''
-        [[ $1 == -q ]] && { extra_opts='-mp'; shift }
+        local -a extra_opts=()
+        local _label=''
+        [[ $1 == -q || $1 == --quiet ]] && { extra_opts+=(-m -p -s -z); shift }
+        [[ $1 == -p || $1 == --prompt  ]] && { extra_opts+=(+p -s -z); shift }
         [[ $1 == --label ]] && { _label="$2"; shift 2 }
-        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "0" "" "$_label"
-        zsh-defer ${extra_opts:+$extra_opts} "$@"
+        _zdot_defer_record "$*" "0" "" "$_label"
+        # zdot_info "running zsh-defer ${extra_opts[@]} $@"
+        zsh-defer "${extra_opts[@]}" "$@"
     }
     zdot_defer_until() {
-        local extra_opts='' _label=''
-        [[ $1 == -q ]] && { extra_opts='-mp'; shift }
+        local -a extra_opts=()
+        local _label=''
+        [[ $1 == -q || $1 == --quiet ]] && { extra_opts+=(-m -p -s -z); shift }
+        [[ $1 == -p || $1 == --prompt  ]] && { extra_opts+=(+p -s -z); shift }
         [[ $1 == --label ]] && { _label="$2"; shift 2 }
         local delay=$1; shift
-        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "$delay" "" "$_label"
-        zsh-defer ${extra_opts:+$extra_opts} -t "$delay" "$@"
+        _zdot_defer_record "$*" "$delay" "" "$_label"
+        # zdot_info "running zsh-defer ${extra_opts[@]} $@"
+        zsh-defer "${extra_opts[@]}" -t "$delay" "$@"
     }
 else
     # Define passthrough wrappers - run immediately.
-    # -q is accepted for API compatibility but is a no-op here (no ZLE).
+    # -q and -p are accepted for API compatibility but are no-ops here (no ZLE).
     zdot_defer() {
         local _label=''
-        [[ $1 == -q ]] && shift
+        [[ $1 == -q || $1 == --quiet || $1 == -p || $1 == --prompt ]] && shift
         [[ $1 == --label ]] && { _label="$2"; shift 2 }
-        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "0" "" "$_label"
+        _zdot_defer_record "$*" "0" "" "$_label"
         "$@"
     }
     zdot_defer_until() {
         local _label=''
-        [[ $1 == -q ]] && shift
+        [[ $1 == -q || $1 == --quiet || $1 == -p || $1 == --prompt ]] && shift
         [[ $1 == --label ]] && { _label="$2"; shift 2 }
         local delay=$1; shift
-        (( ! _ZDOT_DEFER_SKIP_RECORD )) && _zdot_defer_record "$*" "$delay" "" "$_label"
+        _zdot_defer_record "$*" "$delay" "" "$_label"
         "$@"
     }
 fi
 
-# ============================================================================
-# Hook Registration
-# ============================================================================
-
-# This hook clones all declared plugins (but doesn't load them)
-zdot_hook_register zdot_plugins_clone_all interactive noninteractive \
-    --requires plugins-declared \
-    --provides plugins-cloned

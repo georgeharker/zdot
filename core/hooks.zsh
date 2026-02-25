@@ -12,13 +12,10 @@ typeset -gA _ZDOT_HOOK_CONTEXTS      # hook_id -> "interactive noninteractive ..
 typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
-typeset -gA _ZDOT_HOOK_ON_DEMAND     # hook_id -> 1 if on-demand
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
-typeset -gA _ZDOT_PHASES_PROMISED    # phase_name -> 1 when promised (for validation)
 typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
 typeset -gA _ZDOT_HOOKS_EXECUTED     # hook_id -> 1 when executed at runtime
 typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
-typeset -gA _ZDOT_ON_DEMAND_PHASES   # phase_name -> 1 if explicitly on-demand
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
@@ -30,6 +27,17 @@ typeset -ga _ZDOT_DEFER_ORDER_WARNINGS      # warnings accumulated during edge i
 typeset -ga _ZDOT_FORCED_DEFERRED_WARNINGS  # warnings for hooks force-deferred due to deferred dependency
 typeset -ga _ZDOT_DEFERRED_HOOKS            # hook_ids marked as deferred (skip eager plan)
 typeset -gA _ZDOT_ACCEPTED_DEFERRED         # func_name -> "all" or "phase1 phase2 ..." (user-accepted force-deferral)
+typeset -gA _ZDOT_HOOK_GROUP                # hook_id -> group name (--group)
+typeset -gA _ZDOT_HOOK_PROVIDES_GROUP       # hook_id -> group name this hook provides into (--provides-group)
+typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
+typeset -gA _ZDOT_HOOK_GROUPS               # hook_id -> "group1 group2 ..." (multi-group forward map)
+typeset -gA _ZDOT_GROUP_MEMBERS             # group_name -> "hook_id1 hook_id2 ..." (reverse index)
+typeset -gA _ZDOT_HOOK_DEFER_ARGS           # hook_id -> flag-set key (see _ZDOT_DEFER_FLAG_NAMES)
+typeset -gA _ZDOT_DEFER_FLAG_NAMES          # flag-set key -> display name; extend here to add new defer modes
+_ZDOT_DEFER_FLAG_NAMES["--prompt"]="prompt"
+_ZDOT_DEFER_FLAG_NAMES["-p"]="prompt"
+_ZDOT_DEFER_FLAG_NAMES["--quiet"]="quiet"
+_ZDOT_DEFER_FLAG_NAMES["-q"]="quiet"
 
 # ============================================================================
 # Acceptance of Force-Deferred Hooks
@@ -69,7 +77,8 @@ zdot_accept_deferred() {
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_hook_register <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional] [--on-demand]
+# Usage: zdot_hook_register <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# Sets REPLY to the hook_id on success.
 # Contexts: interactive, noninteractive, login, nonlogin
 # --provides-tool <tool>  sugar for --provides tool:<tool>
 # --requires-tool <tool>  sugar for --requires tool:<tool>
@@ -86,6 +95,11 @@ zdot_hook_register() {
     # context-safe while still supporting the flags anywhere in the argument list.
     local hook_name=""
     local hook_deferred=0
+    local hook_defer_noquiet=0
+    local hook_defer_args
+    local -a hook_groups=()
+    local hook_provides_group=""
+    local hook_requires_group=""
     local -a _raw_args=("$@")
     local -a _filtered_args=()
     local _i=1
@@ -95,6 +109,19 @@ zdot_hook_register() {
             hook_name="${_raw_args[$_i]}"
         elif [[ ${_raw_args[$_i]} == --deferred ]]; then
             hook_deferred=1
+        elif [[ ${_raw_args[$_i]} == --deferred-prompt ]]; then
+            hook_deferred=1
+            hook_defer_noquiet=1
+            hook_defer_args="--prompt"
+        elif [[ ${_raw_args[$_i]} == --group ]]; then
+            (( _i++ ))
+            hook_groups+=("${_raw_args[$_i]}")
+        elif [[ ${_raw_args[$_i]} == --provides-group ]]; then
+            (( _i++ ))
+            hook_provides_group="${_raw_args[$_i]}"
+        elif [[ ${_raw_args[$_i]} == --requires-group ]]; then
+            (( _i++ ))
+            hook_requires_group="${_raw_args[$_i]}"
         else
             _filtered_args+=("${_raw_args[$_i]}")
         fi
@@ -109,7 +136,6 @@ zdot_hook_register() {
     local -a requires
     local -a provides
     local optional=0
-    local on_demand=0
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -136,10 +162,6 @@ zdot_hook_register() {
                 ;;
             --optional)
                 optional=1
-                shift
-                ;;
-            --on-demand)
-                on_demand=1
                 shift
                 ;;
             *)
@@ -180,15 +202,20 @@ zdot_hook_register() {
     _ZDOT_HOOK_REQUIRES[$hook_id]="${requires[*]}"
     _ZDOT_HOOK_PROVIDES[$hook_id]="${provides[*]}"
     _ZDOT_HOOK_OPTIONAL[$hook_id]=$optional
-    _ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand
     [[ $hook_deferred -eq 1 ]] && _ZDOT_DEFERRED_HOOKS+=($hook_id)
-
-    # Mark required phases as on-demand if this hook is on-demand
-    if [[ $on_demand -eq 1 ]]; then
-        for phase in ${requires[@]}; do
-            _ZDOT_ON_DEMAND_PHASES[$phase]=1
+    [[ $hook_deferred -eq 1 && $hook_defer_noquiet -eq 1 ]] && _ZDOT_HOOK_DEFER_ARGS[$hook_id]="$hook_defer_args"
+    if [[ ${#hook_groups[@]} -gt 0 ]]; then
+        _ZDOT_HOOK_GROUP[$hook_id]="${hook_groups[1]}"
+        local _hg
+        for _hg in "${hook_groups[@]}"; do
+            _ZDOT_HOOK_GROUPS[$hook_id]+=" $_hg"
+            _ZDOT_HOOK_GROUPS[$hook_id]="${_ZDOT_HOOK_GROUPS[$hook_id]# }"
+            _ZDOT_GROUP_MEMBERS[$_hg]+=" $hook_id"
+            _ZDOT_GROUP_MEMBERS[$_hg]="${_ZDOT_GROUP_MEMBERS[$_hg]# }"
         done
     fi
+    [[ -n $hook_provides_group ]] && _ZDOT_HOOK_PROVIDES_GROUP[$hook_id]="$hook_provides_group"
+    [[ -n $hook_requires_group ]] && _ZDOT_HOOK_REQUIRES_GROUP[$hook_id]="$hook_requires_group"
 
     # Register phase provider (context-aware)
     if [[ ${#provides[@]} -gt 0 ]]; then
@@ -234,6 +261,7 @@ zdot_hook_register() {
     if [[ -n "$_ZDOT_CURRENT_MODULE_NAME" ]]; then
         _ZDOT_HOOK_MODULES[$func_name]="$_ZDOT_CURRENT_MODULE_NAME"
     fi
+    REPLY=$hook_id
 }
 
 # Register declarative ordering constraints between named hooks
@@ -325,28 +353,21 @@ zdot_build_execution_plan() {
         # Count dependencies
         for phase in $requires; do
             # Check if phase is promised or has a provider hook in current contexts
-            if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}" && [[ -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
+            if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}"; then
                 # Required phase has no provider in current context
                 if [[ ${_ZDOT_HOOK_OPTIONAL[$hook_id]} == 1 ]]; then
                     skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (missing: $phase)")
                     degree=-1  # Mark as skipped
                     break
                 else
-                    zdot_warn "zdot_build_execution_plan: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context; skipping"
-                    skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (missing: $phase)")
-                    degree=-1
-                    break
+                    zdot_error "zdot_build_execution_plan: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context"
+                    return 1
                 fi
             fi
             
-            # Only increment degree for phases with actual providers
-            # Promised phases are treated as "already available" so hooks depending on them
-            # can be added to execution plan, but will be placed at the end
-            if [[ -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
-                (( degree++ ))
-                # Build adjacency list: phase -> hooks that depend on it
-                adjacency_list[$phase]+=" $hook_id"
-            fi
+            (( degree++ ))
+            # Build adjacency list: phase -> hooks that depend on it
+            adjacency_list[$phase]+=" $hook_id"
         done
         
         # Skip if marked as skipped
@@ -356,49 +377,8 @@ zdot_build_execution_plan() {
         
         in_degree[$hook_id]=$degree
         
-        # Add to initial queue only if in-degree is zero AND the hook does
-        # not exclusively depend on promised phases.
-        #
-        # Promised phases are declared via zdot_promise_phase but have no
-        # real provider hook behind them — they are fulfilled externally
-        # (e.g. by the shell itself at a certain point in startup).
-        #
-        # Kahn's algorithm decrements a hook's in-degree each time one of
-        # its required phases is provided by a completing hook.  Promised
-        # phases never have a provider hook, so no decrement ever fires for
-        # those dependency edges.
-        #
-        # Consequence: a hook whose in-degree reaches 0 *only* because all
-        # its requires are promised phases has effectively no ordering
-        # constraint imposed by the real DAG.  Placing it in the initial
-        # zero-in-degree queue would cause it to run immediately — before
-        # any real work — which is wrong.
-        #
-        # Instead, such hooks are collected and appended at the very end of
-        # the execution order once all real hooks have been placed (see the
-        # "append promised-phase-only hooks" block below).
         if [[ $degree -eq 0 ]]; then
-            # Check if this hook depends only on promised phases
-            local -a requires_phases=(${=_ZDOT_HOOK_REQUIRES[$hook_id]})
-            local depends_only_on_promised=1
-            
-            if [[ ${#requires_phases} -eq 0 ]]; then
-                # No requirements at all - add to queue normally
-                depends_only_on_promised=0
-            else
-                for phase in $requires_phases; do
-                    if [[ -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
-                        # Depends on at least one non-promised phase
-                        depends_only_on_promised=0
-                        break
-                    fi
-                done
-            fi
-            
-            # Only add to initial queue if not depending solely on promised phases
-            if [[ $depends_only_on_promised -eq 0 ]]; then
-                zero_in_degree+=($hook_id)
-            fi
+            zero_in_degree+=($hook_id)
         fi
     done
 
@@ -576,36 +556,7 @@ zdot_build_execution_plan() {
         fi
     done
     
-    # Add hooks that depend ONLY on promised phases to the END of execution order
-    # These hooks had degree=0 from the start but were never added because they
-    # don't depend on any provider hooks - they only depend on promised phases
-    local -a promised_phase_hooks
-    for hook_id in ${(k)in_degree}; do
-        # Skip hooks already in execution order
-        if [[ " ${execution_order[*]} " =~ " ${hook_id} " ]]; then
-            continue
-        fi
-        
-        # Check if this hook depends only on promised phases
-        local requires=(${=_ZDOT_HOOK_REQUIRES[$hook_id]})
-        local depends_only_on_promised=1
-        
-        for phase in $requires; do
-            if [[ -z ${_ZDOT_PHASES_PROMISED[$phase]} ]]; then
-                depends_only_on_promised=0
-                break
-            fi
-        done
-        
-        if [[ $depends_only_on_promised -eq 1 ]]; then
-            promised_phase_hooks+=($hook_id)
-        fi
-    done
-    
-    # Append promised-phase-only hooks to the END
-    execution_order+=($promised_phase_hooks)
-    
-    # Check for cycles (if any hooks still have in_degree > 0 and don't depend only on promised phases)
+    # Check for cycles
     local -a cyclic_hooks
     for hook_id in ${(k)in_degree}; do
         if [[ ${in_degree[$hook_id]} -gt 0 ]]; then
@@ -746,23 +697,6 @@ zdot_build_execution_plan() {
 # Hook Execution
 # ============================================================================
 
-# Promise that a phase will be provided manually later
-# Usage: zdot_promise_phase <phase-name>
-# This allows hooks to depend on phases that will be provided outside the hook system
-# Hooks depending ONLY on promised phases will be placed at the END of the execution order
-# Example: zdot_promise_phase finalize; zdot_build_execution_plan; zdot_execute_all
-zdot_promise_phase() {
-    local phase="$1"
-    
-    if [[ -z $phase ]]; then
-        zdot_error "zdot_promise_phase: ERROR: No phase name specified"
-        return 1
-    fi
-    
-    _ZDOT_PHASES_PROMISED[$phase]=1
-    return 0
-}
-
 # Verify that declared tools are available on PATH (runtime post-hoc check)
 # Usage: zdot_verify_tools <tool1> [tool2 ...]
 # Warns for each tool not found; does not affect scheduling
@@ -785,7 +719,7 @@ _zdot_execute_hook() {
     local hook_id="$1"
     local function_name="$2"
     local stop_callback="$3"
-    
+
     local func=${_ZDOT_HOOKS[$hook_id]}
     local -a provides=(${=_ZDOT_HOOK_PROVIDES[$hook_id]})
 
@@ -794,6 +728,7 @@ _zdot_execute_hook() {
         zdot_verbose "zdot: hooks: run: $func"
         _ZDOT_CURRENT_HOOK_FUNC=$func
         if $func; then
+            local _rc=$?
             _ZDOT_CURRENT_HOOK_FUNC=
 
             _ZDOT_HOOKS_EXECUTED[$hook_id]=1
@@ -810,11 +745,14 @@ _zdot_execute_hook() {
             done
             return 0
         else
+            local _rc=$?
             _ZDOT_CURRENT_HOOK_FUNC=
-            zdot_error "${function_name}: Hook '$func' failed (exit code: $?)"
+            _ZDOT_HOOKS_EXECUTED[$hook_id]=1
+            zdot_error "${function_name}: Hook '$func' failed (exit code: $_rc)"
             return 1
         fi
     else
+        _ZDOT_HOOKS_EXECUTED[$hook_id]=1
         zdot_error "${function_name}: Hook function '$func' not found"
         return 1
     fi
@@ -834,17 +772,25 @@ _zdot_execute_hook() {
 # the next eligible one, so deferred hooks run in dependency order
 # without needing a central polling loop.
 #
-# If `_zdot_execute_hook` reports failure the chain-reaction is
-# intentionally stopped: downstream hooks whose `requires` set
-# includes a phase that the failed hook was supposed to provide will
-# never satisfy `_zdot_hook_requirements_met`, so dispatching them
-# would be futile and misleading.
+# The chain always continues regardless of the hook's exit code:
+#   0 — success (hook ran cleanly)
+#   2 — hook was already executed / skipped (not a failure)
+#   other — hook reported an error; phases it was supposed to provide
+#            will be absent, so downstream hooks will stall and the
+#            stall detector in `_zdot_run_deferred_phase_check` will
+#            report the missing phases.  We still call the check so
+#            that any independent branches can still make progress.
 _zdot_deferred_hook_wrapper() {
     local hook_id=$1
     unset "_ZDOT_HOOKS_QUEUED[$hook_id]"
-    if _zdot_execute_hook "$hook_id"; then
-        _zdot_run_deferred_phase_check
-    fi
+    local _hw_label="${_ZDOT_HOOKS[$hook_id]}"
+    local _hw_name="${_ZDOT_HOOK_NAMES[$hook_id]}"
+    [[ -n "$_hw_name" ]] && _hw_label+=" [${_hw_name}]"
+    _ZDOT_DEFERRED_CURRENT_HOOK="$_hw_label"
+    _zdot_deferred_progress_print "$_hw_label"
+    _zdot_execute_hook "$hook_id"
+    _ZDOT_DEFERRED_CURRENT_HOOK=''
+    _zdot_run_deferred_phase_check
 }
 
 # Return 0 if every phase required by hook_id is present in
@@ -883,6 +829,8 @@ _zdot_hook_requirements_met() {
 #      to kick off subsequent waves (chain-reaction dispatch).
 _zdot_run_deferred_phase_check() {
     local hook_id
+    local dispatched=0
+    local -a pending_hooks=()
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         # Only process deferred hooks
         if [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -eq 0 ]]; then
@@ -901,15 +849,105 @@ _zdot_run_deferred_phase_check() {
 
         # Dispatch only when all required phases are available
         if ! _zdot_hook_requirements_met "$hook_id"; then
+            pending_hooks+=("$hook_id")
             continue
         fi
 
+        dispatched=$(( dispatched + 1 ))
         _ZDOT_HOOKS_QUEUED[$hook_id]=1
         local _hw_label="${_ZDOT_HOOKS[$hook_id]}"
         local _hw_name="${_ZDOT_HOOK_NAMES[$hook_id]}"
         [[ -n "$_hw_name" ]] && _hw_label+=" [${_hw_name}]"
-        zdot_defer -q --label "$_hw_label" _zdot_deferred_hook_wrapper "$hook_id"
+        local -a _defer_extra=(-q)
+        if [[ -n "${_ZDOT_HOOK_DEFER_ARGS[$hook_id]+set}" ]]; then
+            local _defer_args="${_ZDOT_HOOK_DEFER_ARGS[$hook_id]}"
+            _defer_extra=(${_defer_args:+${(z)_defer_args}})
+        fi
+        zdot_defer "${_defer_extra[@]}" --label "$_hw_label" _zdot_deferred_hook_wrapper "$hook_id"
     done
+
+    # Stall detection: if nothing was dispatched this round but hooks are still
+    # waiting, their required phases will never arrive — report an error.
+    # Guard against false positives: if hooks are still queued (in-flight), the
+    # required phases may yet be provided once those hooks complete.
+    if [[ $dispatched -eq 0 && ${#pending_hooks} -gt 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
+        _ZDOT_DEFERRED_ACTIVE=0
+        if [[ -o zle ]]; then
+            local _zdot_flush_fd
+            exec {_zdot_flush_fd}</dev/null
+            zle -F $_zdot_flush_fd _zdot_flush_handler
+        fi
+        zdot_error "_zdot_run_deferred_phase_check: deferred hooks are stalled" \
+            "(no progress made; the following hooks have unmet requirements" \
+            "that will never be provided):"
+        local hook_label hook_name req
+        local -a missing_phases
+        for hook_id in $pending_hooks; do
+            hook_label="${_ZDOT_HOOKS[$hook_id]}"
+            hook_name="${_ZDOT_HOOK_NAMES[$hook_id]}"
+            [[ -n "$hook_name" ]] && hook_label+=" [${hook_name}]"
+            missing_phases=()
+            for req in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
+                if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
+                    missing_phases+=("$req")
+                fi
+            done
+            zdot_error "  hook '${hook_label}': waiting for phase(s): ${missing_phases[*]}"
+        done
+    fi
+
+    # Secondary stall detection: hooks whose requirements ARE met but which are
+    # neither queued nor executed — these would be silently stuck (e.g. if a
+    # bug incorrectly marks a hook as executed before it runs, or the hook
+    # falls through the loop without being dispatched for an unknown reason).
+    local -a ready_but_stuck=()
+    for hook_id in $_ZDOT_EXECUTION_PLAN; do
+        [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -eq 0 ]] && continue
+        [[ ${+_ZDOT_HOOKS_EXECUTED[$hook_id]} -eq 1 ]] && continue
+        [[ ${+_ZDOT_HOOKS_QUEUED[$hook_id]} -eq 1 ]] && continue
+        _zdot_hook_requirements_met "$hook_id" || continue
+        # Requirements met, not queued, not executed — it should have been dispatched
+        # but wasn't (possibly on a previous call to this function that was interrupted).
+        ready_but_stuck+=("$hook_id")
+    done
+    if [[ ${#ready_but_stuck} -gt 0 && $dispatched -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
+        _ZDOT_DEFERRED_ACTIVE=0
+        if [[ -o zle ]]; then
+            local _zdot_flush_fd
+            exec {_zdot_flush_fd}</dev/null
+            zle -F $_zdot_flush_fd _zdot_flush_handler
+        fi
+        zdot_error "_zdot_run_deferred_phase_check: the following hooks have met" \
+            "requirements but were never dispatched (logic bug):"
+        for hook_id in $ready_but_stuck; do
+            local hook_label="${_ZDOT_HOOKS[$hook_id]}"
+            local hook_name="${_ZDOT_HOOK_NAMES[$hook_id]}"
+            [[ -n "$hook_name" ]] && hook_label+=" [${hook_name}]"
+            zdot_error "  hook '${hook_label}'"
+        done
+    fi
+
+    # Normal completion: nothing dispatched, nothing queued, nothing pending —
+    # the deferred queue has fully drained.
+    if [[ $dispatched -eq 0 && ${#pending_hooks} -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
+        # Auto-dispatch the 'finally' group on first full drain.
+        # Hooks that declared --requires-group finally are collected in
+        # _ZDOT_GROUP_MEMBERS[finally]; execute any that haven't run yet.
+        if [[ -n "${_ZDOT_GROUP_MEMBERS[finally]}" ]]; then
+            local _finally_hook_id
+            for _finally_hook_id in ${=_ZDOT_GROUP_MEMBERS[finally]}; do
+                if [[ -z ${_ZDOT_HOOKS_EXECUTED[$_finally_hook_id]} ]]; then
+                    _zdot_execute_hook "$_finally_hook_id" "_zdot_run_deferred_phase_check"
+                fi
+            done
+        fi
+        _ZDOT_DEFERRED_ACTIVE=0
+        if [[ -o zle ]]; then
+            local _zdot_flush_fd
+            exec {_zdot_flush_fd}</dev/null
+            zle -F $_zdot_flush_fd _zdot_flush_handler
+        fi
+    fi
 }
 
 # Run every hook in the eager (non-deferred) execution plan in dependency
@@ -924,8 +962,8 @@ _zdot_run_deferred_phase_check() {
 #
 # Each hook is delegated to `_zdot_execute_hook`, which handles function-
 # existence checks, phase marking, and `_ZDOT_HOOKS_EXECUTED` bookkeeping.
-# Any hook that has already been executed (e.g. via `zdot_run_until`) is
-# skipped so this function is safe to call after a partial run.
+# Any hook that has already been executed is skipped so this function is
+# safe to call after a partial run.
 #
 # Returns 1 if one or more hooks fail; otherwise 0.
 zdot_execute_all() {
@@ -964,170 +1002,42 @@ zdot_execute_all() {
         return 1
     fi
 
-    zdot_verbose "zdot: hooks: done ($executed executed)"
-
-    # Kick off the deferred hook DAG — runs after the prompt is first drawn
-    zdot_defer -q --label "<run deferred phases>" _zdot_run_deferred_phase_check
-    return 0
-}
-
-# Run hooks in dependency order, stopping as soon as a specific phase is
-# provided.  This is used when a caller needs a particular capability to be
-# ready before proceeding — for example, ensuring `xdg-configured` is in
-# place before a lazy-loaded tool tries to write its cache.
-#
-# The function iterates `_ZDOT_EXECUTION_PLAN` in order and delegates each
-# hook to `_zdot_execute_hook`, passing `_zdot_check_target_phase` as the
-# stop callback.  That callback returns 0 (triggering early exit with code 2)
-# the moment the target phase appears in the set of phases just provided by
-# the hook that finished.  Hooks already executed by a prior call are skipped.
-#
-# If the plan is exhausted without the target phase ever being provided, the
-# function warns and returns 1.  If the phase was already provided before the
-# call, it returns 0 immediately without executing anything.
-#
-# Usage: zdot_run_until <phase>
-zdot_run_until() {
-    local target_phase="$1"
-    
-    if [[ -z $target_phase ]]; then
-        zdot_error "zdot_run_until: ERROR: No target phase specified"
-        return 1
-    fi
-
-    if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
-        zdot_error "zdot_run_until: ERROR: No execution plan. Call zdot_build_execution_plan first."
-        return 1
-    fi
-    
-    # Check if target phase has already been provided
-    if [[ -n ${_ZDOT_PHASES_PROVIDED[$target_phase]} ]]; then
-        zdot_verbose "zdot: hooks: phase already provided: $target_phase"
-        return 0
-    fi
-
-    local executed=0
-    local failed=0
-
-    zdot_verbose "zdot: hooks: running until: $target_phase"
-
-    # Callback passed to _zdot_execute_hook as the phase-check function.
-    #
-    # _zdot_execute_hook calls this after each phase is marked provided.
-    # If this function returns 0 (i.e., the just-provided phase matches
-    # $target_phase), _zdot_execute_hook returns exit code 2 to signal
-    # early termination.  zdot_run_until breaks its execution loop on
-    # exit code 2, stopping as soon as the target phase is available
-    # without running any further hooks.
-    _zdot_check_target_phase() {
-        [[ $1 == $target_phase ]]
-    }
-    
+    # Detect eager hooks that were in the plan but never ran.
+    # This can happen when a hook's in-degree never reaches zero due to a
+    # bug in the dependency graph (e.g. a cycle that Kahn's algorithm could
+    # not resolve, or a plan that was built with missing providers that
+    # slipped past the earlier checks).
+    local -a unexecuted_eager=()
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
-        # Skip if this hook was already executed
-        if [[ -n ${_ZDOT_HOOKS_EXECUTED[$hook_id]} ]]; then
+        # Deferred hooks are handled separately — skip them here
+        if [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -gt 0 ]]; then
             continue
         fi
-        
-        _zdot_execute_hook "$hook_id" "zdot_run_until" "_zdot_check_target_phase"
-        local result=$?
-        
-        if [[ $result -eq 0 ]]; then
-            (( executed++ ))
-        elif [[ $result -eq 2 ]]; then
-            # Early termination - target phase reached
-            (( executed++ ))
-            zdot_verbose "zdot: hooks: reached phase: $target_phase ($executed executed)"
-            return 0
-        else
-            (( failed++ ))
+        if [[ -z ${_ZDOT_HOOKS_EXECUTED[$hook_id]} ]]; then
+            unexecuted_eager+=("${_ZDOT_HOOKS[$hook_id]}")
         fi
     done
-    
-    # If we got here, the target phase was never provided
-    if [[ $failed -gt 0 ]]; then
-        zdot_error "zdot_run_until: Completed with $failed failed hook(s), target phase '$target_phase' not provided"
+    if [[ ${#unexecuted_eager[@]} -gt 0 ]]; then
+        zdot_error "zdot_execute_all: The following eager hooks were in the plan but never ran (possible dependency cycle or missing provider):"
+        for _ue in "${unexecuted_eager[@]}"; do
+            zdot_error "  - $_ue"
+        done
         return 1
     fi
 
-    zdot_warn "zdot_run_until: WARNING: Target phase '$target_phase' was not provided by any hook"
-    return 1
+    zdot_verbose "zdot: hooks: done ($executed executed)"
+
+    # Kick off the deferred hook DAG — runs after the prompt is first drawn.
+    # Mark deferred logging as active so log functions route output through ZLE.
+    _ZDOT_DEFERRED_ACTIVE=1
+    _ZDOT_DEFERRED_SHOWN=0
+    zdot_defer -q --label "<run deferred phases>" _zdot_run_deferred_phase_check
+
+    return 0
 }
 
 # ============================================================================
 # Introspection and Debugging
 # ============================================================================
 
-# Print a summary of registered hooks grouped by the module that registered
-# them.  Intended as a human-readable introspection tool, not a runtime
-# primitive — it is called interactively or from debug/test scripts.
-#
-# Module membership is read from `_ZDOT_HOOK_MODULES`, which is populated by
-# `zdot_hook_register` when hooks are declared.  For each hook the output
-# shows the function name, its `provides` set, and its `requires` set so the
-# reader can quickly audit what a module contributes to the dependency graph.
-#
-# An optional module-name argument narrows output to a single module; without
-# it every module is printed in alphabetical order.
-#
-# Usage: zdot_module_hooks [module-name]
-zdot_module_hooks() {
-    local target_module="$1"
 
-    # Build a map of module -> hooks
-    local -A module_hooks
-
-    for hook_id in ${(k)_ZDOT_HOOKS}; do
-        local func=${_ZDOT_HOOKS[$hook_id]}
-        local module="${_ZDOT_HOOK_MODULES[$func]}"
-
-        # Filter by module if specified
-        if [[ -n "$target_module" && "$module" != "$target_module" ]]; then
-            continue
-        fi
-
-        if [[ -z "${module_hooks[$module]}" ]]; then
-            module_hooks[$module]="$func"
-        else
-            module_hooks[$module]="${module_hooks[$module]} $func"
-        fi
-    done
-
-    if [[ -n "$target_module" ]]; then
-        zdot_info "Hooks registered by module: $target_module"
-    else
-        zdot_info "Hooks registered by each module:"
-    fi
-    zdot_info ""
-
-    # Sort modules alphabetically
-    for module in ${(ko)module_hooks}; do
-        zdot_info "Module: $module"
-
-        local hooks="${module_hooks[$module]}"
-        for func in ${=hooks}; do
-            # Find hook_id for this function
-            local hook_id=""
-            for hid in ${(k)_ZDOT_HOOKS}; do
-                if [[ ${_ZDOT_HOOKS[$hid]} == $func ]]; then
-                    hook_id=$hid
-                    break
-                fi
-            done
-
-            if [[ -n $hook_id ]]; then
-                local provides=${_ZDOT_HOOK_PROVIDES[$hook_id]:-"(none)"}
-                local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
-                zdot_info "  • $func"
-                zdot_info "    provides: $provides"
-                zdot_info "    requires: $requires"
-            fi
-        done
-        zdot_info ""
-    done
-
-    if [[ -z "$target_module" ]]; then
-        local total_modules=${#module_hooks[@]}
-        zdot_info "Total: $total_modules module(s) with registered hooks"
-    fi
-}

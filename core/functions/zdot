@@ -310,10 +310,6 @@ function zdot() {
             zdot_info "  ${(j: :)${(k)_ZDOT_PHASES_PROVIDED[@]:-<none>}}"
 
             zdot_info ""
-            zdot_info "--- _ZDOT_PHASES_PROMISED ---"
-            zdot_info "  ${(j: :)${(k)_ZDOT_PHASES_PROMISED[@]:-<none>}}"
-
-            zdot_info ""
             zdot_info "--- _ZDOT_PLUGINS_ORDER (${#_ZDOT_PLUGINS_ORDER} entries) ---"
             local spec
             for spec in $_ZDOT_PLUGINS_ORDER; do

@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="8"          # Cache format version (unified DAG with deferred tagging)
+typeset -g _ZDOT_CACHE_VERSION="12"         # Cache format version (plugins-cloned-sentinel hook)
 
 # ============================================================================
 # Cache Configuration
@@ -279,7 +279,6 @@ zdot_cache_save_plan() {
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
             local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
-            local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
 
             echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
@@ -287,7 +286,6 @@ zdot_cache_save_plan() {
             echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
-            echo "_ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand"
 
             if [[ -n "$provides" ]]; then
                 # Serialize context-aware providers
@@ -305,16 +303,7 @@ zdot_cache_save_plan() {
                         echo "_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]='$hook_id'"
                     done
                 done
-                for phase in ${=provides}; do
-                    echo "_ZDOT_PHASES_PROMISED[$phase]=1"
-                done
             fi
-
-            for phase in ${=requires}; do
-                if [[ $on_demand -eq 1 ]]; then
-                    echo "_ZDOT_ON_DEMAND_PHASES[$phase]=1"
-                fi
-            done
         done
 
         echo ""
@@ -336,7 +325,6 @@ zdot_cache_save_plan() {
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
             local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
-            local on_demand="${_ZDOT_HOOK_ON_DEMAND[$hook_id]}"
 
             echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
@@ -344,7 +332,22 @@ zdot_cache_save_plan() {
             echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
-            echo "_ZDOT_HOOK_ON_DEMAND[$hook_id]=$on_demand"
+        done
+
+        echo ""
+        echo "# Defer flag-set name lookup (flag-set key -> display name)"
+        echo "typeset -gA _ZDOT_DEFER_FLAG_NAMES=()"
+        for _flag_key in "${(@k)_ZDOT_DEFER_FLAG_NAMES}"; do
+            echo "_ZDOT_DEFER_FLAG_NAMES[${(q)_flag_key}]=${(q)_ZDOT_DEFER_FLAG_NAMES[$_flag_key]}"
+        done
+
+        echo ""
+        echo "# Deferred hook dispatch args"
+        echo "typeset -gA _ZDOT_HOOK_DEFER_ARGS=()"
+        for hook_id in "${_ZDOT_DEFERRED_HOOKS[@]}"; do
+            if [[ -n "${_ZDOT_HOOK_DEFER_ARGS[$hook_id]+set}" ]]; then
+                echo "_ZDOT_HOOK_DEFER_ARGS[${hook_id}]=${(q)_ZDOT_HOOK_DEFER_ARGS[$hook_id]}"
+            fi
         done
 
         echo ""
@@ -370,6 +373,22 @@ zdot_cache_save_plan() {
             echo "    ${(q)_fdw}"
         done
         echo ")"
+
+        echo ""
+        echo "# Hook group membership (multi-group forward map)"
+        echo "typeset -gA _ZDOT_HOOK_GROUPS=()"
+        local _hg_id
+        for _hg_id in "${(k)_ZDOT_HOOK_GROUPS[@]}"; do
+            echo "_ZDOT_HOOK_GROUPS[${_hg_id}]=${(q)_ZDOT_HOOK_GROUPS[$_hg_id]}"
+        done
+
+        echo ""
+        echo "# Group member index (reverse map)"
+        echo "typeset -gA _ZDOT_GROUP_MEMBERS=()"
+        local _gm_name
+        for _gm_name in "${(k)_ZDOT_GROUP_MEMBERS[@]}"; do
+            echo "_ZDOT_GROUP_MEMBERS[${(q)_gm_name}]=${(q)_ZDOT_GROUP_MEMBERS[$_gm_name]}"
+        done
     } > "$plan_file"
 
     # Compile the plan file for faster loading (co-located)

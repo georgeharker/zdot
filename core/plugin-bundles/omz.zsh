@@ -60,14 +60,18 @@ zdot_omz_check_for_upgrade() {
 zdot_load_omz_theme() {
     local theme_name="${1:-$ZSH_THEME}"
     local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-    local custom="${ZDOTDIR:-$HOME}/.oh-my-zsh/custom"
+    local custom="$ZSH_CUSTOM"
 
     local theme_file
 
-    if [[ -f "$custom/themes/$theme_name.zsh-theme" ]]; then
-        theme_file="$custom/themes/$theme_name.zsh-theme"
-    elif [[ -f "$custom/$theme_name.zsh-theme" ]]; then
+    # Search order mirrors use-omz.zsh:
+    #   1. $ZSH_CUSTOM (flat)
+    #   2. $ZSH_CUSTOM/themes
+    #   3. $ZSH/themes
+    if [[ -f "$custom/$theme_name.zsh-theme" ]]; then
         theme_file="$custom/$theme_name.zsh-theme"
+    elif [[ -f "$custom/themes/$theme_name.zsh-theme" ]]; then
+        theme_file="$custom/themes/$theme_name.zsh-theme"
     elif [[ -f "$cache/themes/$theme_name.zsh-theme" ]]; then
         theme_file="$cache/themes/$theme_name.zsh-theme"
     fi
@@ -75,17 +79,19 @@ zdot_load_omz_theme() {
     if [[ -n "$theme_file" ]]; then
         source "$theme_file"
         _ZDOT_THEME_LOADED=1
+    else
+        print -u2 "[omz] Theme '$theme_name' not found."
     fi
 }
 
 zdot_set_theme_during_precmd() {
-    [[ $_ZDOT_OMZ_THEME_PRECMD_SET -eq 1 ]] && return 0
+    # Self-remove from precmd hook immediately (mirrors use-omz.zsh behaviour)
+    autoload -Uz add-zsh-hook
+    add-zsh-hook -d precmd zdot_omz_theme_hook
+
     [[ -n "$ZSH_THEME" ]] || return 0
 
-    _ZDOT_OMZ_THEME_PRECMD_SET=1
-
     local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
-    local custom="${ZDOTDIR:-$HOME}/.oh-my-zsh/custom"
 
     local -A aliases_pre
     local key
@@ -93,9 +99,13 @@ zdot_set_theme_during_precmd() {
         [[ -n "${aliases[$key]:-}" ]] && aliases_pre[$key]=$aliases[$key]
     done
 
+    # async_prompt must be loaded before theme libs (mirrors use-omz.zsh behaviour)
+    [[ "${+functions[_omz_register_handler]}" -gt 0 ]] || source "$cache/lib/async_prompt.zsh" 2>/dev/null
+
     [[ -n "${FX:-}" ]] && [[ -n "${FG:-}" ]] && [[ -n "${BG:-}" ]] || source "$cache/lib/spectrum.zsh" 2>/dev/null
-    [[ -n "${ZSH_THEME_GIT_PROMPT_PREFIX:-}" ]] || source "$cache/lib/theme-and-appearance.zsh" 2>/dev/null
-    source "$cache/lib/vcs_info.zsh" 2>/dev/null
+    [[ "${+functions[colors]}" -gt 0 ]] &&
+        [[ -n "${ZSH_THEME_GIT_PROMPT_PREFIX:-}" ]] || source "$cache/lib/theme-and-appearance.zsh" 2>/dev/null
+    [[ "${+functions[VCS_INFO_formats]}" -gt 0 ]] || source "$cache/lib/vcs_info.zsh" 2>/dev/null
 
     zdot_load_omz_theme "$ZSH_THEME"
 
@@ -121,18 +131,17 @@ zdot_omz_theme_hook() {
 
 _zdot_load_omz_lib() {
     local cache=$_ZDOT_PLUGINS_CACHE
-    local omz_lib="$cache/ohmyzsh/ohmyzsh/lib"
 
-    fpath+=( "$omz_lib" )
+    # Ensure the completions cache dir exists and is on fpath (idempotent)
+    # (mirrors what use-omz.zsh does with $ZSH_CACHE_DIR/completions)
+    mkdir -p "$ZSH_CACHE_DIR/completions"
+    (( ${fpath[(Ie)"$ZSH_CACHE_DIR/completions"]} )) || fpath=( "$ZSH_CACHE_DIR/completions" $fpath )
 
-    local lib_file
-    for lib_file in functions compfix completion key-bindings termsupport; do
-        if [[ -f "$omz_lib/$lib_file.zsh" ]]; then
-            source "$omz_lib/$lib_file.zsh"
-        fi
-    done
+    # No lib files are eagerly sourced here:
+    #  - functions, compfix, git, async_prompt, nvm, etc. are lazy-stubbed above
+    #  - completion, key-bindings, termsupport, history, etc. are left to the user
+    # This matches the use-omz.zsh model exactly.
 
-    # Mark as loaded
     _ZDOT_PLUGINS_LOADED[omz:lib]=1
 }
 
@@ -235,36 +244,51 @@ zdot_bundle_omz_match() {
 
 if [[ "$_zdot_omz_enabled" == yes ]]; then
 
-    # Bugfix: OMZ has a regression where async-prompt can cause issues.
-    # Only relevant when OMZ is active.
-    if ! zstyle -t ':omz:alpha:lib:git' async-prompt; then
-        zstyle ':omz:alpha:lib:git' async-prompt no
-    fi
-
     # ------------------------------------------------------------------
-    # OMZ Core Variables (from use-omz)
+    # Bundle init function: called by zdot_init during bundle init pass
     # ------------------------------------------------------------------
 
-    # Set ZSH_CUSTOM to the path where custom config files and plugins exist
-    [[ -n "$ZSH_CUSTOM" ]] || ZSH_CUSTOM="${ZSH_CUSTOM_DIR:-${ZDOTDIR:-$HOME}/.oh-my-zsh/custom}"
+    zdot_bundle_omz_init() {
+        # Step 1: OMZ self-update check
+        zdot_omz_check_for_upgrade
 
-    # Set ZSH_CACHE_DIR for cache files (use zdot-specific prefix)
-    [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zdot"
+        # Step 2: Set OMZ environment variables and state
+        # Bugfix: OMZ has a regression where async-prompt can cause issues.
+        if ! zstyle -t ':omz:alpha:lib:git' async-prompt; then
+            zstyle ':omz:alpha:lib:git' async-prompt no
+        fi
 
-    # ------------------------------------------------------------------
-    # Theme state variables
-    # ------------------------------------------------------------------
+        # Set ZSH to the OMZ installation directory (required by OMZ plugins/themes)
+        [[ -n "$ZSH" ]] || ZSH="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
 
-    typeset -g _ZDOT_OMZ_THEME_PRECMD_SET=0
-    typeset -g _ZDOT_THEME_LOADED=0
-    typeset -g ZSH_THEME
+        # Set ZSH_CUSTOM to the path where custom config files and plugins exist
+        [[ -n "$ZSH_CUSTOM" ]] || ZSH_CUSTOM="$ZSH/custom"
+
+        # Set ZSH_CACHE_DIR for cache files (use zdot-specific prefix)
+        [[ -n "$ZSH_CACHE_DIR" ]] || ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zdot"
+
+        typeset -g _ZDOT_THEME_LOADED=0
+        typeset -g ZSH_THEME
+
+        # Step 3: Register lib loader; --provides-group omz-plugins means any
+        # hook tagged --group omz-plugins gets --requires omz-lib-loaded injected.
+        zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
+            --provides omz-lib-loaded \
+            --provides-group omz-plugins
+
+        # Step 4: Register theme init hook
+        zdot_hook_register zdot_omz_theme_init interactive noninteractive \
+            --requires omz-lib-loaded \
+            --provides omz-theme-ready
+
+    }
 
     # ------------------------------------------------------------------
     # Plugin Bundle API registration
     # ------------------------------------------------------------------
 
     # Register this bundle handler with the registry
-    zdot_bundle_register omz
+    zdot_bundle_register omz --init-fn zdot_bundle_omz_init --provides omz-bundle-initialized
     zdot_use_bundle ohmyzsh/ohmyzsh
 
     # Bundle-specific compdump stamp: OMZ git HEAD revision.
@@ -284,20 +308,12 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         zdot_load_plugin omz:lib
     }
 
-    zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
-        --requires plugins-cloned \
-        --provides omz-lib-loaded
-
     # OMZ theme hook: loads theme during precmd if ZSH_THEME is set
     # Depends on omz-lib-loaded (omz:lib sourced), provides omz-theme-ready
     zdot_omz_theme_init() {
         autoload -Uz add-zsh-hook
         add-zsh-hook precmd zdot_omz_theme_hook
     }
-
-    zdot_hook_register zdot_omz_theme_init interactive \
-        --requires omz-lib-loaded \
-        --provides omz-theme-ready
 
     # ------------------------------------------------------------------
     # Lazy-loaded OMZ Libs (from use-omz)
@@ -322,21 +338,21 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # lib/async_prompt.zsh
     [[ "${+functions[_omz_register_handler]}" -gt 0 ]] ||
     function _omz_register_handler _omz_async_request _omz_async_callback {
-        zdot_omz_lazy_load_lib async_prompt.zsh
+        zdot_omz_lazy_load_lib async_prompt
         "$0" "$@"
     }
 
     # lib/bzr.zsh
     [[ "${+functions[bzr_prompt_info]}" -gt 0 ]] ||
     function bzr_prompt_info {
-        zdot_omz_lazy_load_lib bzr.zsh
+        zdot_omz_lazy_load_lib bzr
         "$0" "$@"
     }
 
     # lib/cli.zsh
     [[ "${+functions[omz]}" -gt 0 ]] ||
     function omz {
-        zdot_omz_lazy_load_lib cli.zsh
+        zdot_omz_lazy_load_lib cli
         "$0" "$@"
     }
 
@@ -344,7 +360,7 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     [[ "${+functions[detect-clipboard]}" -gt 0 ]] ||
     function detect-clipboard clipcopy clippaste {
         unfunction detect-clipboard
-        zdot_omz_lazy_load_lib clipboard.zsh
+        zdot_omz_lazy_load_lib clipboard
         detect-clipboard
         "$0" "$@"
     }
@@ -352,7 +368,7 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # lib/compfix.zsh
     [[ "${+functions[handle_completion_insecurities]}" -gt 0 ]] ||
     function handle_completion_insecurities {
-        zdot_omz_lazy_load_lib compfix.zsh
+        zdot_omz_lazy_load_lib compfix
         "$0" "$@"
     }
 
@@ -363,7 +379,7 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         omz_urldecode \
         omz_urlencode \
     {
-        zdot_omz_lazy_load_lib functions.zsh
+        zdot_omz_lazy_load_lib functions
         "$0" "$@"
     }
 
@@ -385,15 +401,15 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         git_current_user_email \
         git_repo_name \
     {
-        [[ "${+functions[_omz_register_handler]}" -gt 0 ]] || zdot_omz_lazy_load_lib async_prompt.zsh
-        zdot_omz_lazy_load_lib git.zsh
+        [[ "${+functions[_omz_register_handler]}" -gt 0 ]] || zdot_omz_lazy_load_lib async_prompt
+        zdot_omz_lazy_load_lib git
         "$0" "$@"
     }
 
     # lib/nvm.zsh
     [[ "${+functions[nvm_prompt_info]}" -gt 0 ]] ||
     function nvm_prompt_info {
-        zdot_omz_lazy_load_lib nvm.zsh
+        zdot_omz_lazy_load_lib nvm
         "$0" "$@"
     }
 
@@ -412,44 +428,8 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         rvm_prompt_info \
         ruby_prompt_info \
     {
-        zdot_omz_lazy_load_lib prompt_info_functions.zsh
+        zdot_omz_lazy_load_lib prompt_info_functions
         "$0" "$@"
     }
-
-    # ------------------------------------------------------------------
-    # Prompt Functions (interactive only - lazy loaded)
-    # ------------------------------------------------------------------
-
-    _zdot_omz_setup_prompt_funcs() {
-        # lib/nvm.zsh
-        [[ "${+functions[nvm_prompt_info]}" -gt 0 ]] ||
-        function nvm_prompt_info {
-            zdot_omz_lazy_load_lib nvm.zsh
-            "$0" "$@"
-        }
-
-        # lib/prompt_info_functions.zsh
-        [[ "${+functions[rvm_prompt_info]}" -gt 0 ]] ||
-        function chruby_prompt_info \
-            rbenv_prompt_info \
-            hg_prompt_info \
-            pyenv_prompt_info \
-            svn_prompt_info \
-            vi_mode_prompt_info \
-            virtualenv_prompt_info \
-            jenv_prompt_info \
-            azure_prompt_info \
-            tf_prompt_info \
-            rvm_prompt_info \
-            ruby_prompt_info \
-        {
-            zdot_omz_lazy_load_lib prompt_info_functions.zsh
-            "$0" "$@"
-        }
-    }
-
-    zdot_hook_register _zdot_omz_setup_prompt_funcs interactive \
-        --requires omz-lib-loaded \
-        --provides omz-prompt-funcs-ready
 
 fi

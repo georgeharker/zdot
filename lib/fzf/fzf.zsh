@@ -78,7 +78,7 @@ zdot_hook_register _fzf_init interactive \
 
 # Post-plugin: setup fzf after plugins are loaded
 zdot_hook_register _fzf_post_plugin interactive \
-    --requires plugins-loaded \
+    --requires plugins-post-configured \
     --provides fzf-ready
 
 # Lazy load module functions

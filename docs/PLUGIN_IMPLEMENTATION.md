@@ -19,16 +19,15 @@ _ZDOT_PLUGINS_CACHE  - Cache directory path
 
 | Function | Purpose |
 |----------|---------|
-| `zdot_use <spec> [kind]` | Declare a plugin |
-| `zdot_use_defer <spec>` | Declare plugin with defer kind |
+| `zdot_use <spec> [-hook\|-defer] [opts]` | Declare a plugin (normal, hook-loaded, or deferred) |
+| `zdot_use_defer <spec>` | Deprecated alias for `zdot_use <spec> -defer` |
 | `zdot_use_fpath <spec>` | Declare plugin with fpath kind |
 | `zdot_use_path <spec>` | Declare plugin with path kind |
+| `zdot_init` | Clone all repos, run bundle inits, resolve groups, build DAG, execute all hooks |
 | `zdot_plugin_path <spec>` | Get filesystem path for plugin |
 | `zdot_plugin_clone <spec>` | Clone plugin to cache |
 | `zdot_plugins_clone_all` | Clone all declared plugins |
 | `zdot_load_plugin <spec>` | Load a specific plugin |
-| `zdot_load_all_plugins` | Load all `normal`-kind plugins in declaration order (defined but not called in the active hook chain) |
-| `zdot_load_deferred_plugins` | Load all `defer`-kind plugins via `zdot_defer source` |
 | `zdot_list_plugins [--mode]` | List plugins |
 | `zdot_update_plugin [spec]` | Update plugin(s) |
 | `zdot_clean_plugins` | Remove unused plugins |
@@ -49,15 +48,20 @@ Provides phase-based execution:
 
 ```
 xdg-configured          -> XDG dirs configured
-plugins-declared        -> All zdot_use calls registered
 plugins-cloned          -> Plugins cloned to cache
+omz-lib-loaded          -> OMZ lib sourced
 omz-plugins-loaded      -> OMZ plugins individually loaded
-plugins-loaded          -> Deferred plugins scheduled
+abbr-ready              -> zsh-abbr loaded
+fsh-ready               -> fast-syntax-highlighting loaded
+fast-abbr-ready         -> fast-abbr bridge loaded
+autosuggest-ready       -> zsh-autosuggestions loaded
+autosuggest-abbr-ready  -> autosuggest-abbr bridge loaded (last deferred phase)
+compinit-done           -> compinit has run (interactive only)
 fzf-tab-loaded          -> fzf-tab loaded (interactive only)
 plugins-post-configured -> Post-load config done
 nvm-ready               -> NVM initialized
-                           (interactive: triggered by prompt-ready;
-                            noninteractive: triggered by plugins-loaded)
+                           (interactive: triggered after plugins-post-configured;
+                            noninteractive: triggered after omz-plugins-loaded)
 ```
 
 Registration:
@@ -82,7 +86,7 @@ _ZDOT_BUNDLE_HANDLERS   - Ordered array of registered bundle handler names
 
 | Function | Purpose |
 |----------|---------|
-| `zdot_bundle_register <name>` | Register a bundle handler (call at end of handler file) |
+| `zdot_bundle_register <name> [--init-fn <fn>] [--provides <phase>]` | Register a bundle handler |
 
 **Currently registered handlers:**
 
@@ -103,10 +107,20 @@ zdot_bundle_<name>_load  <spec>   # Source / activate the plugin
 All four functions are required. If a handler does not need cloning (e.g., OMZ is
 cloned at file-source time), `zdot_bundle_<name>_clone` must still be defined as a no-op.
 
-Registration must happen **after** all four functions are defined, at the end of the file:
+Optionally, a handler may also define an init function that is called by `zdot_init`
+during its bundle-init pass (step 2), **before** any plugins are cloned or loaded:
 
 ```zsh
-zdot_bundle_register <name>
+zdot_bundle_<name>_init()  {
+    # one-time setup: set environment vars, configure paths, etc.
+}
+```
+
+Registration must happen **after** all four (or five) functions are defined, at the end
+of the file, and must declare any init function and phase it provides:
+
+```zsh
+zdot_bundle_register <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
 ```
 
 `zdot_bundle_register` is idempotent — sourcing the file twice is safe.
@@ -139,7 +153,7 @@ zdot_bundle_<name>_load() {
     # source the plugin entry point
 }
 
-zdot_bundle_register <name>
+zdot_bundle_register <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
 ```
 
 Then explicitly source the new file in `zdot.zsh` (auto-discovery is a planned future
@@ -291,38 +305,85 @@ function git_prompt_info {
 - clipboard.zsh
 - spectrum.zsh
 
+## Phase Contract
+
+The zdot plugin system uses a single trigger model: user-land declares all plugin
+specs via `zdot_use` calls, then calls `zdot_init` exactly once.  `zdot_init` drives
+the entire clone-and-load sequence internally; no user-land hook is required to emit
+any intermediate phase.
+
+### `zdot_init` — the single trigger
+
+`zdot_init` must be called **after** all `zdot_use` declarations in the same file
+(or after sourcing all sub-modules that contain `zdot_use` calls).  It performs five
+steps in order:
+
+1. Clone all repos that have not yet been cloned (`zdot_plugins_clone_all`).
+2. Run the init function for every registered bundle handler that declared `--init-fn`.
+3. Resolve group annotations (`--group`, `--provides-group`, `--requires-group`) into
+   concrete DAG edges.
+4. Build the hook execution plan (topological sort of registered hooks).
+5. Execute all hooks in plan order, respecting `--deferred` and interactivity flags.
+
+### `plugins-cloned` — emitted by core
+
+After step 1 completes, core emits `plugins-cloned`.  Every hook that loads or
+configures plugins must declare `--requires plugins-cloned` so it runs only after
+the filesystem is ready.
+
+### Summary
+
+| Phase             | Provided by        | Consumed by                        |
+|-------------------|--------------------|------------------------------------|
+| `plugins-cloned`  | `zdot_init` step 1 | every plugin-loading hook           |
+
+The core clone hook registration lives in `core/plugins.zsh`.  `zdot_init` is called
+at the bottom of `lib/plugins/plugins.zsh` (or whichever file completes the last
+`zdot_use` declaration).
+
+---
+
 ## Plugin Loading Flow
 
 ```
-Shell startup (.zshrc / .zshenv — commonly symlinked to the same file so
-interactive and noninteractive shells share one config, though any entry
-point that sources zdot_init works):
-  └─> zdot_init
-       └─> modules sourced (lib/plugins/plugins.zsh)
-            └─> zdot_use / zdot_use_defer calls register specs into
-                _ZDOT_PLUGINS_ORDER and _ZDOT_PLUGINS
-            └─> hook functions registered against named phases
+Shell startup (.zshrc / .zshenv):
+  └─> modules sourced (lib/plugins/plugins.zsh)
+       └─> zdot_use / zdot_use -hook / zdot_use -defer calls register specs
+           and hook functions against named phases
+       └─> zdot_init called at end of file
 
-Hook phase chain (driven by zdot_hook_run):
+zdot_init (core/plugins.zsh):
+  1. zdot_plugins_clone_all        — clone all repos; emits plugins-cloned
+  2. bundle init pass              — calls zdot_bundle_omz_init (provides: omz-lib-loaded)
+  3. resolve group annotations     — injects edges for --group/--provides-group/--requires-group
+  4. build execution plan          — topological sort of registered hooks
+  5. execute all hooks in order
+
+Hook phase chain (driven by zdot_init step 5):
   xdg-configured
-    └─> _plugins_configure           (provides: plugins-declared)
-  plugins-declared
-    └─> zdot_plugins_clone_all       (provides: plugins-cloned)
+    └─> _plugins_configure         (requires: xdg-configured)
   plugins-cloned
-    └─> _plugins_load_omz            (calls zdot_load_plugin per OMZ spec)
-                                     (provides: omz-plugins-loaded)
+    └─> _plugins_load_omz          (requires: plugins-cloned)
+                                   (provides: omz-plugins-loaded)
+                                   (calls zdot_load_plugin per OMZ spec)
   omz-plugins-loaded
-    └─> _plugins_load_deferred       (calls zdot_load_deferred_plugins)
-                                     (provides: plugins-loaded)
-  plugins-loaded
-    └─> _plugins_load_fzf_tab        (interactive only)
-                                     (provides: fzf-tab-loaded)
-    └─> _plugins_post_init           (provides: plugins-post-configured)
-    └─> _nvm_noninteractive_init     (noninteractive only)
-                                     (provides: nvm-ready)
-  prompt-ready
-    └─> _nvm_interactive_init        (interactive only)
-                                     (provides: nvm-ready)
+    └─> olets/zsh-abbr             (deferred; provides: abbr-ready)
+    └─> zsh-users/zsh-autosuggestions
+                                   (deferred; provides: autosuggest-ready)
+    └─> zdharma-continuum/fast-syntax-highlighting
+                                   (deferred; provides: fsh-ready)
+    └─> _nvm_noninteractive_init   (noninteractive only; provides: nvm-ready)
+  fsh-ready
+    └─> 5A6F65/fast-abbr           (deferred; provides: fast-abbr-ready)
+  autosuggest-ready
+    └─> olets/zsh-autosuggestions-abbreviations-strategy
+                                   (deferred; provides: autosuggest-abbr-ready)
+  autosuggest-abbr-ready
+    └─> zdot_compinit_defer        (deferred; provides: compinit-done)
+    └─> _plugins_load_fzf_tab      (interactive only; provides: fzf-tab-loaded)
+    └─> _plugins_post_init         (deferred; provides: plugins-post-configured)
+  plugins-post-configured
+    └─> _nvm_interactive_init      (interactive, deferred; provides: nvm-ready)
 ```
 
 ## Non-Interactive Mode Handling

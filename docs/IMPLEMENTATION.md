@@ -40,13 +40,7 @@ This document provides technical implementation details for the zdot system. It 
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Phase Promises (.zshrc)                                  │
-│    - User calls zdot_promise_phase() for manual phases      │
-│    - Marks phases as available for dependency resolution    │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 4. Execution Planning (zdot_build_execution_plan)           │
+│ 3. Execution Planning (zdot_build_execution_plan)           │
 │    - Analyze hook dependencies                               │
 │    - Perform topological sort                                │
 │    - Build ordered execution plan                            │
@@ -54,7 +48,7 @@ This document provides technical implementation details for the zdot system. It 
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Hook Execution (zdot_execute_all)                        │
+│ 4. Hook Execution (zdot_execute_all)                        │
 │    - Iterate through execution plan                          │
 │    - Check shell context matches                             │
 │    - Execute hook function                                   │
@@ -62,7 +56,7 @@ This document provides technical implementation details for the zdot system. It 
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. Deferred Hook Dispatch (_zdot_run_deferred_phase_check)  │
+│ 5. Deferred Hook Dispatch (_zdot_run_deferred_phase_check)  │
 │    - Called once after zdot_execute_all completes            │
 │    - Checks each deferred hook's required phases             │
 │    - Dispatches hooks whose dependencies are now satisfied   │
@@ -143,8 +137,7 @@ fi
 - Dependency resolution (`zdot_build_execution_plan`)
 - Hook execution (`zdot_execute_all`)
 - Deferred hook dispatch (`_zdot_run_deferred_phase_check`)
-- Phase management (`zdot_promise_phase`)
-- Intentional deferral acknowledgement (`zdot_accept_deferred`)
+- Phase management (`zdot_accept_deferred`)
 - Module loading (`zdot_load_modules`)
 
 **Key Functions:**
@@ -157,8 +150,7 @@ Registers a hook with the system.
 1. Parse arguments (function name, contexts, flags)
 2. Generate unique hook ID: `hook_N` (sequential integer, e.g. `hook_1`, `hook_2`)
 3. Store metadata in global associative arrays
-4. If `--on-demand`, populate `_ZDOT_ON_DEMAND_PHASES`
-5. If `--provides`, create reverse mapping in `_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` (key: `"context:phase"`)
+4. If `--provides`, create reverse mapping in `_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` (key: `"context:phase"`)
 
 **Validation:**
 - Checks for duplicate hook IDs
@@ -182,14 +174,11 @@ Builds ordered execution plan via topological sort.
 - Handled inline during graph traversal — no separate recursive function
 - Missing optional dependencies: hook is skipped gracefully
 - Missing required dependencies: warning is issued, hook excluded
-- On-demand phases: not validated during planning; hooks included unconditionally
 
 **Edge Cases:**
 - Circular dependency detection via recursion tracking
 - Missing optional dependencies (hooks skipped gracefully)
 - Missing required dependencies (warnings issued)
-- Promised phases (treated as available even if not provided yet)
-- On-demand phases (not validated, hooks won't error)
 
 ##### `zdot_execute_all()` (lines 273-314)
 
@@ -309,7 +298,7 @@ Lists all loaded user modules from `_ZDOT_USER_MODULES_LOADED`.
 
 **Responsibilities:**
 - Display all registered hooks
-- Categorize by phase, on-demand, or error
+- Categorize by phase, unplanned, or error
 - Validate hook requirements
 - Show context filtering
 
@@ -318,17 +307,15 @@ Lists all loaded user modules from `_ZDOT_USER_MODULES_LOADED`.
 2. Parse `--all` flag for showing all contexts
 3. Categorize each hook:
    - **Hooks by Phase**: Have `--provides` set
-   - **On-demand Hooks**: Marked `--on-demand` OR have satisfiable deps but no `--provides`
-   - **Error Hooks**: No `--provides`, not on-demand, have unsatisfiable requirements
+   - **Unplanned Hooks**: Have satisfiable deps but no `--provides`
+   - **Error Hooks**: No `--provides`, have unsatisfiable requirements
 4. Group phase hooks by provided phase
-5. Collect on-demand hooks
+5. Collect unplanned hooks
 6. Detect error hooks via requirement validation
 
 **Requirement Validation** (lines 77-92):
 A requirement is **satisfiable** if ANY of:
 1. Provided by a hook (`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx:$req]` for each active context)
-2. Promised via `zdot_promise_phase()` (`_ZDOT_PHASES_PROMISED[$req]`)
-3. Marked as on-demand (`_ZDOT_ON_DEMAND_PHASES[$req]`)
 
 If any requirement is unsatisfiable, hook is flagged as error.
 
@@ -342,9 +329,9 @@ Phase: brew-ready
 Phase: xdg-configured
   • _xdg_init (interactive noninteractive)
 
-On-demand Hooks:
+Unplanned Hooks:
 
-  • _xdg_cleanup (interactive noninteractive) [optional] [on-demand]
+  • _xdg_cleanup (interactive noninteractive) [optional]
 
 ⚠️ Hooks with Missing Requirements:
 
@@ -379,9 +366,7 @@ typeset -gA _ZDOT_HOOK_PROVIDES
 typeset -gA _ZDOT_HOOK_OPTIONAL
 # Example: _ZDOT_HOOK_OPTIONAL["hook_1"]=1
 
-# Hook ID → 1 if on-demand
-typeset -gA _ZDOT_HOOK_ON_DEMAND
-# Example: _ZDOT_HOOK_ON_DEMAND["hook_2"]=1
+# Hook ID → 1 (removed; no longer used)
 ```
 
 #### Phase Tracking
@@ -391,17 +376,9 @@ typeset -gA _ZDOT_HOOK_ON_DEMAND
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT
 # Example: _ZDOT_PHASE_PROVIDERS_BY_CONTEXT["interactive:brew-ready"]="hook_1"
 
-# Phase name → 1 if promised
-typeset -gA _ZDOT_PHASES_PROMISED
-# Example: _ZDOT_PHASES_PROMISED["finalize"]=1
-
 # Phase name → 1 if actually provided at runtime
 typeset -gA _ZDOT_PHASES_PROVIDED
 # Example: _ZDOT_PHASES_PROVIDED["brew-ready"]=1
-
-# Phase name → 1 if on-demand (won't validate in dependency check)
-typeset -gA _ZDOT_ON_DEMAND_PHASES
-# Example: _ZDOT_ON_DEMAND_PHASES["finalize"]=1
 ```
 
 #### Runtime State
@@ -556,8 +533,6 @@ for each hook_id in registered hooks:
     if contexts don't match current shell: skip
     for each phase in _ZDOT_HOOK_REQUIRES[hook_id]:
         if phase already in _ZDOT_PHASES_PROVIDED: continue
-        if phase in _ZDOT_PHASES_PROMISED: continue
-        if phase in _ZDOT_ON_DEMAND_PHASES: continue
         provider = _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[ctx:phase]
         if provider exists: in_degree[hook_id]++
 
@@ -585,7 +560,7 @@ for each hook_id not in execution_plan:
 
 1. **No Recursion**: BFS queue eliminates recursion depth limits
 2. **Deterministic Order**: Hooks at the same depth are processed in registration order
-3. **Promised/On-Demand Phases**: Treated as already satisfied; do not block enqueue
+3. **Finally Group**: Hooks requiring the `finally` group are dispatched automatically when the deferred queue fully drains
 4. **Optional Handling**: Hooks with unresolvable optional deps are silently skipped
 5. **Circular Detection**: Hooks still in the unprocessed set after BFS drains indicate a cycle
 
@@ -647,46 +622,23 @@ zdot_hook_register _hook_a interactive --requires nonexistent-phase
 ⚠ Hook _hook_a requires phase nonexistent-phase, which is not available
 ```
 
-#### Promised but Never Provided Phases
+#### Finally Group Hooks
 
 **Example:**
 ```zsh
-# In .zshrc
-zdot_promise_phase special-phase  # Promised but never actually provided
-
-# In module
-zdot_hook_register _hook_a interactive --requires special-phase --provides phase-a
+# In module: register a cleanup hook that runs after all deferred hooks complete
+zdot_hook_register _cleanup interactive --requires-group finally
 ```
 
 **Behavior:**
-- Dependency resolution succeeds (phase is promised)
-- Hook is added to execution plan
-- Hook executes (may fail if it actually needs the phase)
-- Phase is never marked as provided
+- Hook is added to `_ZDOT_GROUP_MEMBERS[finally]` at registration time
+- Hook is NOT in the main execution plan — it does not participate in topological sort
+- When `_zdot_run_deferred_phase_check` detects the deferred queue has fully drained
+  (no hooks dispatched, no pending hooks, no queued hooks), it iterates
+  `_ZDOT_GROUP_MEMBERS[finally]` and executes each member not yet in `_ZDOT_HOOKS_EXECUTED`
+- No manual triggering required
 
-**Risk**: Hook may fail at runtime if it truly depends on the phase
-
-**Mitigation**: Only promise phases that will actually be provided (i.e. a hook with `--provides <phase>` will run before your hook)
-
-#### On-Demand Phases
-
-**Example:**
-```zsh
-# In module: register a hook that requires the "finalize" on-demand phase
-zdot_hook_register _cleanup interactive --requires finalize --on-demand
-
-# Elsewhere (e.g. in .zshrc, after all modules are loaded):
-zdot_run_until finalize  # Execute all hooks up to and including finalize
-```
-
-**Behavior:**
-- Hook is marked as on-demand; `finalize` is added to `_ZDOT_ON_DEMAND_PHASES`
-- Dependency resolution skips validation that `finalize` is provided by any eager hook
-- Hook is categorized as "on-demand" rather than an error
-- Hook only executes when `zdot_run_until finalize` is called, which runs all hooks
-  up to and including the `finalize` phase
-
-**Use Case**: Cleanup tasks that run on shell exit
+**Use Case**: Cleanup tasks, post-init bookkeeping that should run after all deferred setup completes
 
 ## Context System
 
@@ -1133,7 +1085,7 @@ zdot_error "Failed to initialize: $error_message"
 
 2. **Registered Hooks** (lines 14-16):
    - Calls `zdot_hooks_list` to show hook organization
-   - Shows phases, on-demand hooks, and errors
+   - Shows phases, unplanned hooks, and errors
 
 3. **Completion Status** (lines 18-60):
    - Shows completion commands to be generated
@@ -1167,11 +1119,9 @@ zdot_debug_info
    - Shows contexts and flags (`[optional]`)
    - Standard hooks that provide phases
 
-2. **On-demand Hooks** (lines 157-190):
-   - Hooks marked `--on-demand`
+2. **Unplanned Hooks** (lines 157-190):
    - Hooks without `--provides` but with satisfiable deps
-   - Marked with `[on-demand]` indicator
-   - Not errors, waiting for manual trigger
+   - Not errors; simply have no phase to provide
 
 3. **Hooks with Missing Requirements** (lines 192-220):
    - Hooks with unsatisfiable dependencies
@@ -1258,7 +1208,6 @@ echo "Contexts: ${_ZDOT_HOOK_CONTEXTS[$hook_id]}"
 echo "Requires: ${_ZDOT_HOOK_REQUIRES[$hook_id]}"
 echo "Provides: ${_ZDOT_HOOK_PROVIDES[$hook_id]}"
 echo "Optional: ${_ZDOT_HOOK_OPTIONAL[$hook_id]:-0}"
-echo "On-demand: ${_ZDOT_HOOK_ON_DEMAND[$hook_id]:-0}"
 ```
 
 ## Design Decisions
@@ -1344,20 +1293,20 @@ echo "On-demand: ${_ZDOT_HOOK_ON_DEMAND[$hook_id]:-0}"
 - Graceful degradation for optional features
 - Errors shown for truly broken configs
 
-### Why On-Demand Flag?
+### Why Finally Group?
 
-**Problem**: Some hooks depend on manually-triggered phases (like `finalize`). These were showing up as errors in `zdot_hooks_list` even though they're intentional.
+**Problem**: Some hooks need to run after all deferred initialization completes — e.g. cleanup or post-init bookkeeping. Previously this used `--on-demand` with a manually-triggered `finalize` phase.
 
 **Alternatives Considered:**
-1. **Promise all manual phases**: Requires user action, easy to forget (rejected)
-2. **Assume all non-provided phases are manual**: Hides real errors (rejected)
-3. **Explicit on-demand flag**: Chosen
+1. **Manual trigger (`zdot_run_until finalize`)**: Requires user to call explicitly, easy to forget (rejected)
+2. **Special `finalize` phase**: Treated as a regular phase but never provided by an eager hook — caused plan errors (rejected)
+3. **Finally group with auto-dispatch**: Chosen
 
 **Why chosen:**
-- Explicit intent (module author decides)
-- Distinguishes "waiting for manual trigger" from "broken config"
-- Improves debug output clarity
-- Doesn't require user to promise phases
+- Fully automatic: no user action required to trigger cleanup hooks
+- Uses the existing group infrastructure (`_ZDOT_GROUP_MEMBERS`)
+- Clean separation: `finally` hooks are outside the main execution plan
+- Hooks simply declare `--requires-group finally` at registration time
 
 ### Why Autoloading for Functions?
 
@@ -1507,10 +1456,6 @@ zdot_debug_phases() {
     for phase in "${(k)_ZDOT_PHASES_PROVIDED[@]}"; do
         echo "  ✓ $phase"
     done
-    echo "Promised phases:"
-    for phase in "${(k)_ZDOT_PHASES_PROMISED[@]}"; do
-        echo "  ⏳ $phase"
-    done
 }
 ```
 
@@ -1527,7 +1472,7 @@ zdot_debug_phases() {
 **Common modifications:**
 
 1. **Change skip behavior**: Modify how optional hooks are handled in the in-degree computation loop
-2. **Add new phase types**: Extend the logic that classifies promised vs. on-demand phases
+2. **Add new phase types**: Extend the logic that classifies phase providers and group membership
 3. **Improve cycle detection**: Enhance the cycle-detected error path in `zdot_build_execution_plan()`
 
 **Testing**: After modifications, test with:
@@ -1536,35 +1481,20 @@ zdot_debug_phases() {
 - Missing required dependencies
 - Complex dependency graphs (3+ levels deep)
 
-### Creating Custom Phase Management
+### Using the Finally Group for Cleanup Hooks
 
-**Use Case**: Custom lifecycle phases beyond `finalize`.
-
-**Example**: Add a `shutdown` phase for cleanup when shell exits.
+**Use Case**: Run cleanup or post-init hooks automatically after all deferred initialization completes.
 
 **Implementation:**
 
-1. In `.zshrc`, promise phase and build execution plan:
+In module, register hook with `--requires-group finally`:
 ```zsh
-zdot_promise_phase shutdown
-zdot_build_execution_plan
+zdot_hook_register _mymodule_cleanup interactive noninteractive \
+    --requires-group finally
 ```
 
-2. In module, register hook with `--on-demand`:
-```zsh
-zdot_hook_register _mymodule_shutdown interactive noninteractive \
-    --requires shutdown \
-    --on-demand
-```
-
-3. In `.zshrc`, trigger on exit using `zdot_run_until`:
-```zsh
-zshexit() {
-    zdot_run_until shutdown
-}
-```
-
-**Result**: `_mymodule_shutdown` runs when `shutdown` is reached via `zdot_run_until shutdown`.
+**Result**: `_mymodule_cleanup` runs automatically when `_zdot_run_deferred_phase_check` detects
+the deferred queue has fully drained — no manual triggering required.
 
 ---
 
@@ -1940,7 +1870,7 @@ zsh -l -c 'zdot_debug_info'
 - Circular dependencies
 - Missing dependencies
 - Optional vs required
-- On-demand hooks
+- Finally group hooks
 
 3. **Test with verbose logging:**
 ```zsh
@@ -2013,19 +1943,7 @@ When adding features:
    echo "${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[interactive:phase-name]}"
    ```
 
-2. Check if phase is promised:
-   ```zsh
-   echo "${_ZDOT_PHASES_PROMISED[phase-name]}"
-   ```
-
-3. Check if phase is on-demand:
-   ```zsh
-   echo "${_ZDOT_ON_DEMAND_PHASES[phase-name]}"
-   ```
-
 **Solutions:**
-- Promise phase if manually triggered: `zdot_promise_phase phase-name`
-- Mark hook as on-demand: `--on-demand` flag
 - Fix phase name typo
 - Add module that provides the phase
 
@@ -2391,61 +2309,6 @@ internal re-execution paths to avoid double-logging).
 `zdot_show_defer_queue` iterates the parallel arrays and formats each entry
 as a table row. It is intended for diagnostic use (e.g. called from
 `zdot_debug` or interactively) to inspect what was deferred and in what order.
-
----
-
-## On-Demand Phase Execution: `zdot_run_until`
-
-### Overview
-
-`zdot_run_until` triggers execution of hooks up to and including a target
-phase, but only for hooks registered with `--on-demand` for that phase.
-On-demand hooks are excluded from the main synchronous execution plan; they
-are only run when explicitly requested via `zdot_run_until`.
-
-### Global Array
-
-```
-_ZDOT_ON_DEMAND_PHASES (associative): phase_name → 1 (marks phase as on-demand)
-```
-
-Declared in `core/hooks.zsh`. Populated during `zdot_hook_register` when
-`--on-demand` is present.
-
-### Registration
-
-```zsh
-zdot_hook_register --on-demand my_lazy_init tools
-```
-
-- The `--on-demand` flag causes the hook's required phases to be recorded in
-  `_ZDOT_ON_DEMAND_PHASES` rather than added to the main execution plan.
-- On-demand hooks do not participate in the topological sort for the main plan.
-
-### Usage
-
-```zsh
-zdot_run_until <phase>
-```
-
-- Requires the execution plan to have been built (`zdot_build_execution_plan`
-  must have run first).
-- Runs all on-demand hooks whose required phases are satisfied up to and
-  including `<phase>`.
-- Skips hooks that have already executed (idempotent).
-- Useful for lazy initialization: a plugin can defer expensive setup until the
-  first time a feature is actually needed, then call `zdot_run_until` to
-  trigger it on demand.
-
-### Example
-
-```zsh
-# Register a hook that only runs when explicitly triggered:
-zdot_hook_register --on-demand --name lazy-db my_db_init tools network
-
-# Later, when the DB is actually needed:
-zdot_run_until tools
-```
 
 ---
 
