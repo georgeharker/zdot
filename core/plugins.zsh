@@ -6,24 +6,24 @@
 # Global State
 # ============================================================================
 
-typeset -ga _ZDOT_PLUGINS_ORDER   # Ordered list of plugin specs
-typeset -gA _ZDOT_PLUGINS        # plugin spec -> kind (normal/defer/fpath/path)
-typeset -gA _ZDOT_PLUGINS_LOADED # plugin spec -> 1 (already loaded)
-typeset -gA _ZDOT_PLUGIN_COMPILE_EXTRA # plugin spec -> space-separated list of extra files to compile
-typeset -gA _ZDOT_PLUGINS_VERSION # plugin spec -> version/rev (optional)
-typeset -gA _ZDOT_PLUGINS_PATH   # plugin spec -> filesystem path (populated at clone time)
-typeset -gA _ZDOT_PLUGINS_FILE   # plugin spec -> *.plugin.zsh path (populated at load time)
-typeset -g  _ZDOT_PLUGINS_CACHE  # cache directory
+typeset -ga _ZDOT_PLUGINS_ORDER         # Ordered list of plugin specs
+typeset -gA _ZDOT_PLUGINS               # plugin spec -> kind (normal/defer/fpath/path)
+typeset -gA _ZDOT_PLUGINS_LOADED        # plugin spec -> 1 (already loaded)
+typeset -gA _ZDOT_PLUGIN_COMPILE_EXTRA  # plugin spec -> space-separated list of extra files to compile
+typeset -gA _ZDOT_PLUGINS_VERSION       # plugin spec -> version/rev (optional)
+typeset -gA _ZDOT_PLUGINS_PATH          # plugin spec -> filesystem path (populated at clone time)
+typeset -gA _ZDOT_PLUGINS_FILE          # plugin spec -> *.plugin.zsh path (populated at load time)
+typeset -g  _ZDOT_PLUGINS_CACHE         # cache directory
 typeset -g  _ZDOT_PLUGINS_INITIALIZED=0
-typeset -ga _ZDOT_BUNDLE_HANDLERS # Ordered list of registered bundle handler names
-typeset -ga _ZDOT_BUNDLE_REPOS    # Repos cloned as bundle dependencies (not user plugins)
-typeset -gA _ZDOT_BUNDLE_INIT_FN  # bundle name -> init function name
-typeset -gA _ZDOT_BUNDLE_PROVIDES # bundle name -> phase token published after bundle init
-typeset -ga _ZDOT_DEFER_CMDS        # [N] = command string submitted
-typeset -ga _ZDOT_DEFER_HOOKS       # [N] = hook_func that submitted it (or "?" if outside hook)
-typeset -ga _ZDOT_DEFER_DELAYS      # [N] = delay in seconds (0 if none)
-typeset -ga _ZDOT_DEFER_SPECS       # [N] = human-readable spec name (plugins), "__sentinel__", or ""
-typeset -ga _ZDOT_DEFER_LABELS      # [N] = explicit --label override (or "" if none)
+typeset -ga _ZDOT_BUNDLE_HANDLERS       # Ordered list of registered bundle handler names
+typeset -ga _ZDOT_BUNDLE_REPOS          # Repos cloned as bundle dependencies (not user plugins)
+typeset -gA _ZDOT_BUNDLE_INIT_FN        # bundle name -> init function name
+typeset -gA _ZDOT_BUNDLE_PROVIDES       # bundle name -> phase token published after bundle init
+typeset -ga _ZDOT_DEFER_CMDS            # [N] = command string submitted
+typeset -ga _ZDOT_DEFER_HOOKS           # [N] = hook_func that submitted it (or "?" if outside hook)
+typeset -ga _ZDOT_DEFER_DELAYS          # [N] = delay in seconds (0 if none)
+typeset -ga _ZDOT_DEFER_SPECS           # [N] = human-readable spec name (plugins), "__sentinel__", or ""
+typeset -ga _ZDOT_DEFER_LABELS          # [N] = explicit --label override (or "" if none)
 typeset -g  _ZDOT_DEFER_COUNTER=0
 
 # _zdot_defer_record — append one deferred-command entry to the display log.
@@ -190,8 +190,8 @@ zdot_bundle_register() {
     local init_fn='' provides_phase=''
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --init-fn)   init_fn=$2;       shift 2 ;;
-            --provides)  provides_phase=$2; shift 2 ;;
+            --init-fn)  init_fn=$2;         shift 2 ;;
+            --provides) provides_phase=$2;  shift 2 ;;
             *) zdot_error "zdot_bundle_register: unknown option: $1"; return 1 ;;
         esac
     done
@@ -203,7 +203,7 @@ zdot_bundle_register() {
     done
     _ZDOT_BUNDLE_HANDLERS+=( "$name" )
 
-    [[ -n "$init_fn" ]]       && _ZDOT_BUNDLE_INIT_FN[$name]=$init_fn
+    [[ -n "$init_fn" ]]        && _ZDOT_BUNDLE_INIT_FN[$name]=$init_fn
     [[ -n "$provides_phase" ]] && _ZDOT_BUNDLE_PROVIDES[$name]=$provides_phase
 }
 

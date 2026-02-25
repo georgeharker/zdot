@@ -248,7 +248,10 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # Bundle init function: called by zdot_init during bundle init pass
     # ------------------------------------------------------------------
 
-    zdot_bundle_omz_init() {
+    # Real OMZ setup work — registered as a hook so that all hooks in the
+    # omz-configure group (user-space zstyle calls, etc.) are guaranteed to
+    # have run before this fires.
+    _zdot_bundle_omz_setup() {
         # Step 1: OMZ self-update check
         zdot_omz_check_for_upgrade
 
@@ -280,7 +283,16 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         zdot_hook_register zdot_omz_theme_init interactive noninteractive \
             --requires omz-lib-loaded \
             --provides omz-theme-ready
+    }
 
+    # Bundle init function: called directly by _zdot_init_bundles.
+    # Does NOT do OMZ setup inline — instead registers _zdot_bundle_omz_setup
+    # as a hook so that all omz-configure group hooks (user-space zstyle calls)
+    # run first via the normal hook resolution pass.
+    zdot_bundle_omz_init() {
+        zdot_hook_register _zdot_bundle_omz_setup interactive noninteractive \
+            --provides omz-bundle-initialized \
+            --requires-group omz-configure
     }
 
     # ------------------------------------------------------------------
@@ -288,7 +300,9 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # ------------------------------------------------------------------
 
     # Register this bundle handler with the registry
-    zdot_bundle_register omz --init-fn zdot_bundle_omz_init --provides omz-bundle-initialized
+    zdot_bundle_register omz \
+        --init-fn zdot_bundle_omz_init \
+        --provides omz-bundle-initialized
     zdot_use_bundle ohmyzsh/ohmyzsh
 
     # Bundle-specific compdump stamp: OMZ git HEAD revision.

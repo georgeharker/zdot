@@ -74,7 +74,8 @@ zdot_bundle_pz_init() {
     # Step 2: register the Prezto init hook
     zdot_hook_register _zdot_pz_load_init interactive noninteractive \
         --requires plugins-cloned \
-        --provides pz-init-loaded
+        --provides pz-init-loaded \
+        --requires-group pz-configure
 }
 
 # ============================================================================
