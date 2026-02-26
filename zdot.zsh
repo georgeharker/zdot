@@ -13,7 +13,10 @@
 # NOTE: Using :a (absolute path) instead of :A to preserve symlinks
 local zdot_core_dir="${${(%):-%x}:a:h}/core"
 
-# Source logging first (needed by other components)
+# Source base first (needed by other components)
+source "${zdot_core_dir}/base.zsh"
+
+# Source logging (needed by other components)
 source "${zdot_core_dir}/logging.zsh"
 
 # Source all components in dependency order

@@ -275,15 +275,21 @@ zdot_use_plugin() {
 
     # ── New hook / defer path ───────────────────────────────────────────────
     # Parse options
-    local opt_name='' opt_provides='' opt_config='' opt_context=''
+    local opt_name='' opt_provides='' opt_config=''
     local opt_requires='' opt_requires_group='' opt_provides_group=''
+    local -a opt_contexts=()
     local -a opt_groups=()
     while [[ $# -gt 0 ]]; do
         case $1 in
             --name)           opt_name=$2;           shift 2 ;;
             --provides)       opt_provides=$2;        shift 2 ;;
             --config)         opt_config=$2;          shift 2 ;;
-            --context)        opt_context=$2;         shift 2 ;;
+            --context)
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do
+                    opt_contexts+=("$1"); shift
+                done
+                ;;
             --requires)
                 [[ $subcommand == hook ]] && {
                     zdot_error "zdot_use_plugin: --requires is only valid with defer"
@@ -319,22 +325,25 @@ zdot_use_plugin() {
         fi
     fi
 
-    # Build the private loader function
-    local _def
-    IFS= read -r -d '' _def << EOD
-${loader_name}() {
-    local _spec=${(q)spec}
-    # Optional config callback — resolve dir only when a callback is set
-    ${opt_config:+zdot_plugin_path "\$_spec" && ${opt_config} "\$REPLY" "\$_spec"}
-    zdot_load_plugin "\$_spec"
-}
-EOD
-    eval "$_def"
+    # Build the private loader function.
+    # NOTE: Do NOT use `IFS= read -r -d '' var << heredoc` here —
+    # in process-substitution subshells (own process group), that
+    # pattern triggers SIGTTOU and stops the subshell.
+    local _config_body=""
+    if [[ -n "$opt_config" ]]; then
+        _config_body='zdot_plugin_path "\$_spec" && '"${opt_config}"' "\$REPLY" "\$_spec"'
+    fi
+    eval "${loader_name}() {
+        local _spec=${(q)spec}
+        ${_config_body}
+        zdot_load_plugin \"\$_spec\"
+    }"
 
     # Build zdot_register_hook argument list
-    local -a hook_args=( "$loader_name" interactive noninteractive )
+    local -a contexts=( interactive noninteractive )
+    (( ${#opt_contexts} )) && contexts=( "${opt_contexts[@]}" )
+    local -a hook_args=( "$loader_name" "${contexts[@]}" )
     [[ -n "$opt_provides" ]]       && hook_args+=( --provides        "$opt_provides" )
-    [[ -n "$opt_context" ]]        && hook_args+=( --context         "$opt_context" )
     local _og
     for _og in "${opt_groups[@]}"; do
         hook_args+=( --group "$_og" )
@@ -1134,7 +1143,7 @@ zdot_compile_plugins() {
 
 _zdot_plugins_init
 
-if zstyle -T ':zdot:plugins' defer; then
+if zdot_interactive && zstyle -T ':zdot:plugins' defer; then
     # Register zsh-defer so it shows in plugin list
     zdot_use_plugin romkatv/zsh-defer
     

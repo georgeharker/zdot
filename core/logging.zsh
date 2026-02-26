@@ -67,7 +67,7 @@ function _zdot_deferred_progress_widget() {
 }
 
 # Register only in interactive shells with a terminal.
-if [[ -o interactive && -t 1 ]]; then
+if zdot_interactive && zdot_has_tty; then
     autoload -Uz add-zsh-hook add-zle-hook-widget
     zle -N _zdot_flush_handler
     zle -N _zdot_deferred_progress_widget
@@ -111,6 +111,8 @@ function zdot_cleanup_logging(){
 # if `zstyle ':zdot:defer' progress yes` is set.  This is live/ephemeral —
 # it goes directly to $TTY and is NOT accumulated in _ZDOT_DEFERRED_MESSAGES.
 function _zdot_deferred_progress_print() {
+    # Bail if not appropriate (no tty or noninteractive)
+    (zdot_interactive && zdot_has_tty) || return 0
     zstyle -t ':zdot:defer' progress || return 0
     [[ -o zle && -n $TTY ]] || return 0
     print -Pn "\n%F{white}… ${(q)1}%f" >$TTY

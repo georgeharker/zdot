@@ -157,12 +157,25 @@ _zdot_load_omz_lib() {
         [[ -f "$cache/lib/$lib.zsh" ]] && source "$cache/lib/$lib.zsh"
     }
 
-    # lib/async_prompt.zsh
-    [[ "${+functions[_omz_register_handler]}" -gt 0 ]] ||
-    function _omz_register_handler _omz_async_request _omz_async_callback {
-        zdot_omz_lazy_load_lib async_prompt
-        "$0" "$@"
-    }
+    # Disable OMZ async git prompt — it opens persistent fds via zle -F
+    # that leak into process-substitution subshells (e.g. Ghostty's ssh
+    # wrapper), causing hangs.  Must be set before git.zsh is sourced so
+    # the zstyle -T check in git.zsh evaluates false.
+    # See: https://github.com/ohmyzsh/ohmyzsh/issues/12328
+    if ! zstyle -t ':omz:alpha:lib:git' async-prompt; then
+        zstyle ':omz:alpha:lib:git' async-prompt no
+    fi
+
+    # lib/async_prompt.zsh (interactive only — opens persistent fds via
+    # zle -F that leak into process-substitution subshells in wrappers
+    # like Ghostty's ssh(), causing hangs)
+    if zdot_interactive; then
+        [[ "${+functions[_omz_register_handler]}" -gt 0 ]] ||
+        function _omz_register_handler _omz_async_request _omz_async_callback {
+            zdot_omz_lazy_load_lib async_prompt
+            "$0" "$@"
+        }
+    fi
 
     # lib/bzr.zsh
     [[ "${+functions[bzr_prompt_info]}" -gt 0 ]] ||
@@ -223,7 +236,11 @@ _zdot_load_omz_lib() {
         git_current_user_email \
         git_repo_name \
     {
-        [[ "${+functions[_omz_register_handler]}" -gt 0 ]] || zdot_omz_lazy_load_lib async_prompt
+        # Only load async_prompt in interactive shells — it opens
+        # persistent fds via zle -F that leak into subshells
+        if zdot_interactive; then
+            [[ "${+functions[_omz_register_handler]}" -gt 0 ]] || zdot_omz_lazy_load_lib async_prompt
+        fi
         zdot_omz_lazy_load_lib git
         "$0" "$@"
     }
@@ -361,7 +378,9 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # have run before this fires.
     _zdot_bundle_omz_setup() {
         # Step 1: OMZ self-update check
-        zdot_omz_check_for_upgrade
+        if zdot_interactive && zdot_has_tty; then
+            zdot_omz_check_for_upgrade
+        fi
 
         # Step 2: Set OMZ environment variables and state
         # Bugfix: OMZ has a regression where async-prompt can cause issues.

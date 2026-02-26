@@ -25,7 +25,7 @@ _autocomplete_plugins_configure() {
 # ============================================================================
 
 # OMZ plugins (eager)
-zdot_use_plugin omz:plugins/zoxide
+zdot_use_plugin omz:plugins/zoxide defer
 
 # Deferred plugins (bespoke dependency DAG)
 zdot_use_plugin olets/zsh-abbr defer \
@@ -42,11 +42,13 @@ zdot_use_plugin 5A6F65/fast-abbr-highlighting defer \
 
 zdot_use_plugin zsh-users/zsh-autosuggestions defer \
     --name autosuggest-load --provides autosuggest-ready \
-    --requires autocomplete-loaded
+    --requires autocomplete-loaded \
+    --context interactive
 
 zdot_use_plugin olets/zsh-autosuggestions-abbreviations-strategy defer \
     --name autosuggest-abbr-load --provides autosuggest-abbr-ready \
-    --requires autosuggest-ready
+    --requires autosuggest-ready \
+    --context interactive
 
 # ============================================================================
 # Eager Load (OMZ plugins)
@@ -82,12 +84,12 @@ zdot_define_module autocomplete \
     --group omz-plugins \
     --requires plugins-cloned omz-bundle-initialized \
     --post-init-requires autosuggest-abbr-ready \
-    --post-init-context interactive noninteractive
+    --post-init-context interactive
 
 # ============================================================================
 # Compinit (deferred, after all deferred plugins)
 # ============================================================================
 
-zdot_register_hook zdot_compinit_defer interactive noninteractive \
+zdot_register_hook zdot_compinit_defer interactive \
     --name compinit-defer --deferred \
     --requires autosuggest-abbr-ready --provides compinit-done
