@@ -19,10 +19,10 @@ _ZDOT_PLUGINS_CACHE  - Cache directory path
 
 | Function | Purpose |
 |----------|---------|
-| `zdot_use <spec> [-hook\|-defer] [opts]` | Declare a plugin (normal, hook-loaded, or deferred) |
-| `zdot_use_defer <spec>` | Deprecated alias for `zdot_use <spec> -defer` |
-| `zdot_use_fpath <spec>` | Declare plugin with fpath kind |
-| `zdot_use_path <spec>` | Declare plugin with path kind |
+| `zdot_use_plugin <spec> [-hook\|-defer] [opts]` | Declare a plugin (normal, hook-loaded, or deferred) |
+| `zdot_use_defer <spec>` | **Deprecated** — alias for `zdot_use_plugin <spec> -defer` |
+| `zdot_use_fpath <spec>` | Declare plugin with fpath kind (legacy compat) |
+| `zdot_use_path <spec>` | Declare plugin with path kind (legacy compat) |
 | `zdot_init` | Clone all repos, run bundle inits, resolve groups, build DAG, execute all hooks |
 | `zdot_plugin_path <spec>` | Get filesystem path for plugin |
 | `zdot_plugin_clone <spec>` | Clone plugin to cache |
@@ -66,7 +66,7 @@ nvm-ready               -> NVM initialized
 
 Registration:
 ```zsh
-zdot_hook_register my_func interactive \
+zdot_register_hook my_func interactive \
     --requires plugins-declared \
     --provides plugins-loaded
 ```
@@ -86,7 +86,7 @@ _ZDOT_BUNDLE_HANDLERS   - Ordered array of registered bundle handler names
 
 | Function | Purpose |
 |----------|---------|
-| `zdot_bundle_register <name> [--init-fn <fn>] [--provides <phase>]` | Register a bundle handler |
+| `zdot_register_bundle <name> [--init-fn <fn>] [--provides <phase>]` | Register a bundle handler |
 
 **Currently registered handlers:**
 
@@ -120,10 +120,10 @@ Registration must happen **after** all four (or five) functions are defined, at 
 of the file, and must declare any init function and phase it provides:
 
 ```zsh
-zdot_bundle_register <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
+zdot_register_bundle <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
 ```
 
-`zdot_bundle_register` is idempotent — sourcing the file twice is safe.
+`zdot_register_bundle` is idempotent — sourcing the file twice is safe.
 
 #### Writing a New Bundle Handler
 
@@ -153,7 +153,7 @@ zdot_bundle_<name>_load() {
     # source the plugin entry point
 }
 
-zdot_bundle_register <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
+zdot_register_bundle <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
 ```
 
 Then explicitly source the new file in `zdot.zsh` (auto-discovery is a planned future
@@ -308,14 +308,14 @@ function git_prompt_info {
 ## Phase Contract
 
 The zdot plugin system uses a single trigger model: user-land declares all plugin
-specs via `zdot_use` calls, then calls `zdot_init` exactly once.  `zdot_init` drives
+specs via `zdot_use_plugin` calls, then calls `zdot_init` exactly once.  `zdot_init` drives
 the entire clone-and-load sequence internally; no user-land hook is required to emit
 any intermediate phase.
 
 ### `zdot_init` — the single trigger
 
-`zdot_init` must be called **after** all `zdot_use` declarations in the same file
-(or after sourcing all sub-modules that contain `zdot_use` calls).  It performs five
+`zdot_init` must be called **after** all `zdot_use_plugin` declarations in the same file
+(or after sourcing all sub-modules that contain `zdot_use_plugin` calls).  It performs five
 steps in order:
 
 1. Clone all repos that have not yet been cloned (`zdot_plugins_clone_all`).
@@ -339,7 +339,7 @@ the filesystem is ready.
 
 The core clone hook registration lives in `core/plugins.zsh`.  `zdot_init` is called
 at the bottom of `lib/plugins/plugins.zsh` (or whichever file completes the last
-`zdot_use` declaration).
+`zdot_use_plugin` declaration).
 
 ---
 
@@ -347,14 +347,17 @@ at the bottom of `lib/plugins/plugins.zsh` (or whichever file completes the last
 
 ```
 Shell startup (.zshrc / .zshenv):
-  └─> modules sourced (lib/plugins/plugins.zsh)
-       └─> zdot_use / zdot_use -hook / zdot_use -defer calls register specs
+  └─> modules sourced (lib/plugins/ per-concern modules:
+       │   autocomplete, fzf, nodejs, shell-extras, tmux)
+       └─> zdot_use_plugin / zdot_use_plugin -hook / zdot_use_plugin -defer calls register specs
            and hook functions against named phases
        └─> zdot_init called at end of file
 
 zdot_init (core/plugins.zsh):
   1. zdot_plugins_clone_all        — clone all repos; emits plugins-cloned
   2. bundle init pass              — calls zdot_bundle_omz_init (provides: omz-lib-loaded)
+     NOTE: The former monolithic lib/plugins/plugins.zsh has been split into
+           per-concern modules (autocomplete, fzf, nodejs, shell-extras, tmux).
   3. resolve group annotations     — injects edges for --group/--provides-group/--requires-group
   4. build execution plan          — topological sort of registered hooks
   5. execute all hooks in order
@@ -424,7 +427,7 @@ All caches in `~/.cache/zdot/`:
 
 To find which plugins are used across your config:
 
-1. **Declared** (via `zdot_use`): `_ZDOT_PLUGINS_ORDER` array
+1. **Declared** (via `zdot_use_plugin`): `_ZDOT_PLUGINS_ORDER` array
 2. **Loaded** (actually used): `_ZDOT_PLUGINS_LOADED` associative array
 3. **Installed** (in cache): iterate `$ZDOT_PLUGINS_CACHE/*`
 
@@ -451,7 +454,7 @@ zdot_clean_plugins --dry-run
 
 | Feature | Antidote | Zdot |
 |---------|----------|------|
-| Plugin declaration | `plugins=(...)` or separate file | `zdot_use` in modules |
+| Plugin declaration | `plugins=(...)` or separate file | `zdot_use_plugin` in modules |
 | OMZ support | Built-in | Via `omz:` prefix |
 | Raw OMZ format | Via separate file | Via `zdot_import_antidote` |
 | Library loading | All at once | Lazy via stubs |

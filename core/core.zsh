@@ -54,8 +54,8 @@ zdot_get_completions_dir() {
 typeset -gA _ZDOT_PHASES          # phase_name@context -> array of hook functions
 typeset -gA _ZDOT_MODULES_LOADED  # module_name -> 1 (loaded status)
 typeset -gA _ZDOT_HOOK_MODULES    # hook_function -> module_name (tracks which module registered each hook)
-typeset -g _ZDOT_CURRENT_MODULE_DIR  # Set by zdot_module_load, used by modules
-typeset -g _ZDOT_CURRENT_MODULE_NAME  # Set by zdot_module_load, module name being loaded
+typeset -g _ZDOT_CURRENT_MODULE_DIR  # Set by zdot_load_module, used by modules
+typeset -g _ZDOT_CURRENT_MODULE_NAME  # Set by zdot_load_module, module name being loaded
 typeset -g  _ZDOT_USER_MODULES_DIR     # Resolved lazily from zstyle ':zdot:user-modules' path
 typeset -gA _ZDOT_USER_MODULES_LOADED  # user module_name -> 1 (separate from built-in tracking)
 

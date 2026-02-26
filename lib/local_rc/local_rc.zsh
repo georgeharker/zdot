@@ -12,7 +12,4 @@ _local_rc_init() {
 
 # Register hook: runs late to allow local overrides of anything
 # Optional dependency on secrets - runs after secrets if available, otherwise runs anyway
-zdot_hook_register _local_rc_init interactive noninteractive \
-    --requires secrets-loaded \
-    --optional \
-    --provides local-overrides-loaded
+zdot_simple_hook local_rc --requires secrets-loaded --optional --provides local-overrides-loaded

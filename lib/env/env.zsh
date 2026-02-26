@@ -54,6 +54,4 @@ _env_init() {
 }
 
 # Register hook - requires XDG paths for tool configurations
-zdot_hook_register _env_init interactive noninteractive \
-    --requires xdg-configured \
-    --provides env-configured
+zdot_simple_hook env

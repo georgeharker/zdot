@@ -18,6 +18,4 @@ _shell_init() {
 }
 
 # Register hook - requires XDG paths for history directory
-zdot_hook_register _shell_init interactive noninteractive \
-    --requires xdg-configured \
-    --provides shell-configured
+zdot_simple_hook shell

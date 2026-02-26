@@ -10,16 +10,7 @@ _apt_init() {
 }
 
 # Register hooks - requires xdg-configured, provides tool availability on Debian
-zdot_hook_register _apt_init interactive noninteractive \
-    --requires xdg-configured \
-    --requires env-configured \
-    --provides apt-ready \
-    --provides-tool op \
-    --provides-tool eza \
-    --provides-tool oh-my-posh \
-    --provides-tool gh \
-    --provides-tool tailscale \
-    --provides-tool zoxide \
-    --provides-tool rg \
-    --provides-tool bat \
-    --provides-tool fd
+zdot_simple_hook apt --requires xdg-configured env-configured --provides apt-ready \
+    --provides-tool op --provides-tool eza --provides-tool oh-my-posh \
+    --provides-tool gh --provides-tool tailscale --provides-tool zoxide \
+    --provides-tool rg --provides-tool bat --provides-tool fd

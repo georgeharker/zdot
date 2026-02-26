@@ -103,7 +103,7 @@ zdot module user-clone <name>  # Copy a built-in module into the user modules di
 point for local customisation. Fails if the destination already exists.
 
 **Implementation**: delegates to `zdot_module_list`, `zdot_user_module_list`,
-`zdot_user_module_load` (core/modules.zsh).
+`zdot_load_user_module` (core/modules.zsh).
 
 ---
 

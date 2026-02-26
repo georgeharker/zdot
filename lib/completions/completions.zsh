@@ -24,9 +24,9 @@ _completions_init() {
     done
     
     # Register standard file-based completions
-    zdot_completion_register_file "gh" "gh completion -s zsh"
-    zdot_completion_register_file "tailscale" "tailscale completion zsh"
-    zdot_completion_register_file "sharedserver" "sharedserver completion zsh"
+    zdot_register_completion_file "gh" "gh completion -s zsh"
+    zdot_register_completion_file "tailscale" "tailscale completion zsh"
+    zdot_register_completion_file "sharedserver" "sharedserver completion zsh"
 }
 
 # Phase 2: Run live completions after tools are available
@@ -42,11 +42,11 @@ _completions_finalize() {
 
 # Register hooks
 # Phase 1: Early fpath setup (before compinit)
-zdot_hook_register _completions_init interactive \
+zdot_register_hook _completions_init interactive \
     --requires xdg-configured \
     --provides completions-paths-ready
 
 # Phase 2: Late live completions (after tools available)
-zdot_hook_register _completions_finalize interactive \
-    --requires completions-paths-ready plugins-post-configured rust-ready bun-ready uv-configured \
+zdot_register_hook _completions_finalize interactive \
+    --requires completions-paths-ready autocomplete-post-configured rust-ready bun-ready uv-configured \
     --provides completions-ready

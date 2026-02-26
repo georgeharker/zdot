@@ -26,7 +26,7 @@ typeset -ga _ZDOT_DEFER_ORDER_PAIRS  # flat: from_name to_name from_name to_name
 typeset -ga _ZDOT_DEFER_ORDER_WARNINGS      # warnings accumulated during edge injection
 typeset -ga _ZDOT_FORCED_DEFERRED_WARNINGS  # warnings for hooks force-deferred due to deferred dependency
 typeset -ga _ZDOT_DEFERRED_HOOKS            # hook_ids marked as deferred (skip eager plan)
-typeset -gA _ZDOT_ACCEPTED_DEFERRED         # func_name -> "all" or "phase1 phase2 ..." (user-accepted force-deferral)
+typeset -gA _ZDOT_ACCEPTED_DEFERRED         # func_name -> "all" or "phase1 phase2 ..." (user-allowed force-deferral)
 typeset -gA _ZDOT_HOOK_GROUP                # hook_id -> group name (--group)
 typeset -gA _ZDOT_HOOK_PROVIDES_GROUP       # hook_id -> group name this hook provides into (--provides-group)
 typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
@@ -45,14 +45,14 @@ _ZDOT_DEFER_FLAG_NAMES["-q"]="quiet"
 
 # Mark a hook function as intentionally force-deferred, suppressing warnings.
 # Must be called before zdot_build_execution_plan.
-# Usage: zdot_accept_deferred <function-name> [<phase>...]
+# Usage: zdot_allow_defer <function-name> [<phase>...]
 #   With no phases: accepts all force-deferral for this hook function.
 #   With phases: accepts only force-deferral caused by those specific phases.
-zdot_accept_deferred() {
+zdot_allow_defer() {
     local func_name="$1"
     shift
     if [[ -z $func_name ]]; then
-        print -u2 "zdot_accept_deferred: missing function name"
+        print -u2 "zdot_allow_defer: missing function name"
         return 1
     fi
     if [[ $# -eq 0 ]]; then
@@ -77,15 +77,15 @@ zdot_accept_deferred() {
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_hook_register <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
 # Sets REPLY to the hook_id on success.
 # Contexts: interactive, noninteractive, login, nonlogin
 # --provides-tool <tool>  sugar for --provides tool:<tool>
 # --requires-tool <tool>  sugar for --requires tool:<tool>
 # Multiple --provides / --provides-tool flags are allowed
-# Example: zdot_hook_register _my_init interactive --requires xdg-configured --provides my-ready
-# Example: zdot_hook_register _brew_install interactive --provides-tool fzf --provides-tool op
-zdot_hook_register() {
+# Example: zdot_register_hook _my_init interactive --requires xdg-configured --provides my-ready
+# Example: zdot_register_hook _brew_install interactive --provides-tool fzf --provides-tool op
+zdot_register_hook() {
     # Pre-pass: extract --name and --deferred before positional parsing.
     # These two flags are extracted here rather than in the main parsing loop
     # below because the main loop uses a simple case-in-positional pattern that
@@ -174,12 +174,12 @@ zdot_hook_register() {
     
     # Validation
     if [[ -z "$func_name" ]]; then
-        zdot_error "zdot_hook_register: function name required"
+        zdot_error "zdot_register_hook: function name required"
         return 1
     fi
 
     if [[ ${#contexts[@]} -eq 0 ]]; then
-        zdot_error "zdot_hook_register: at least one context required (interactive, noninteractive, login, nonlogin)"
+        zdot_error "zdot_register_hook: at least one context required (interactive, noninteractive, login, nonlogin)"
         return 1
     fi
     
@@ -190,7 +190,8 @@ zdot_hook_register() {
     # Store name mapping (fall back to func_name if --name not given)
     local _effective_name="${hook_name:-$func_name}"
     if [[ -n "${_ZDOT_HOOK_BY_NAME[$_effective_name]}" ]]; then
-        zdot_warn "zdot_hook_register: duplicate hook name '$_effective_name'; skipping registration"
+        zdot_warn "zdot_register_hook: duplicate hook name '$_effective_name'; skipping registration"
+        REPLY="${_ZDOT_HOOK_BY_NAME[$_effective_name]}"
         return 1
     fi
     _ZDOT_HOOK_NAMES[$hook_id]="$_effective_name"
@@ -237,11 +238,11 @@ zdot_hook_register() {
                     local conflicting_hook=${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}
                     if [[ $is_tool_phase -eq 1 ]]; then
                         # Tool phases: first registered wins; warn and skip
-                        zdot_warn "zdot_hook_register: phase '$p' already provided by '${_ZDOT_HOOKS[$conflicting_hook]}' in context '$new_ctx'; skipping '$func_name'"
+                        zdot_warn "zdot_register_hook: phase '$p' already provided by '${_ZDOT_HOOKS[$conflicting_hook]}' in context '$new_ctx'; skipping '$func_name'"
                         skip_phase=1
                         break
                     else
-                        zdot_error "zdot_hook_register: ERROR: Multiple hooks provide phase '$p' in context '$new_ctx'"
+                        zdot_error "zdot_register_hook: ERROR: Multiple hooks provide phase '$p' in context '$new_ctx'"
                         zdot_error "  Previous: ${_ZDOT_HOOKS[$conflicting_hook]}"
                         zdot_error "  Current: $func_name"
                         return 1
@@ -625,7 +626,7 @@ zdot_build_execution_plan() {
     #   "forced"   — provided by a hook that was itself force-deferred
     #                because it depended on an explicit-deferred phase
     #                (unintended transitive chain; a warning is emitted
-    #                unless zdot_accept_deferred was called for that
+    #                unless zdot_allow_defer was called for that
     #                func+phase combination to pre-acknowledge it)
     #
     # Seeded below from the initial deferred set before the loop starts.
@@ -668,7 +669,7 @@ zdot_build_execution_plan() {
     # The `reason` value controls user-visible behaviour:
     #   "explicit" → silent (user knowingly created the dependency)
     #   "forced"   → warning emitted (unexpected late dependency chain)
-    #                unless zdot_accept_deferred pre-acknowledged it
+    #                unless zdot_allow_defer pre-acknowledged it
     local changed=1
     while [[ $changed -eq 1 ]]; do
         changed=0

@@ -111,4 +111,4 @@ _op_init() {
 # Register hook - requires xdg-configured, provides secrets-loaded
 # Runs in both interactive and noninteractive modes
 # Interactive prompts only happen in interactive shells due to function guards
-zdot_hook_register _op_init interactive noninteractive --requires xdg-configured --requires-tool op --provides secrets-loaded
+zdot_register_hook _op_init interactive noninteractive --requires xdg-configured --requires-tool op --provides secrets-loaded

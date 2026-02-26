@@ -19,5 +19,4 @@ _ssh_init() {
 }
 
 # Register initialization hook - no dependencies, sets tmux flags
-zdot_hook_register _ssh_init interactive noninteractive \
-    --provides ssh-configured
+zdot_simple_hook ssh --no-requires

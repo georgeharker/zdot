@@ -30,6 +30,4 @@ _dotfiler_init() {
 
 # Register hook: requires secrets for GH_TOKEN
 # Only needed in interactive shells
-zdot_hook_register _dotfiler_init interactive \
-    --requires secrets-loaded \
-    --provides dotfiler-ready
+zdot_simple_hook dotfiler --requires secrets-loaded --provides dotfiler-ready --context interactive

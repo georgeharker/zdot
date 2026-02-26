@@ -62,6 +62,6 @@ _xdg_cleanup() {
 
 # Register hooks
 # xdg is a foundation module - no dependencies, provides xdg-configured phase
-zdot_hook_register _xdg_init interactive noninteractive --provides xdg-configured
+zdot_register_hook _xdg_init interactive noninteractive --provides xdg-configured
 # Cleanup hook runs at the end of deferred dispatch as a finally-group member
-zdot_hook_register _xdg_cleanup interactive noninteractive --group finally
+zdot_register_hook _xdg_cleanup interactive noninteractive --group finally

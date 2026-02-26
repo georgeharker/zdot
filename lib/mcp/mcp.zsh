@@ -34,4 +34,4 @@ _mcp_init() {
 # Register hook - optionally requires secrets-loaded, provides mcp-configured
 # Runs in both interactive and noninteractive modes
 # Will skip gracefully if secrets are not available (optional dependency)
-zdot_hook_register _mcp_init interactive noninteractive --requires xdg-configured secrets-loaded --provides mcp-configured --optional
+zdot_simple_hook mcp --requires xdg-configured secrets-loaded --optional

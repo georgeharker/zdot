@@ -10,6 +10,4 @@ _keybinds_init() {
 
 # Register hook: requires plugins to be loaded and post-configured
 # Keybinds only needed in interactive shells
-zdot_hook_register _keybinds_init interactive \
-    --requires plugins-post-configured \
-    --provides keybinds-configured
+zdot_simple_hook keybinds --no-requires --context interactive

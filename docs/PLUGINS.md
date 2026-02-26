@@ -6,7 +6,7 @@ Zdot includes a native plugin system that replaces the previous antidote-based s
 
 The plugin system works in phases:
 
-1. **Declaration Phase**: Plugins are declared with `zdot_use` in module files
+1. **Declaration Phase**: Plugins are declared with `zdot_use_plugin` in module files
 2. **Clone Phase**: Plugins are cloned to cache on first shell startup
 3. **Load Phase**: Plugins are loaded on-demand when needed (via hooks or explicit calls)
 
@@ -16,35 +16,38 @@ The plugin system works in phases:
 
 ```zsh
 # In your module files (e.g., lib/plugins/plugins.zsh)
-zdot_use Aloxaf/fzf-tab
-zdot_use omz:plugins/git
-zdot_use omz:lib
+zdot_use_plugin Aloxaf/fzf-tab
+zdot_use_plugin omz:plugins/git
+zdot_use_plugin omz:lib
 ```
 
 ### Plugin Kinds
 
 ```zsh
-zdot_use <spec>           # Normal: declare for loading in plugins-cloned phase
-zdot_use_defer <spec>     # Deferred: load via zsh-defer
-zdot_use_fpath <spec>    # Fpath: add to fpath only
-zdot_use_path <spec>      # Path: use as directory path
+zdot_use_plugin <spec>           # Normal: declare for loading in plugins-cloned phase
+zdot_use_plugin <spec> defer     # Deferred: load via zsh-defer
+zdot_use_fpath <spec>            # Fpath: add to fpath only (legacy compatibility)
+zdot_use_path <spec>             # Path: use as directory path (legacy compatibility)
 ```
+
+> **Note:** `zdot_use_defer` is deprecated. Use `zdot_use_plugin <spec> defer` instead.
+> `zdot_use_fpath` and `zdot_use_path` still exist for legacy compatibility.
 
 ### OMZ Plugins
 
 Access Oh My Zsh plugins with the `omz:` prefix:
 
 ```zsh
-zdot_use omz:plugins/git
-zdot_use omz:plugins/docker
-zdot_use omz:plugins/tmux
+zdot_use_plugin omz:plugins/git
+zdot_use_plugin omz:plugins/docker
+zdot_use_plugin omz:plugins/tmux
 ```
 
 ### OMZ Libraries
 
 ```zsh
-zdot_use omz:lib          # Declare OMZ lib spec (libs are lazy-loaded via stubs)
-zdot_use omz:plugins/nvm  # NVM with OMZ integration
+zdot_use_plugin omz:lib          # Declare OMZ lib spec (libs are lazy-loaded via stubs)
+zdot_use_plugin omz:plugins/nvm  # NVM with OMZ integration
 ```
 
 ### Prezto Modules
@@ -52,9 +55,9 @@ zdot_use omz:plugins/nvm  # NVM with OMZ integration
 Access Prezto modules with the `pz:` prefix, or use the convenience wrapper:
 
 ```zsh
-zdot_use pz:modules/git        # Load the Prezto git module
-zdot_use pz:modules/syntax-highlighting
-zdot_use pz:modules/autosuggestions
+zdot_use_plugin pz:modules/git        # Load the Prezto git module
+zdot_use_plugin pz:modules/syntax-highlighting
+zdot_use_plugin pz:modules/autosuggestions
 
 # Convenience wrapper (equivalent to the above)
 zdot_use_pz git
@@ -65,7 +68,7 @@ zdot_use_pz autosuggestions
 Prezto is cloned automatically (with submodules) on first shell startup.
 A minimal `.zpreztorc` stub is created at `${ZDOTDIR:-$HOME}/.zpreztorc` if
 none exists, so that Prezto does not auto-load modules — zdot handles module
-loading exclusively via `zdot_use pz:modules/<name>`.
+loading exclusively via `zdot_use_plugin pz:modules/<name>`.
 
 To disable the Prezto bundle entirely:
 

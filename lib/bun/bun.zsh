@@ -8,9 +8,7 @@ _bun_init() {
 }
 
 # Register hooks
-zdot_hook_register _bun_init interactive noninteractive \
-    --requires xdg-configured \
-    --provides bun-ready
+zdot_simple_hook bun --provides bun-ready
 
 # Register completions
-zdot_completion_register_file "bub" "bun completions zsh > $(zdot_get_completions_dir)/_bun"
+zdot_register_completion_file "bub" "bun completions zsh > $(zdot_get_completions_dir)/_bun"

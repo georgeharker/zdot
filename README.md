@@ -122,7 +122,7 @@ _mymodule_init() {
 }
 
 # Register the hook
-zdot_hook_register _mymodule_init interactive noninteractive \
+zdot_register_hook _mymodule_init interactive noninteractive \
     --provides mymodule-ready \
     --optional
 ```
@@ -153,7 +153,7 @@ _mymodule_init() {
 }
 
 # Register with dependencies
-zdot_hook_register _mymodule_init interactive noninteractive \
+zdot_register_hook _mymodule_init interactive noninteractive \
     --requires xdg-configured brew-ready \
     --provides mymodule-ready \
     --optional
@@ -176,7 +176,7 @@ _mymodule_cleanup() {
 }
 
 # Register as on-demand hook
-zdot_hook_register _mymodule_cleanup interactive noninteractive \
+zdot_register_hook _mymodule_cleanup interactive noninteractive \
     --requires finalize \
     --on-demand \
     --optional
@@ -212,7 +212,7 @@ Identical to built-in modules — one directory per module, main file named the 
 
 ```zsh
 # In your .zshrc (after the zstyle and before zdot_build_execution_plan):
-zdot_user_module_load mymodule
+zdot_load_user_module mymodule
 ```
 
 The framework tracks user modules in `_ZDOT_USER_MODULES_LOADED` in addition to the shared
@@ -238,7 +238,7 @@ The destination must not already exist. Edit the copy freely — the original in
 
 | Function | Description |
 |---|---|
-| `zdot_user_module_load <name>` | Source a user module (dedup-safe) |
+| `zdot_load_user_module <name>` | Source a user module (dedup-safe) |
 | `zdot_user_module_list` | Print loaded user module names |
 | `zdot_user_module_path <name>` | Return the path to a user module's main file |
 
@@ -248,7 +248,7 @@ The destination must not already exist. Edit the copy freely — the original in
 
 ### Hook Registration
 
-#### `zdot_hook_register <function> [contexts...] [flags...]`
+#### `zdot_register_hook <function> [contexts...] [flags...]`
 
 Register a function to be called during shell initialization.
 
@@ -265,19 +265,84 @@ Register a function to be called during shell initialization.
 **Examples:**
 ```zsh
 # Simple hook, no dependencies
-zdot_hook_register _mymodule_init interactive --provides mymodule-ready
+zdot_register_hook _mymodule_init interactive --provides mymodule-ready
 
 # Hook with dependencies
-zdot_hook_register _mymodule_init interactive \
+zdot_register_hook _mymodule_init interactive \
     --requires xdg-configured brew-ready \
     --provides mymodule-ready \
     --optional
 
 # Cleanup hook (on-demand)
-zdot_hook_register _mymodule_cleanup interactive noninteractive \
+zdot_register_hook _mymodule_cleanup interactive noninteractive \
     --requires finalize \
     --on-demand
 ```
+
+### Sugar Functions
+
+#### `zdot_simple_hook`
+
+Convention-over-configuration helper for single-hook modules. Reduces the most common registration pattern to one line.
+
+**Defaults:**
+- Function: `_<name>_init` (must already exist)
+- Requires: `xdg-configured`
+- Provides: `<name>-configured`
+- Contexts: `interactive noninteractive`
+
+```zsh
+# Simplest form — all defaults
+zdot_simple_hook sudo
+
+# Override provides token
+zdot_simple_hook brew --provides brew-ready
+
+# No auto-requires, interactive-only
+zdot_simple_hook aliases --no-requires --context interactive
+
+# Custom requires + optional dependency
+zdot_simple_hook uv --requires secrets-loaded --optional
+
+# Tool provider with multiple --provides-tool
+zdot_simple_hook brew --provides brew-ready \
+    --provides-tool op --provides-tool eza --provides-tool gh
+```
+
+All unrecognized flags are passed through to `zdot_register_hook`.
+
+#### `zdot_define_module`
+
+Multi-phase module definition for plugin-loading modules with configure → load → post-init lifecycles.
+
+```zsh
+# Simple plugin loader with auto-bundle detection
+zdot_define_module tmux \
+    --load-plugins omz:plugins/tmux \
+    --auto-bundle
+
+# Full lifecycle with explicit load function
+zdot_define_module fzf \
+    --configure _fzf_init \
+    --load _fzf_plugins_load_omz \
+    --post-init _fzf_post_plugin \
+    --group omz-plugins \
+    --requires plugins-cloned omz-bundle-initialized \
+    --provides-tool fzf
+
+# With post-init customization
+zdot_define_module autocomplete \
+    --configure _autocomplete_plugins_configure \
+    --load _autocomplete_plugins_load \
+    --post-init _autocomplete_plugins_post_init \
+    --group omz-plugins \
+    --requires plugins-cloned omz-bundle-initialized \
+    --post-init-requires autosuggest-abbr-ready \
+    --post-init-context interactive noninteractive
+```
+
+**Phase flags:** `--configure`, `--load`, `--load-plugins`, `--post-init`, `--interactive-init`, `--noninteractive-init`
+**Modifier flags:** `--context`, `--configure-context`, `--load-context`, `--post-init-context`, `--post-init-requires`, `--provides-tool`, `--requires-tool`, `--requires`, `--auto-bundle`, `--group`
 
 ### Phase Management
 
@@ -378,15 +443,15 @@ zdot automatically orders hook execution based on dependencies:
 
 ```zsh
 # This hook runs first (no dependencies)
-zdot_hook_register _xdg_init interactive --provides xdg-configured
+zdot_register_hook _xdg_init interactive --provides xdg-configured
 
 # This runs after xdg-configured
-zdot_hook_register _brew_init interactive \
+zdot_register_hook _brew_init interactive \
     --requires xdg-configured \
     --provides brew-ready
 
 # This runs after both xdg-configured and brew-ready
-zdot_hook_register _mymodule_init interactive \
+zdot_register_hook _mymodule_init interactive \
     --requires xdg-configured brew-ready \
     --provides mymodule-ready
 ```
@@ -417,13 +482,13 @@ Hooks can specify which shell contexts they should run in:
 **Examples:**
 ```zsh
 # Only interactive shells
-zdot_hook_register _prompt_init interactive
+zdot_register_hook _prompt_init interactive
 
 # Both interactive and non-interactive
-zdot_hook_register _env_init interactive noninteractive
+zdot_register_hook _env_init interactive noninteractive
 
 # Only interactive login shells
-zdot_hook_register _welcome_message interactive login
+zdot_register_hook _welcome_message interactive login
 ```
 
 The system automatically detects the current context and only runs matching hooks.
@@ -572,7 +637,7 @@ _aliases_init() {
     return 0
 }
 
-zdot_hook_register _aliases_init interactive --provides aliases-loaded
+zdot_register_hook _aliases_init interactive --provides aliases-loaded
 ```
 
 ### Module with External Dependency
@@ -600,7 +665,7 @@ _docker_init() {
     return 0
 }
 
-zdot_hook_register _docker_init interactive noninteractive \
+zdot_register_hook _docker_init interactive noninteractive \
     --requires xdg-configured \
     --provides docker-ready \
     --optional
@@ -631,10 +696,10 @@ _tempfiles_cleanup() {
     return 0
 }
 
-zdot_hook_register _tempfiles_init interactive noninteractive \
+zdot_register_hook _tempfiles_init interactive noninteractive \
     --provides tempfiles-ready
 
-zdot_hook_register _tempfiles_cleanup interactive noninteractive \
+zdot_register_hook _tempfiles_cleanup interactive noninteractive \
     --requires finalize \
     --on-demand
 ```
@@ -672,12 +737,12 @@ _python_tools_init() {
 }
 
 # First hook sets up environment
-zdot_hook_register _python_env_init interactive noninteractive \
+zdot_register_hook _python_env_init interactive noninteractive \
     --requires xdg-configured \
     --provides python-env-ready
 
 # Second hook initializes tools (depends on environment)
-zdot_hook_register _python_tools_init interactive \
+zdot_register_hook _python_tools_init interactive \
     --requires python-env-ready \
     --provides python-ready \
     --optional

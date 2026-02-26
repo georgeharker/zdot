@@ -5,7 +5,7 @@
 #   - ZPREZTODIR setup
 #   - .zpreztorc stub (if absent) — prevents Prezto from auto-loading modules
 #   - Prezto init.zsh sourcing (in plugins-cloned hook)
-#   - pz: spec support for zdot_use pz:modules/<name>
+#   - pz: spec support for zdot_use_plugin pz:modules/<name>
 
 # ============================================================================
 # Early Setup: Clone Prezto if enabled
@@ -72,7 +72,7 @@ zdot_bundle_pz_init() {
     # set at file-source time so that zdot_plugin_clone can reference it early)
 
     # Step 2: register the Prezto init hook
-    zdot_hook_register _zdot_pz_load_init interactive noninteractive \
+    zdot_register_hook _zdot_pz_load_init interactive noninteractive \
         --requires plugins-cloned \
         --provides pz-bundle-initialized \
         --provides pz-init-loaded \
@@ -85,7 +85,7 @@ zdot_bundle_pz_init() {
 
 # Register this bundle handler with the registry — only when enabled
 if [[ "$_zdot_pz_enabled" == yes ]]; then
-    zdot_bundle_register pz --init-fn zdot_bundle_pz_init
+    zdot_register_bundle pz --init-fn zdot_bundle_pz_init
     zdot_use_bundle sorin-ionescu/prezto
 fi
 
@@ -96,7 +96,7 @@ fi
 # Convenience wrapper: declare a Prezto module for loading
 zdot_use_pz() {
     local module=$1
-    zdot_use "pz:modules/${module}"
+    zdot_use_plugin "pz:modules/${module}"
 }
 
 # ============================================================================
@@ -110,12 +110,12 @@ _zdot_pz_load_init() {
     # Create a minimal .zpreztorc stub if none exists.
     # Prezto's init.zsh unconditionally sources ${ZDOTDIR:-$HOME}/.zpreztorc.
     # The stub sets pmodules to empty so Prezto does not auto-load anything —
-    # zdot handles module loading via zdot_use pz:modules/<name>.
+    # zdot handles module loading via zdot_use_plugin pz:modules/<name>.
     local zpreztorc="${ZDOTDIR:-${HOME}}/.zpreztorc"
     if [[ ! -f "$zpreztorc" ]]; then
         {
             print "# .zpreztorc — auto-generated stub by zdot pz bundle"
-            print "# zdot loads Prezto modules via zdot_use pz:modules/<name>."
+            print "# zdot loads Prezto modules via zdot_use_plugin pz:modules/<name>."
             print "# Leave pmodules empty to prevent Prezto from auto-loading."
             print "zstyle ':prezto:load' pmodules"
         } >| "$zpreztorc"

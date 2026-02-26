@@ -101,22 +101,22 @@ _nvm_noninteractive_init() {
 _plugins_declare_noop() {
     :
 }
-zdot_hook_register _plugins_declare_noop interactive noninteractive \
+zdot_register_hook _plugins_declare_noop interactive noninteractive \
     --provides plugins-declared
 
 # Register hooks with dependency chain
 # plugins_init prepares plugin configuration, provides plugins-configured
-zdot_hook_register _plugins_init interactive noninteractive --requires xdg-configured --provides plugins-configured
+zdot_register_hook _plugins_init interactive noninteractive --requires xdg-configured --provides plugins-configured
 
 # antidote_load actually loads plugins, provides plugins-loaded
-zdot_hook_register _antidote_load interactive noninteractive --requires plugins-configured --provides plugins-loaded
+zdot_register_hook _antidote_load interactive noninteractive --requires plugins-configured --provides plugins-loaded
 
 # plugins_post_init runs after plugin load, provides plugins-post-configured
-zdot_hook_register _plugins_post_init interactive noninteractive --requires plugins-loaded --provides plugins-post-configured
+zdot_register_hook _plugins_post_init interactive noninteractive --requires plugins-loaded --provides plugins-post-configured
 
 # nvm_interactive_init deferred initialization (interactive only), provides nvm-ready
 # Requires prompt-ready to avoid racing with prompt's zsh-defer initialization
-zdot_hook_register _nvm_interactive_init interactive --requires prompt-ready --provides nvm-ready
+zdot_register_hook _nvm_interactive_init interactive --requires prompt-ready --provides nvm-ready
 # nvm_noninteractive_init, provides nvm-ready
-zdot_hook_register _nvm_noninteractive_init noninteractive --requires plugins-loaded --provides nvm-ready
+zdot_register_hook _nvm_noninteractive_init noninteractive --requires plugins-loaded --provides nvm-ready
 

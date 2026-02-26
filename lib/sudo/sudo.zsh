@@ -15,6 +15,4 @@ _sudo_init() {
 }
 
 # Register hook - requires XDG functions for directory reconfiguration
-zdot_hook_register _sudo_init interactive noninteractive \
-    --requires xdg-configured \
-    --provides sudo-configured
+zdot_simple_hook sudo

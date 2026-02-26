@@ -394,19 +394,19 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     #                       → omz-plugins group members
     #                       → zdot_omz_theme_init
     zdot_bundle_omz_init() {
-        zdot_hook_register _zdot_bundle_omz_setup interactive noninteractive \
+        zdot_register_hook _zdot_bundle_omz_setup interactive noninteractive \
             --provides omz-bundle-initialized \
             --requires-group omz-configure
 
         # Load omz:lib; --provides-group omz-plugins means any hook tagged
         # --group omz-plugins gets --requires omz-lib-loaded injected.
-        zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
+        zdot_register_hook _zdot_omz_load_lib interactive noninteractive \
             --requires omz-bundle-initialized \
             --provides omz-lib-loaded \
             --provides-group omz-plugins
 
         # Theme init runs after all omz-plugins group members have loaded.
-        zdot_hook_register zdot_omz_theme_init interactive noninteractive \
+        zdot_register_hook zdot_omz_theme_init interactive noninteractive \
             --requires omz-lib-loaded \
             --provides omz-theme-ready
     }
@@ -416,8 +416,9 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # ------------------------------------------------------------------
 
     # Register this bundle handler with the registry
-    zdot_bundle_register omz \
-        --init-fn zdot_bundle_omz_init
+    zdot_register_bundle omz \
+        --init-fn zdot_bundle_omz_init \
+        --provides omz-bundle-initialized
     zdot_use_bundle ohmyzsh/ohmyzsh
 
     # Bundle-specific compdump stamp: OMZ git HEAD revision.

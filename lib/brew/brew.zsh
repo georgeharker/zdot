@@ -25,12 +25,6 @@ _brew_init() {
 }
 
 # Register hooks - requires xdg-configured, provides brew-ready and tool availability
-zdot_hook_register _brew_init interactive noninteractive \
-    --requires xdg-configured \
-    --provides brew-ready \
-    --provides-tool op \
-    --provides-tool eza \
-    --provides-tool oh-my-posh \
-    --provides-tool gh \
-    --provides-tool tmux \
-    --provides-tool tailscale
+zdot_simple_hook brew --provides brew-ready \
+    --provides-tool op --provides-tool eza --provides-tool oh-my-posh \
+    --provides-tool gh --provides-tool tmux --provides-tool tailscale

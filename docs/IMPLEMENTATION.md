@@ -36,7 +36,7 @@ This document provides technical implementation details for the zdot system. It 
 │ 2. Module Loading (zdot_load_modules)                       │
 │    - Scan lib/ directory for *.zsh files                    │
 │    - Source each module file                                 │
-│    - Modules register hooks via zdot_hook_register()        │
+│    - Modules register hooks via zdot_register_hook()        │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -86,8 +86,8 @@ zdot/
 │   ├── functions.zsh                # Function autoloading setup
 │   ├── hooks.zsh                    # Hook system (943 lines)
 │   ├── logging.zsh                  # Logging functions (56 lines)
-│   ├── modules.zsh                  # Module loading pipeline (zdot_module_load, zdot_user_module_load, _zdot_load_module_file)
-│   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer)
+│   ├── modules.zsh                  # Module loading pipeline (zdot_load_module, zdot_load_user_module, _zdot_load_module_file)
+│   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer) + sugar functions (zdot_define_module, zdot_simple_hook)
 │   ├── utils.zsh                    # Utility functions (zdot_interactive, zdot_login, …)
 │   ├── functions/                   # Autoloaded functions (zdot, zdot_hooks_list, …)
 │   │   ├── zdot                     # CLI dispatcher
@@ -132,17 +132,17 @@ fi
 
 **Responsibilities:**
 - Global data structure initialization
-- Hook registration (`zdot_hook_register`)
+- Hook registration (`zdot_register_hook`)
 - Execution order constraints (`zdot_defer_order`)
 - Dependency resolution (`zdot_build_execution_plan`)
 - Hook execution (`zdot_execute_all`)
 - Deferred hook dispatch (`_zdot_run_deferred_phase_check`)
-- Phase management (`zdot_accept_deferred`)
+- Phase management (`zdot_allow_defer`)
 - Module loading (`zdot_load_modules`)
 
 **Key Functions:**
 
-##### `zdot_hook_register()` (lines 29-102)
+##### `zdot_register_hook()` (lines 29-102)
 
 Registers a hook with the system.
 
@@ -263,8 +263,8 @@ zdot_has_tty     || return 0    # skip when no terminal I/O available
 #### core/modules.zsh (Module Loading System)
 
 **Responsibilities:**
-- Built-in module loading (`zdot_module_load`)
-- User module loading (`zdot_user_module_load`)
+- Built-in module loading (`zdot_load_module`)
+- User module loading (`zdot_load_user_module`)
 - Deduplication and existence checking (`_zdot_load_module_file`)
 - User modules directory resolution (`_zdot_user_modules_dir`)
 - Module path helpers (`zdot_module_path`, `zdot_user_module_path`)
@@ -276,11 +276,11 @@ zdot_has_tty     || return 0    # skip when no terminal I/O available
 
 Internal entry point for loading any module file. Handles deduplication, existence checking, and marks `_ZDOT_MODULES_LOADED`. All extra per-category tracking (e.g. `_ZDOT_USER_MODULES_LOADED`) is the caller's responsibility.
 
-##### `zdot_module_load()` (lines 53–57)
+##### `zdot_load_module()` (lines 53–57)
 
 Public API for loading a named built-in module from `$_ZDOT_LIB_DIR/<name>/<name>.zsh`. Delegates to `_zdot_load_module_file`.
 
-##### `zdot_user_module_load()` (lines 114–124)
+##### `zdot_load_user_module()` (lines 114–124)
 
 Public API for loading a named user module. Resolves the user modules directory via `_zdot_user_modules_dir()`, delegates to `_zdot_load_module_file`, then sets `_ZDOT_USER_MODULES_LOADED[$module]=1`.
 
@@ -442,7 +442,7 @@ typeset -ga _ZDOT_EXECUTION_PLAN
 ```
 Module Loaded
       ↓
-zdot_hook_register() called
+zdot_register_hook() called
       ↓
 Assign sequential hook_id = "hook_N"
       ↓
@@ -570,8 +570,8 @@ for each hook_id not in execution_plan:
 
 **Example:**
 ```zsh
-zdot_hook_register _hook_a interactive --requires phase-b --provides phase-a
-zdot_hook_register _hook_b interactive --requires phase-a --provides phase-b
+zdot_register_hook _hook_a interactive --requires phase-b --provides phase-a
+zdot_register_hook _hook_b interactive --requires phase-a --provides phase-b
 ```
 
 **Detection:**
@@ -590,7 +590,7 @@ zdot_hook_register _hook_b interactive --requires phase-a --provides phase-b
 
 **Example:**
 ```zsh
-zdot_hook_register _hook_a interactive --requires nonexistent-phase --optional
+zdot_register_hook _hook_a interactive --requires nonexistent-phase --optional
 ```
 
 **Behavior:**
@@ -608,7 +608,7 @@ zdot_hook_register _hook_a interactive --requires nonexistent-phase --optional
 
 **Example:**
 ```zsh
-zdot_hook_register _hook_a interactive --requires nonexistent-phase
+zdot_register_hook _hook_a interactive --requires nonexistent-phase
 ```
 
 **Behavior:**
@@ -627,7 +627,7 @@ zdot_hook_register _hook_a interactive --requires nonexistent-phase
 **Example:**
 ```zsh
 # In module: register a cleanup hook that runs after all deferred hooks complete
-zdot_hook_register _cleanup interactive --requires-group finally
+zdot_register_hook _cleanup interactive --requires-group finally
 ```
 
 **Behavior:**
@@ -674,13 +674,13 @@ zdot_has_tty() {
 **Usage in Hook Registration:**
 ```zsh
 # Interactive shells only
-zdot_hook_register _prompt_init interactive
+zdot_register_hook _prompt_init interactive
 
 # Both interactive and non-interactive
-zdot_hook_register _env_init interactive noninteractive
+zdot_register_hook _env_init interactive noninteractive
 
 # All contexts (interactive, noninteractive, login, nonlogin)
-zdot_hook_register _universal_init interactive noninteractive login nonlogin
+zdot_register_hook _universal_init interactive noninteractive login nonlogin
 ```
 
 ### Context Matching Algorithm
@@ -753,8 +753,8 @@ done
 The framework loads named modules through a three-layer call chain:
 
 ```
-zdot_module_load <name>          # public — load a built-in module
-zdot_user_module_load <name>     # public — load a user module
+zdot_load_module <name>          # public — load a built-in module
+zdot_load_user_module <name>     # public — load a user module
         │
         ▼
 _zdot_load_module_file <name> <file>   # private — dedup + existence check + load
@@ -769,7 +769,7 @@ source <compiled-or-original-file>
 
 #### `_zdot_load_module_file` (core/modules.zsh)
 
-Central private helper. Both `zdot_module_load` and `zdot_user_module_load` delegate to it.
+Central private helper. Both `zdot_load_module` and `zdot_load_user_module` delegate to it.
 
 ```zsh
 _zdot_load_module_file() {
@@ -836,14 +836,14 @@ The path is resolved once by `_zdot_user_modules_dir` and cached in `_ZDOT_USER_
 #### Loading a User Module
 
 ```zsh
-zdot_user_module_load my-custom
+zdot_load_user_module my-custom
 ```
 
 This calls `_zdot_load_module_file "my-custom" "${_ZDOT_USER_MODULES_DIR}/my-custom/my-custom.zsh"` and additionally sets `_ZDOT_USER_MODULES_LOADED[$module]=1` so user modules can be listed independently.
 
 #### Deduplication
 
-User modules share `_ZDOT_MODULES_LOADED` with built-in modules. If a built-in module named `foo` is already loaded, calling `zdot_user_module_load foo` is a no-op. Choose unique names for user modules.
+User modules share `_ZDOT_MODULES_LOADED` with built-in modules. If a built-in module named `foo` is already loaded, calling `zdot_load_user_module foo` is a no-op. Choose unique names for user modules.
 
 #### Cloning a Built-in Module
 
@@ -859,7 +859,7 @@ zdot module user-clone xdg
 
 | Function | Description |
 |---|---|
-| `zdot_user_module_load <name>` | Load a user module (deduped) |
+| `zdot_load_user_module <name>` | Load a user module (deduped) |
 | `zdot_user_module_list` | Print names of all loaded user modules |
 | `zdot_user_module_path <name>` | Return the path to a user module's main file |
 
@@ -874,7 +874,7 @@ zdot module user-clone xdg
 
 ### Automatic Module Discovery
 
-> **Note**: For user configurations, explicit loading via `zdot_module_load` / `zdot_user_module_load`
+> **Note**: For user configurations, explicit loading via `zdot_load_module` / `zdot_load_user_module`
 > is the preferred approach. `zdot_load_modules()` is used internally during framework initialisation
 > and is not intended for direct use in module or user init files.
 
@@ -1381,7 +1381,7 @@ typeset -gA _ZDOT_MY_NEW_ARRAY
 - All caps for arrays
 - Descriptive name
 
-### Adding New Flags to zdot_hook_register()
+### Adding New Flags to zdot_register_hook()
 
 **Location**: `core/hooks.zsh` (lines 29-102)
 
@@ -1389,7 +1389,7 @@ typeset -gA _ZDOT_MY_NEW_ARRAY
 
 1. Add flag to usage documentation (lines 29-35):
 ```zsh
-# Usage: zdot_hook_register <function> [contexts...] [--my-flag]
+# Usage: zdot_register_hook <function> [contexts...] [--my-flag]
 ```
 
 2. Initialize local variable (lines 38-44):
@@ -1489,7 +1489,7 @@ zdot_debug_phases() {
 
 In module, register hook with `--requires-group finally`:
 ```zsh
-zdot_hook_register _mymodule_cleanup interactive noninteractive \
+zdot_register_hook _mymodule_cleanup interactive noninteractive \
     --requires-group finally
 ```
 
@@ -2006,7 +2006,7 @@ When adding features:
 ### Overview
 
 Hooks can be assigned human-readable name labels at registration time using the
-`--name` flag on `zdot_hook_register`. Names are stored in a bidirectional
+`--name` flag on `zdot_register_hook`. Names are stored in a bidirectional
 registry and are used by `zdot_defer_order` to express ordering constraints
 without coupling to internal hook IDs.
 
@@ -2018,12 +2018,12 @@ _ZDOT_HOOK_BY_NAME (associative): name label → hook_id
 ```
 
 Both arrays are declared in `core/hooks.zsh`. They are populated during
-`zdot_hook_register` and are read-only after the execution plan is built.
+`zdot_register_hook` and are read-only after the execution plan is built.
 
 ### Registration
 
 ```zsh
-zdot_hook_register --name my-plugin my_plugin_init env network
+zdot_register_hook --name my-plugin my_plugin_init env network
 ```
 
 - `--name <label>` is extracted in a pre-pass before positional argument
@@ -2049,7 +2049,7 @@ _ZDOT_HOOK_BY_NAME[my-plugin]="hook_3"
 
 ### Overview
 
-The `--deferred` flag on `zdot_hook_register` marks a hook as explicitly
+The `--deferred` flag on `zdot_register_hook` marks a hook as explicitly
 deferred. Deferred hooks are excluded from the main synchronous execution plan
 and are instead run after shell startup completes, triggered asynchronously.
 
@@ -2059,12 +2059,12 @@ and are instead run after shell startup completes, triggered asynchronously.
 _ZDOT_DEFERRED_HOOKS (array): hook_ids explicitly marked --deferred
 ```
 
-Declared in `core/hooks.zsh`. Populated during `zdot_hook_register`.
+Declared in `core/hooks.zsh`. Populated during `zdot_register_hook`.
 
 ### Registration
 
 ```zsh
-zdot_hook_register --deferred my_slow_tool_init env
+zdot_register_hook --deferred my_slow_tool_init env
 ```
 
 - The `--deferred` flag is extracted in the same pre-pass as `--name`.
@@ -2134,12 +2134,12 @@ topological sort machinery without altering real phase semantics.
 
 ---
 
-## Suppressing Force-Deferral Warnings: `zdot_accept_deferred`
+## Suppressing Force-Deferral Warnings: `zdot_allow_defer`
 
 ### Overview
 
 When a hook is force-deferred (because its required phase is only provided by a
-deferred hook), the system emits a warning. `zdot_accept_deferred` silences
+deferred hook), the system emits a warning. `zdot_allow_defer` silences
 these warnings for specific function+phase combinations where force-deferral is
 expected and intentional.
 
@@ -2149,17 +2149,17 @@ expected and intentional.
 _ZDOT_ACCEPTED_DEFERRED (associative): func_name → "all" | "phase1 phase2 ..."
 ```
 
-Declared in `core/hooks.zsh`. Populated by `zdot_accept_deferred` at module
+Declared in `core/hooks.zsh`. Populated by `zdot_allow_defer` at module
 load time, before the execution plan is built.
 
 ### Usage
 
 ```zsh
 # Accept force-deferral for all phases of a function:
-zdot_accept_deferred my_plugin_init
+zdot_allow_defer my_plugin_init
 
 # Accept force-deferral for specific phases only:
-zdot_accept_deferred my_plugin_init network tools
+zdot_allow_defer my_plugin_init network tools
 ```
 
 - With no phase arguments: sets `_ZDOT_ACCEPTED_DEFERRED[func]="all"`.
@@ -2223,12 +2223,12 @@ Each deferred hook carries a reason tag:
 | `"forced"`   | Force-deferred due to phase provider being deferred        |
 
 Tool-dependency force-deferral (via `--requires-tool`) is applied silently
-without generating a warning entry, regardless of `zdot_accept_deferred`.
+without generating a warning entry, regardless of `zdot_allow_defer`.
 
 ### Warnings
 
 For each force-deferred hook where the phase+function combo is not accepted via
-`zdot_accept_deferred`, a warning string is appended to
+`zdot_allow_defer`, a warning string is appended to
 `_ZDOT_FORCED_DEFERRED_WARNINGS` and printed during startup to alert the module
 author that an implicit deferral occurred.
 

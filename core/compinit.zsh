@@ -369,6 +369,6 @@ zdot_enable_compinit_precmd() {
     add-zsh-hook precmd zdot_ensure_compinit_during_precmd
 }
 
-zdot_hook_register zdot_enable_compinit_precmd interactive \
+zdot_register_hook zdot_enable_compinit_precmd interactive \
     --requires plugins-cloned \
     --provides compinit-precmd-ready

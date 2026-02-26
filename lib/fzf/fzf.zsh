@@ -2,10 +2,10 @@
 # fzf: FZF configuration and helper functions
 
 # ============================================================================
-# Module Initialization
+# OMZ Completion Configuration (shared omz-configure group)
 # ============================================================================
 
-_fzf_init() {
+_omz_configure_completion() {
     # disable sort when completing `git checkout`
     zstyle ':completion:*:git-checkout:*' sort false
 
@@ -15,7 +15,29 @@ _fzf_init() {
 
     # force zsh not to show completion menu, which allows fzf-tab to capture the unambiguous prefix
     zstyle ':completion:*' menu no
+}
 
+zdot_register_hook _omz_configure_completion interactive noninteractive \
+    --name omz-configure-completion \
+    --group omz-configure
+
+# ============================================================================
+# Plugin Declarations
+# ============================================================================
+
+zdot_use_plugin omz:plugins/fzf
+zdot_use_plugin Aloxaf/fzf-tab
+
+# ============================================================================
+# fzf Core Module (configure -> load -> post-init)
+# ============================================================================
+
+_fzf_plugins_load_omz() {
+    zdot_has_tty && zdot_load_plugin omz:plugins/fzf
+    zdot_verify_tools fzf
+}
+
+_fzf_init() {
     # preview directory's content with eza when completing cd
     zstyle ':fzf-tab:complete:cx:*' fzf-preview 'eza -1 --color=always --icons $realpath'
 
@@ -70,16 +92,26 @@ _fzf_post_plugin() {
     fi
 }
 
-# Register hooks
-# Pre-plugin: configure fzf-tab zstyles before plugin loads
-zdot_hook_register _fzf_init interactive \
-    --requires xdg-configured \
-    --provides fzf-configured
+zdot_define_module fzf \
+    --configure _fzf_init \
+    --load _fzf_plugins_load_omz \
+    --post-init _fzf_post_plugin \
+    --group omz-plugins \
+    --requires plugins-cloned omz-bundle-initialized \
+    --provides-tool fzf
 
-# Post-plugin: setup fzf after plugins are loaded
-zdot_hook_register _fzf_post_plugin interactive \
-    --requires plugins-post-configured \
-    --provides fzf-ready
+# ============================================================================
+# fzf-tab Module (separate load phase, interactive only)
+# ============================================================================
+
+_plugins_load_fzf_tab() {
+    zdot_load_plugin Aloxaf/fzf-tab
+}
+
+zdot_define_module fzf-tab \
+    --load _plugins_load_fzf_tab \
+    --requires autosuggest-abbr-ready fzf-configured \
+    --context interactive
 
 # Lazy load module functions
 zdot_module_autoload_funcs

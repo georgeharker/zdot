@@ -49,10 +49,10 @@ _zdot_load_module_file() {
 }
 
 # Load a module by name
-# Usage: zdot_module_load <module-name>
-zdot_module_load() {
+# Usage: zdot_load_module <module-name>
+zdot_load_module() {
     local module="$1"
-    [[ -z "$module" ]] && { zdot_error "zdot_module_load: module name required"; return 1 }
+    [[ -z "$module" ]] && { zdot_error "zdot_load_module: module name required"; return 1 }
     _zdot_load_module_file "$module" "${_ZDOT_LIB_DIR}/${module}/${module}.zsh"
 }
 
@@ -111,13 +111,13 @@ zdot_user_module_path() {
 }
 
 # Load a user module by name
-# Usage: zdot_user_module_load <module-name>
-zdot_user_module_load() {
+# Usage: zdot_load_user_module <module-name>
+zdot_load_user_module() {
     local module="$1"
-    [[ -z "$module" ]] && { zdot_error "zdot_user_module_load: module name required"; return 1 }
+    [[ -z "$module" ]] && { zdot_error "zdot_load_user_module: module name required"; return 1 }
     local user_dir
     if ! _zdot_user_modules_dir; then
-        zdot_error "zdot_user_module_load: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
+        zdot_error "zdot_load_user_module: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
         return 1
     fi
     user_dir="$REPLY"
