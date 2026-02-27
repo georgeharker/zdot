@@ -38,6 +38,12 @@ _ZDOT_DEFER_FLAG_NAMES["--prompt"]="prompt"
 _ZDOT_DEFER_FLAG_NAMES["-p"]="prompt"
 _ZDOT_DEFER_FLAG_NAMES["--quiet"]="quiet"
 _ZDOT_DEFER_FLAG_NAMES["-q"]="quiet"
+typeset -ga _ZDOT_DEFER_CMDS            # [N] = command string submitted
+typeset -ga _ZDOT_DEFER_HOOKS           # [N] = hook_func that submitted it (or "?" if outside hook)
+typeset -ga _ZDOT_DEFER_DELAYS          # [N] = delay in seconds (0 if none)
+typeset -ga _ZDOT_DEFER_SPECS           # [N] = human-readable spec name (plugins), "__sentinel__", or ""
+typeset -ga _ZDOT_DEFER_LABELS          # [N] = explicit --label override (or "" if none)
+typeset -g  _ZDOT_DEFER_COUNTER=0
 
 # ============================================================================
 # Acceptance of Force-Deferred Hooks
@@ -731,6 +737,139 @@ zdot_build_execution_plan() {
     return 0
 }
 
+# Resolve group annotations into concrete dependency edges by synthesising
+# barrier hooks at resolve-time.
+#
+# For each group G (referenced by --group, --provides-group, or --requires-group):
+#
+#   1. Synthesise two no-op barrier hooks:
+#        _zdot_group_begin_G  →  provides phase  _group_begin_G
+#        _zdot_group_end_G    →  provides phase  _group_end_G
+#      Both are given the union of all member contexts so they survive the DAG
+#      context filter.
+#
+#   2. For every member M of group G:
+#        • inject _group_begin_G into _ZDOT_HOOK_REQUIRES[M]   (M runs after begin)
+#        • synthesise phase _group_member_G_<hid_m>, append to _ZDOT_HOOK_PROVIDES[M]
+#        • inject _group_member_G_<hid_m> into _ZDOT_HOOK_REQUIRES of _zdot_group_end_G
+#          (end runs only after every member has provided its member phase)
+#
+#   3. For every hook H with --requires-group G:
+#        • inject _group_end_G into _ZDOT_HOOK_REQUIRES[H]
+#
+# All synthetic phases are registered into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT for
+# every context in the union so the DAG provider-check passes.
+_zdot_init_resolve_groups() {
+    local _grp _hid _ctx _member _phase _hid_begin _hid_end
+
+    # ── Collect all group names ──────────────────────────────────────────────
+    local -A _all_groups
+    for _grp in "${(k)_ZDOT_GROUP_MEMBERS[@]}"; do
+        _all_groups[$_grp]=1
+    done
+    for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+        _grp="${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}"
+        [[ -n $_grp ]] && _all_groups[$_grp]=1
+    done
+
+    # ── Process each group ───────────────────────────────────────────────────
+    local -A _ctx_union
+    for _grp in "${(k)_all_groups[@]}"; do
+
+        # 'finally' members are dispatched directly by the deferred drain;
+        # skip DAG barrier synthesis entirely for this group.
+        [[ $_grp == finally ]] && continue
+
+        # -- Compute union of member AND requiring-hook contexts -------------
+        _ctx_union=()
+        for _member in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+            for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
+                _ctx_union[$_ctx]=1
+            done
+        done
+        # Always include contexts from hooks that require this group, so that
+        # the synthetic barriers are visible to the DAG context filter even
+        # when the requiring hook runs in a wider context than the members.
+        for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_hid]:-}; do
+                _ctx_union[$_ctx]=1
+            done
+        done
+        local _ctx_list="${(j: :)${(k)_ctx_union}}"
+
+        # -- Allocate barrier hook IDs ---------------------------------------
+        (( _ZDOT_HOOK_COUNTER++ ))
+        _hid_begin="hook_${_ZDOT_HOOK_COUNTER}"
+        (( _ZDOT_HOOK_COUNTER++ ))
+        _hid_end="hook_${_ZDOT_HOOK_COUNTER}"
+
+        local _fn_begin="_zdot_group_begin_${_grp}"
+        local _fn_end="_zdot_group_end_${_grp}"
+        local _phase_begin="_group_begin_${_grp}"
+        local _phase_end="_group_end_${_grp}"
+
+        # -- Define barrier shell functions (no-ops; ordering is DAG-enforced) -
+        eval "${_fn_begin}() { return 0; }"
+        eval "${_fn_end}() { return 0; }"
+
+        # -- Register begin barrier ------------------------------------------
+        _ZDOT_HOOKS[$_hid_begin]=$_fn_begin
+        _ZDOT_HOOK_NAMES[$_hid_begin]="group-begin:${_grp}"
+        _ZDOT_HOOK_BY_NAME["group-begin:${_grp}"]=$_hid_begin
+        _ZDOT_HOOK_CONTEXTS[$_hid_begin]="$_ctx_list"
+        _ZDOT_HOOK_REQUIRES[$_hid_begin]=""
+        _ZDOT_HOOK_PROVIDES[$_hid_begin]="$_phase_begin"
+        _ZDOT_HOOK_OPTIONAL[$_hid_begin]=1
+
+        # -- Register end barrier --------------------------------------------
+        _ZDOT_HOOKS[$_hid_end]=$_fn_end
+        _ZDOT_HOOK_NAMES[$_hid_end]="group-end:${_grp}"
+        _ZDOT_HOOK_BY_NAME["group-end:${_grp}"]=$_hid_end
+        _ZDOT_HOOK_CONTEXTS[$_hid_end]="$_ctx_list"
+        _ZDOT_HOOK_REQUIRES[$_hid_end]=""
+        _ZDOT_HOOK_PROVIDES[$_hid_end]="$_phase_end"
+        _ZDOT_HOOK_OPTIONAL[$_hid_end]=1
+
+        # -- Register begin/end phases into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT -
+        for _ctx in ${(k)_ctx_union}; do
+            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_begin}]=$_hid_begin
+            _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_end}]=$_hid_end
+        done
+
+        # -- Wire each member through the barriers ---------------------------
+        for _member in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+            # M must run after the begin barrier
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_member]:-} " != *" ${_phase_begin} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_member]+="${_ZDOT_HOOK_REQUIRES[$_member]:+ }${_phase_begin}"
+            fi
+
+            # Synthesise per-member phase and register it
+            local _phase_member="_group_member_${_grp}_${_member}"
+            if [[ " ${_ZDOT_HOOK_PROVIDES[$_member]:-} " != *" ${_phase_member} "* ]]; then
+                _ZDOT_HOOK_PROVIDES[$_member]+="${_ZDOT_HOOK_PROVIDES[$_member]:+ }${_phase_member}"
+            fi
+            for _ctx in ${(k)_ctx_union}; do
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_member}]=$_member
+            done
+
+            # End barrier must run after this member's phase
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid_end]:-} " != *" ${_phase_member} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_hid_end]+="${_ZDOT_HOOK_REQUIRES[$_hid_end]:+ }${_phase_member}"
+            fi
+        done
+
+        # -- Wire requires-group hooks to run after the end barrier ----------
+        for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid]:-} " != *" ${_phase_end} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_hid]+="${_ZDOT_HOOK_REQUIRES[$_hid]:+ }${_phase_end}"
+            fi
+        done
+
+    done
+}
+
 # ============================================================================
 # Hook Execution
 # ============================================================================
@@ -1075,7 +1214,146 @@ zdot_execute_all() {
 }
 
 # ============================================================================
+# Module Definition Sugar
+# ============================================================================
+
+# zdot_simple_hook <name> [flags...]
+#
+# Sugar for the most common single-hook module pattern. Auto-derives:
+#   fn       = _<name>_init         (must already exist)
+#   requires = xdg-configured       (override with --requires, clear with --no-requires)
+#   provides = <name>-configured    (override with --provides)
+#   contexts = interactive noninteractive (override with --context)
+#
+# Supported flags:
+#   --provides <phase>            Override the auto-derived provides token
+#   --requires <phase...>         Override the default requires (xdg-configured)
+#   --no-requires                 Clear all auto-derived requires
+#   --context <ctx...>            Override contexts (default: interactive noninteractive)
+#   --fn <name>                   Override the auto-derived function name
+#
+# All other flags (--provides-tool, --requires-tool, --optional, --name,
+# --group, --deferred, etc.) are passed through to zdot_register_hook.
+zdot_simple_hook() {
+    local name="$1"; shift
+    local fn="_${name}_init"
+    local provides="${name}-configured"
+    local -a requires=(xdg-configured)
+    local -a contexts=(interactive noninteractive)
+    local no_requires=false
+    local -a passthrough=()
+
+    while (( $# )); do
+        case "$1" in
+            --provides)
+                provides="$2"; shift 2 ;;
+            --requires)
+                requires=()
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do
+                    requires+=("$1"); shift
+                done
+                ;;
+            --no-requires)
+                no_requires=true; shift ;;
+            --context)
+                contexts=()
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do
+                    contexts+=("$1"); shift
+                done
+                ;;
+            --fn)
+                fn="$2"; shift 2 ;;
+            *)
+                passthrough+=("$1"); shift ;;
+        esac
+    done
+
+    local -a req_args=()
+    if ! $no_requires; then
+        local _r
+        for _r in "${requires[@]}"; do
+            req_args+=(--requires "$_r")
+        done
+    fi
+
+    zdot_register_hook "$fn" "${contexts[@]}" \
+        "${req_args[@]}" \
+        --provides "$provides" \
+        "${passthrough[@]}"
+}
+
+# ============================================================================
 # Introspection and Debugging
 # ============================================================================
 
+# _zdot_defer_record — append one deferred-command entry to the display log.
+#
+# This function does NOT schedule execution; it only records metadata for
+# inspection via `zdot_show_defer_queue`.  The four parallel arrays hold one
+# element per deferred item:
+#
+#   _ZDOT_DEFER_CMDS    — the command string that will be deferred
+#   _ZDOT_DEFER_HOOKS   — the hook_N id of the hook that submitted the defer
+#                         (captured from $_ZDOT_CURRENT_HOOK_FUNC at call time)
+#   _ZDOT_DEFER_DELAYS  — the delay value passed to zsh-defer (or "" for none)
+#   _ZDOT_DEFER_SPECS   — the plugin spec string (or "" if not inside a plugin)
+#
+# _ZDOT_DEFER_COUNTER tracks the total count (== length of each array).
+_zdot_defer_record() {
+    (( _ZDOT_DEFER_COUNTER++ ))
+    _ZDOT_DEFER_CMDS+=( "$1" )
+    _ZDOT_DEFER_HOOKS+=( "${_ZDOT_CURRENT_HOOK_FUNC:-?}" )
+    _ZDOT_DEFER_DELAYS+=( "$2" )
+    _ZDOT_DEFER_SPECS+=( "$3" )
+    _ZDOT_DEFER_LABELS+=( "${4:-}" )
+}
+
+# Display the Defer Order Constraints section (shared by hooks_list and phases_list).
+_zdot_defer_order_display() {
+    if [[ ${#_ZDOT_DEFER_ORDER_PAIRS[@]} -gt 0 ]]; then
+        zdot_report "Defer Order Constraints:"
+        zdot_info ""
+        local _pi=1
+        while [[ $_pi -lt ${#_ZDOT_DEFER_ORDER_PAIRS[@]} ]]; do
+            local _fn="${_ZDOT_DEFER_ORDER_PAIRS[$_pi]}"
+            local _tn="${_ZDOT_DEFER_ORDER_PAIRS[$(( _pi + 1 ))]}"
+            (( _pi += 2 ))
+            zdot_info "  %F{cyan}${_fn}%f → %F{cyan}${_tn}%f"
+        done
+        zdot_info ""
+    fi
+}
+
+# Set _name_mark and _deferred_mark for a given hook_id/func pair.
+# Usage: _zdot_hook_display_marks <hook_id> <func>
+# Sets: _name_mark, _deferred_mark, _noquiet_mark (in caller's scope, no local)
+_zdot_hook_display_marks() {
+    local _hname="${_ZDOT_HOOK_NAMES[$1]:-$2}"
+    _name_mark=""
+    [[ "$_hname" != "$2" ]] && _name_mark=" %F{blue}[name: $_hname]%f"
+    _deferred_mark=""
+    [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]] && _deferred_mark=" %F{magenta}[deferred]%f"
+    _noquiet_mark=""
+    local _defer_arg="${_ZDOT_HOOK_DEFER_ARGS[$1]:-}"
+    if [[ -n "$_defer_arg" ]]; then
+        local _flag_label="${_ZDOT_DEFER_FLAG_NAMES[$_defer_arg]:-$_defer_arg}"
+        _noquiet_mark=" %F{yellow}[${_flag_label}]%f"
+    fi
+}
+
+# Set defer_mark based on whether any hook in the id list ran deferred work.
+# Usage: _zdot_ran_deferred_mark "${id_list[@]}"
+# Sets: defer_mark (in caller's scope, no local)
+_zdot_ran_deferred_mark() {
+    local _rd=0
+    local _id
+    for _id in "$@"; do
+        local _f="${_ZDOT_HOOKS[$_id]}"
+        [[ " ${_ZDOT_DEFER_HOOKS[@]} " =~ " ${_f} " ]] && _rd=1 && break
+    done
+    defer_mark=""
+    [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"
+}
 

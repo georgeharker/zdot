@@ -14,7 +14,7 @@
 local zdot_core_dir="${${(%):-%x}:a:h}/core"
 
 # Source base first (needed by other components)
-source "${zdot_core_dir}/base.zsh"
+source "${zdot_core_dir}/ctx.zsh"
 
 # Source logging (needed by other components)
 source "${zdot_core_dir}/logging.zsh"
@@ -28,6 +28,7 @@ source "${zdot_core_dir}/functions.zsh"
 source "${zdot_core_dir}/completions.zsh"
 source "${zdot_core_dir}/utils.zsh"
 source "${zdot_core_dir}/plugins.zsh"
+source "${zdot_core_dir}/init.zsh"
 
 # Source plugin bundles
 source "${zdot_core_dir}/compinit.zsh"              # shared compinit (before any bundle)
