@@ -727,6 +727,29 @@ zdot_build_execution_plan() {
         done
     done
 
+    # Rebuild _ZDOT_EXECUTION_PLAN_DEFERRED in unified topological order.
+    #
+    # The initial partition (above) added natively-deferred hooks first,
+    # then the force-deferral loop appended force-deferred hooks at the
+    # end.  This broke the relative ordering that Kahn's algorithm
+    # established (e.g. a defer-order edge A→B would be ignored if A was
+    # force-deferred and B was natively deferred).
+    #
+    # Fix: rebuild the deferred list by scanning _ZDOT_EXECUTION_PLAN
+    # (which has the correct topological order) and collecting every
+    # hook_id that ended up in the deferred set.  We use a temporary
+    # associative array for O(1) membership checks.
+    local -A _deferred_set
+    for hook_id in $_ZDOT_EXECUTION_PLAN_DEFERRED; do
+        _deferred_set[$hook_id]=1
+    done
+    _ZDOT_EXECUTION_PLAN_DEFERRED=()
+    for hook_id in $_ZDOT_EXECUTION_PLAN; do
+        if [[ ${_deferred_set[$hook_id]+x} ]]; then
+            _ZDOT_EXECUTION_PLAN_DEFERRED+=($hook_id)
+        fi
+    done
+
     # Report skipped optional hooks if any
     if [[ ${#skipped_hooks} -gt 0 ]]; then
         for skip_msg in $skipped_hooks; do
