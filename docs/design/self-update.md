@@ -105,9 +105,9 @@ declare dotfiler as a zdot plugin:
 zdot_use_plugin georgeharker/dotfiler hook
 ```
 
-A thin wrapper `lib/dotfiler/dotfiler-plugin.zsh` acts as the `.plugin.zsh`
-entrypoint and sets `_ZDOT_DOTFILER_SCRIPTS_DIR` to the cloned `scripts/` path.
-No dotfiler shell integration is activated — only the scripts are made available.
+The plugin hook declaration ensures that `zdot_use_bundle` registers the repo so
+the clone is not treated as an orphan by `zdot_clean_plugins`. The discovery
+function in `core/update.zsh` locates the scripts directly in the plugin cache.
 
 ---
 
@@ -201,33 +201,6 @@ No existing caller passes these flags → defaults kick in → no behavioral cha
 
 ---
 
-## Phase 3: dotfiler Plugin Wrapper
-
-New file: `lib/dotfiler/dotfiler-plugin.zsh`
-
-This is the `.plugin.zsh` entrypoint when dotfiler is loaded as a zdot plugin.
-
-```zsh
-# lib/dotfiler/dotfiler-plugin.zsh
-# Loaded by zdot_load_plugin when dotfiler is used as a plugin.
-# Does NOT activate any dotfiler shell integration.
-# Only exports the scripts/ directory path for use by core/update.zsh.
-
-local _dotfiler_plugin_dir="${0:A:h}"
-# The cloned repo root is two levels up from lib/dotfiler/
-export _ZDOT_DOTFILER_SCRIPTS_DIR="${_dotfiler_plugin_dir}/scripts"
-```
-
-Wait — when cloned as a plugin, the repo root is at
-`$_ZDOT_PLUGINS_CACHE/georgeharker/dotfiler`. The plugin loader finds
-`lib/dotfiler/dotfiler-plugin.zsh` as the `.plugin.zsh` match, so `${0:A:h}`
-is `.../georgeharker/dotfiler/lib/dotfiler`. The scripts dir is at
-`.../georgeharker/dotfiler/scripts`.
-
-```zsh
-export _ZDOT_DOTFILER_SCRIPTS_DIR="${${0:A:h}:h:h}/scripts"
-```
-
 ### Detection function (in core/update.zsh)
 
 ```zsh
@@ -244,11 +217,7 @@ _zdot_update_find_dotfiler_scripts() {
     if [[ -n "$_root" && -f "$_root/scripts/setup.sh" ]]; then
         REPLY="$_root/scripts"; return 0
     fi
-    # 3. Loaded as zdot plugin?
-    if [[ -n "$_ZDOT_DOTFILER_SCRIPTS_DIR" && -f "$_ZDOT_DOTFILER_SCRIPTS_DIR/setup.sh" ]]; then
-        REPLY=$_ZDOT_DOTFILER_SCRIPTS_DIR; return 0
-    fi
-    # 4. Try plugin cache path directly
+    # 3. Try plugin cache path directly
     local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
     local _candidate="$_cache/georgeharker/dotfiler/scripts"
     if [[ -f "$_candidate/setup.sh" ]]; then
@@ -675,9 +644,8 @@ The hook body captures the function references before cleanup runs.
 
 1. `setup.sh`: add `--repo-dir` / `--link-dest`; rename `normalize_path_to_home_relative`
 2. `update.sh`: forward new options to `setup.sh`
-3. `lib/dotfiler/dotfiler-plugin.zsh`: thin wrapper exposing scripts dir
-4. `core/update.zsh`: full implementation (Phases 4–8 above)
-5. `zdot.zsh`: add `source core/update.zsh`
-6. Docs: mark item 3 done in `api-improvements.md`
+3. `core/update.zsh`: full implementation (Phases 4–8 above)
+4. `zdot.zsh`: add `source core/update.zsh`
+5. Docs: mark item 3 done in `api-improvements.md`
 
 Each step is independently reviewable via `git diff` before proceeding.

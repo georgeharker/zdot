@@ -259,7 +259,7 @@ _zdot_update_is_available() {
 }
 
 # ---------------------------------------------------------------------------
-# dotfiler scripts detection (4-step priority)
+# dotfiler scripts detection (3-step priority)
 # ---------------------------------------------------------------------------
 
 _zdot_update_find_dotfiler_scripts() {
@@ -280,14 +280,7 @@ _zdot_update_find_dotfiler_scripts() {
         REPLY="$_root/scripts"; return 0
     fi
 
-    # 3. Loaded as a zdot plugin (lib/dotfiler/dotfiler-plugin.zsh sets this)
-    if [[ -n "$_ZDOT_DOTFILER_SCRIPTS_DIR" \
-        && -f "$_ZDOT_DOTFILER_SCRIPTS_DIR/setup.sh" \
-        && -f "$_ZDOT_DOTFILER_SCRIPTS_DIR/update.sh" ]]; then
-        REPLY=$_ZDOT_DOTFILER_SCRIPTS_DIR; return 0
-    fi
-
-    # 4. Plugin cache path — clone on demand if not yet present.
+    # 3. Plugin cache path — clone on demand if not yet present.
     # zdot_use_bundle already registered this repo at source time (for opted-in users)
     # so the clone will not be treated as an orphan by zdot_clean_plugins.
     local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
