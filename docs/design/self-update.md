@@ -13,7 +13,8 @@ deployment scenarios:
    from the parent root, then applies symlinks. The parent repo's dirty submodule
    pointer is handled per configuration.
 3. **Plain subdir** (edge case): `$ZDOT_DIR` is a plain tracked subdir of the
-   parent repo with its own remote. zdot pulls directly via its own remote.
+   parent repo. Updates are the parent repo's responsibility; zdot hints that
+   the user should disable self-update (`zstyle ':zdot:update' mode disabled`).
 
 The update system is **opt-in by default**: users must set
 `zstyle ':zdot:update' mode` to something other than `disabled` to activate it.
@@ -78,8 +79,9 @@ else:
     parent_root = zdot_git_root
 ```
 
-In `subdir` mode zdot pulls via its own remote directly (same as standalone),
-but does NOT touch the parent repo.
+In `subdir` mode zdot does **not** pull at all — the parent repo manages
+updates. zdot writes the timestamp, logs a hint to disable self-update
+(`zstyle ':zdot:update' mode disabled`), and returns early.
 
 ---
 
@@ -464,11 +466,11 @@ _zdot_update_detect_deployment() {
     if git -C "$_parent_root" submodule status "$_rel" &>/dev/null; then
         REPLY=submodule; return 0
     fi
-    REPLY=subdir; return 0   # plain tracked subdir — treat like standalone
+    REPLY=subdir; return 0   # plain tracked subdir — parent repo manages updates
 }
 ```
 
-### Standalone (and subdir) path
+### Standalone path
 
 ```zsh
 _zdot_update_standalone_apply() {
@@ -630,19 +632,19 @@ The hook body captures the function references before cleanup runs.
 | Risk | Mitigation |
 |---|---|
 | `setup.sh --repo-dir/--link-dest` breaks existing dotfiler users | Defaults identical to current behavior; test with `--dry-run` first |
-| `normalize_path_to_home_relative` rename breaks callers | Rename all internal call sites atomically; keep alias one release |
+| `normalize_path_to_home_relative` rename breaks callers | All 6 call sites are internal to `setup.sh`; renamed atomically, no alias needed |
 | `git submodule update --remote` on wrong path | Validate `_rel` exists as registered submodule before running |
 | `auto` pointer commit surprises user | Default is `none`; user must explicitly opt in |
 | dotfiler plugin clone fails (no network at startup) | Graceful fallback to inline symlink logic; warn clearly |
 | Update check runs before secrets loaded | `--group finally` in hook system ensures last |
-| zdot inside parent repo but not a submodule (`subdir` mode) | Treated as standalone: pull from zdot's own `origin` remote |
+| zdot inside parent repo but not a submodule (`subdir` mode) | No-op: hint to disable self-update; parent repo manages updates |
 | `_zdot_update_*` functions leak if `handle_update` errors out | `_zdot_update_cleanup` called in a `trap ... EXIT` inside the scope |
 
 ---
 
 ## Implementation Order
 
-1. `setup.sh`: add `--repo-dir` / `--link-dest`; rename `normalize_path_to_home_relative`
+1. `setup.sh`: add `--repo-dir` / `--link-dest` (rename to `normalize_path_to_dest_relative` done)
 2. `update.sh`: forward new options to `setup.sh`
 3. `core/update.zsh`: full implementation (Phases 4–8 above)
 4. `zdot.zsh`: add `source core/update.zsh`

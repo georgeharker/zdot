@@ -339,6 +339,17 @@ _zdot_update_handle_update() {
     _zdot_update_detect_deployment   # sets REPLY
     local _deploy=$REPLY
 
+    # 6a. Subdir mode — zdot is a plain tracked subdir of a parent repo
+    #     (e.g. dotfiler); updates are the parent repo's responsibility.
+    if [[ "$_deploy" == subdir ]]; then
+        zdot_info "zdot: update available but zdot is a tracked subdir of a parent repo."
+        zdot_info "zdot: the parent repo manages updates; consider:"
+        zdot_info "zdot:   zstyle ':zdot:update' mode disabled"
+        _zdot_update_write_timestamp 0 ""
+        _zdot_update_release_lock
+        return 0
+    fi
+
     # 7. Dispatch by mode
     local _pull_fn
     [[ "$_deploy" == submodule ]] \
@@ -394,7 +405,7 @@ _zdot_update_detect_deployment() {
         REPLY=submodule; return 0
     fi
 
-    # Plain tracked subdir — pull from zdot's own remote
+    # Plain tracked subdir — parent repo manages updates
     REPLY=subdir; return 0
 }
 
