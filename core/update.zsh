@@ -8,15 +8,18 @@
 #   zstyle ':zdot:update' mode                disabled   # disabled|reminder|prompt|auto
 #   zstyle ':zdot:update' frequency           3600       # seconds between checks
 #   zstyle ':zdot:update' destdir             "${XDG_CONFIG_HOME:-$HOME/.config}/zdot"
-#   zstyle ':zdot:update' submodule-pointer   none       # none|prompt|auto
+#   zstyle ':zdot:update' in-tree-commit        none       # none|prompt|auto
+#   zstyle ':zdot:update' subtree-remote      ""         # "remote branch" for git subtree pull
 #   zstyle ':zdot:dotfiler' scripts-dir       ""         # auto-detected if empty
 #
 # Deployment scenarios:
 #   standalone   — ZDOT_DIR is its own git root; zdot does git pull + apply
 #   submodule    — ZDOT_DIR is a registered submodule inside a parent repo;
 #                  zdot does git submodule update --remote + apply + pointer handling
-#   subdir       — ZDOT_DIR is inside a parent repo but not a submodule;
-#                  treated like standalone (pull from zdot's own origin remote)
+#   subtree      — ZDOT_DIR is inside a parent repo (not a submodule) and
+#                  subtree-remote is set; zdot does git subtree pull + apply
+#   subdir       — ZDOT_DIR is inside a parent repo but not a submodule and
+#                  subtree-remote is unset; parent repo manages updates; zdot no-ops
 #   disabled     — mode=disabled, or dotfiler handles everything; zdot no-ops
 
 # ---------------------------------------------------------------------------
@@ -65,31 +68,57 @@ _zdot_update_apply() {
 }
 
 # ---------------------------------------------------------------------------
-# Submodule pointer handling
+# Shared safety check: no foreign staged changes in parent repo
 # ---------------------------------------------------------------------------
 
-_zdot_update_handle_submodule_ptr() {
-    local _parent=$1 _rel=$2 _new=$3
-    local _ptr_mode
-    zstyle -s ':zdot:update' submodule-pointer _ptr_mode
-    case ${_ptr_mode:-none} in
+_zdot_update_check_foreign_staged() {
+    # Return 0 if safe (no staged changes outside $_rel), 1 if foreign staged
+    # changes exist.  Unstaged diffs elsewhere are fine — the concern is staged
+    # changes that would be swept into an auto-commit.
+    local _parent=$1 _rel=$2
+    local -a _staged
+    _staged=( ${(f)"$(git -C "$_parent" diff --cached --name-only 2>/dev/null)"} )
+    [[ ${#_staged} -eq 0 ]] && return 0      # nothing staged at all
+    local _f
+    for _f in "${_staged[@]}"; do
+        [[ "$_f" != "${_rel}/"* && "$_f" != "$_rel" ]] && return 1
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Parent-repo commit handling (submodule pointer / subtree / subdir)
+# ---------------------------------------------------------------------------
+
+_zdot_update_commit_parent() {
+    local _parent=$1 _rel=$2 _label=$3 _commit_msg=$4
+    local _mode
+    zstyle -s ':zdot:update' in-tree-commit _mode
+    case ${_mode:-none} in
         auto)
+            if ! _zdot_update_check_foreign_staged "$_parent" "$_rel"; then
+                zdot_warn "zdot: foreign staged changes in parent repo — skipping auto-commit (${_label})"
+                return 0
+            fi
             git -C "$_parent" add "$_rel" \
-                && git -C "$_parent" commit -m "zdot: update submodule to ${_new[1,12]}"
+                && git -C "$_parent" commit -m "$_commit_msg"
             ;;
         prompt)
-            # Only prompt if there is no buffered user input already
             _zdot_update_has_typed_input && return 0
-            print -n "zdot: commit updated submodule pointer in parent repo? [y/N] "
+            if ! _zdot_update_check_foreign_staged "$_parent" "$_rel"; then
+                zdot_warn "zdot: foreign staged changes in parent repo — skipping commit (${_label})"
+                return 0
+            fi
+            print -n "zdot: ${_label} — commit in parent repo? [y/N] "
             local _ans
             read -r -k1 _ans; print ""
             if [[ "$_ans" == (y|Y) ]]; then
                 git -C "$_parent" add "$_rel" \
-                    && git -C "$_parent" commit -m "zdot: update submodule to ${_new[1,12]}"
+                    && git -C "$_parent" commit -m "$_commit_msg"
             fi
             ;;
         none|*)
-            zdot_info "zdot: submodule pointer updated — parent repo is dirty (commit manually)"
+            zdot_info "zdot: ${_label} — parent repo is dirty (commit manually)"
             ;;
     esac
 }
@@ -140,7 +169,45 @@ _zdot_update_submodule_apply() {
     }
 
     _zdot_update_apply "$_old" "$_new"
-    _zdot_update_handle_submodule_ptr "$_parent_real" "$_rel" "$_new"
+    _zdot_update_commit_parent "$_parent_real" "$_rel" "submodule pointer updated" "zdot: update submodule to ${_new[1,12]}"
+}
+
+_zdot_update_subtree_apply() {
+    # Subtree pull: fetch from the configured remote/branch, squash-merge
+    # into the parent repo, then apply zdot's changed-file hooks.
+    local _parent_root _zdot_real _parent_real _rel _subtree_spec _remote _branch _old _new
+    _parent_root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null) || return 1
+    _zdot_real=${ZDOT_DIR:A}
+    _parent_real=${_parent_root:A}
+    _rel=${_zdot_real#${_parent_real}/}
+
+    # Read remote + branch from zstyle (space-separated value)
+    zstyle -s ':zdot:update' subtree-remote _subtree_spec || {
+        zdot_warn "zdot: subtree-remote zstyle not set"
+        return 1
+    }
+    _remote=${_subtree_spec%% *}
+    _branch=${_subtree_spec#* }
+    [[ -z "$_remote" || -z "$_branch" ]] && {
+        zdot_warn "zdot: subtree-remote must be 'remote branch' (space-separated)"
+        return 1
+    }
+
+    # Snapshot pre-pull HEAD of the zdot subtree
+    _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+
+    # Subtree pull (squash to keep parent history clean)
+    git -C "$_parent_real" subtree pull --prefix="$_rel" "$_remote" "$_branch" --squash || {
+        zdot_warn "zdot: subtree pull failed"
+        return 1
+    }
+
+    # Snapshot post-pull HEAD
+    _new=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    [[ "$_old" == "$_new" ]] && return 0
+
+    _zdot_update_apply "$_old" "$_new"
+    _zdot_update_commit_parent "$_parent_real" "$_rel" "subtree updated" "zdot: update subtree ${_rel}"
 }
 
 # ---------------------------------------------------------------------------
@@ -352,9 +419,11 @@ _zdot_update_handle_update() {
 
     # 7. Dispatch by mode
     local _pull_fn
-    [[ "$_deploy" == submodule ]] \
-        && _pull_fn=_zdot_update_submodule_apply \
-        || _pull_fn=_zdot_update_standalone_apply
+    case $_deploy in
+        submodule)  _pull_fn=_zdot_update_submodule_apply ;;
+        subtree)    _pull_fn=_zdot_update_subtree_apply   ;;
+        *)          _pull_fn=_zdot_update_standalone_apply ;;
+    esac
 
     case $_mode in
         reminder)
@@ -387,7 +456,7 @@ _zdot_update_handle_update() {
 # ---------------------------------------------------------------------------
 
 _zdot_update_detect_deployment() {
-    # Sets REPLY to: standalone | submodule | subdir | none
+    # Sets REPLY to: standalone | submodule | subtree | subdir | none
     local _zdot_root _zdot_real _parent_real _rel
     _zdot_root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null) || {
         REPLY=none; return 0
@@ -399,10 +468,16 @@ _zdot_update_detect_deployment() {
         REPLY=standalone; return 0
     fi
 
-    # zdot is inside a parent repo — submodule or plain subdir?
+    # zdot is inside a parent repo — submodule, subtree, or plain subdir?
     _rel=${_zdot_real#${_parent_real}/}
     if git -C "$_parent_real" submodule status -- "$_rel" &>/dev/null; then
         REPLY=submodule; return 0
+    fi
+
+    # If subtree-remote zstyle is set, treat as a git-subtree deployment
+    local _subtree_spec
+    if zstyle -s ':zdot:update' subtree-remote _subtree_spec; then
+        REPLY=subtree; return 0
     fi
 
     # Plain tracked subdir — parent repo manages updates
@@ -443,9 +518,11 @@ _zdot_update_cleanup() {
         _zdot_update_find_dotfiler_scripts \
         _zdot_update_detect_deployment \
         _zdot_update_apply \
-        _zdot_update_handle_submodule_ptr \
+        _zdot_update_check_foreign_staged \
+        _zdot_update_commit_parent \
         _zdot_update_standalone_apply \
         _zdot_update_submodule_apply \
+        _zdot_update_subtree_apply \
         _zdot_update_has_typed_input \
         2>/dev/null
     # Note: _zdot_update_handle_update itself is kept alive — it is the hook body.
