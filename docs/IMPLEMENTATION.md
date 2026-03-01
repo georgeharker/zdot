@@ -2093,7 +2093,8 @@ ordering constraints by name label; the actual DAG edges are injected when
 ### Global Arrays
 
 ```
-_ZDOT_DEFER_ORDER_PAIRS    (array): flat list of name pairs [from to from to ...]
+_ZDOT_DEFER_ORDER_DEPENDENCIES    (array): flat list of triplets [ctx from to ctx from to ...]
+                           stride-3: (context_spec, from_name, to_name)
 _ZDOT_DEFER_ORDER_WARNINGS (array): warnings generated during edge injection
 ```
 
@@ -2103,6 +2104,7 @@ Both declared in `core/hooks.zsh`.
 
 ```zsh
 zdot_defer_order name-A name-B name-C
+zdot_defer_order --context interactive name-A name-B name-C
 ```
 
 Records all pairwise (i < j) ordering constraints: A→B, A→C, B→C. This means
@@ -2110,7 +2112,12 @@ A must complete before B, and B before C.
 
 - Arguments are name labels (as assigned via `--name`, or function names as
   fallback).
-- Pairs are stored in `_ZDOT_DEFER_ORDER_PAIRS` as flat adjacent elements.
+- The optional `--context <ctx>` flag restricts the ordering constraint to the
+  given context (e.g., `interactive`). When omitted, the constraint applies in
+  all contexts.
+- Triplets are stored in `_ZDOT_DEFER_ORDER_DEPENDENCIES` as flat stride-3 elements:
+  `(context_spec, from_name, to_name)`. When `--context` is omitted,
+  `context_spec` is the empty string `""`.
 - No validation is done at call time; validation and edge injection occur inside
   `zdot_build_execution_plan`.
 
@@ -2118,15 +2125,22 @@ A must complete before B, and B before C.
 
 During plan construction:
 
-1. Each pair from `_ZDOT_DEFER_ORDER_PAIRS` is resolved to hook_ids via
-   `_ZDOT_HOOK_BY_NAME`.
-2. A synthetic DAG edge is added to the deferred dependency graph.
-3. A cycle check is run on the synthetic-edge-only subgraph (`_doo_adj`) using
+1. Each triplet from `_ZDOT_DEFER_ORDER_DEPENDENCIES` is read as
+   `(context_spec, from_name, to_name)`.
+2. **Context filtering (early skip):** If `context_spec` is non-empty and does
+   not intersect with `current_contexts`, the constraint is silently skipped —
+   it simply doesn't apply in this execution context.
+3. Each name is resolved to a hook_id via `_ZDOT_HOOK_BY_NAME`.
+   - If a name is **not found** in `_ZDOT_HOOK_BY_NAME` at all, the edge is
+     skipped with a warning (genuine error — unknown hook name).
+   - If a name resolves to a hook_id but the hook is **not active** in the
+     current context (not in `in_degree`), the edge is silently skipped (the
+     hook exists but isn't relevant here — no warning).
+4. A synthetic DAG edge is added to the deferred dependency graph.
+5. A cycle check is run on the synthetic-edge-only subgraph (`_doo_adj`) using
    DFS. If adding the edge would create a cycle, the edge is skipped and a
    warning is appended to `_ZDOT_DEFER_ORDER_WARNINGS`.
-4. If either hook is not active (not registered or not deferred), the edge is
-   skipped with a warning.
-5. Contradictory edges (A→B when B→A already exists) are also rejected.
+6. Contradictory edges (A→B when B→A already exists) are also rejected.
 
 The technique used is a **bridge-phase** injection: a synthetic intermediate
 phase is created to carry the ordering constraint through the existing

@@ -22,7 +22,7 @@ typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are de
 typeset -g _ZDOT_CURRENT_HOOK_FUNC   # Set by hook runner during execution; empty between hooks
 typeset -gA _ZDOT_HOOK_NAMES         # hook_id -> user-assigned name label
 typeset -gA _ZDOT_HOOK_BY_NAME       # name label -> hook_id
-typeset -ga _ZDOT_DEFER_ORDER_PAIRS  # flat: from_name to_name from_name to_name ...
+typeset -ga _ZDOT_DEFER_ORDER_DEPENDENCIES  # flat stride-3: ctx_spec from_name to_name ctx_spec from_name to_name ...
 typeset -ga _ZDOT_DEFER_ORDER_WARNINGS      # warnings accumulated during edge injection
 typeset -ga _ZDOT_FORCED_DEFERRED_WARNINGS  # warnings for hooks force-deferred due to deferred dependency
 typeset -ga _ZDOT_DEFERRED_HOOKS            # hook_ids marked as deferred (skip eager plan)
@@ -276,10 +276,21 @@ zdot_register_hook() {
 }
 
 # Register declarative ordering constraints between named hooks
-# Usage: zdot_defer_order <name-A> <name-B> [name-C ...]
+# Usage: zdot_defer_order [--context <ctx>] <name-A> <name-B> [name-C ...]
 # Generates all pairwise A→B, A→C, B→C pairs (full ordering chain)
+# --context <ctx>  Only apply this ordering in the given context (e.g. interactive).
+#                  If omitted, the ordering applies in every context where both hooks are active.
 # Must be called before zdot_build_execution_plan
 zdot_defer_order() {
+    local _ctx_spec=""
+    if [[ "${1:-}" == "--context" ]]; then
+        if [[ -z "${2:-}" ]]; then
+            zdot_error "zdot_defer_order: --context requires a value"
+            return 1
+        fi
+        _ctx_spec="$2"
+        shift 2
+    fi
     local -a names=("$@")
     if [[ ${#names[@]} -lt 2 ]]; then
         zdot_error "zdot_defer_order: requires at least 2 hook names"
@@ -288,7 +299,7 @@ zdot_defer_order() {
     local i j
     for (( i=1; i<${#names[@]}; i++ )); do
         for (( j=i+1; j<=${#names[@]}; j++ )); do
-            _ZDOT_DEFER_ORDER_PAIRS+=("${names[$i]}" "${names[$j]}")
+            _ZDOT_DEFER_ORDER_DEPENDENCIES+=("$_ctx_spec" "${names[$i]}" "${names[$j]}")
         done
     done
 }
@@ -452,17 +463,46 @@ zdot_build_execution_plan() {
     }
 
     local _pi=1
-    while [[ $_pi -lt ${#_ZDOT_DEFER_ORDER_PAIRS[@]} ]]; do
-        local _from_name="${_ZDOT_DEFER_ORDER_PAIRS[$_pi]}"
-        local _to_name="${_ZDOT_DEFER_ORDER_PAIRS[$(( _pi + 1 ))]}"
-        (( _pi += 2 ))
+    while [[ $_pi -le $(( ${#_ZDOT_DEFER_ORDER_DEPENDENCIES[@]} - 2 )) ]]; do
+        local _ctx_spec="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$_pi]}"
+        local _from_name="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$(( _pi + 1 ))]}"
+        local _to_name="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$(( _pi + 2 ))]}"
+        (( _pi += 3 ))
+
+        # Approach A: if this constraint specifies a context and it doesn't
+        # intersect the contexts we're building for, silently skip it — the
+        # constraint is simply irrelevant to this execution plan.
+        if [[ -n "$_ctx_spec" ]]; then
+            local _ctx_match=0
+            local _cc
+            for _cc in "${current_contexts[@]}"; do
+                if [[ "$_ctx_spec" == "$_cc" ]]; then
+                    _ctx_match=1
+                    break
+                fi
+            done
+            if (( ! _ctx_match )); then
+                continue
+            fi
+        fi
 
         local _hid_a="${_ZDOT_HOOK_BY_NAME[$_from_name]}"
         local _hid_b="${_ZDOT_HOOK_BY_NAME[$_to_name]}"
 
-        # Skip if either hook is not active in current context
+        # Approach B: distinguish "unknown name" from "not active in context".
+        # Case 1: name not found in _ZDOT_HOOK_BY_NAME at all — genuine error.
+        if [[ -z "$_hid_a" ]]; then
+            _ZDOT_DEFER_ORDER_WARNINGS+=("zdot_defer_order: '$_from_name'→'$_to_name': unknown hook name '$_from_name'; skipping")
+            continue
+        fi
+        if [[ -z "$_hid_b" ]]; then
+            _ZDOT_DEFER_ORDER_WARNINGS+=("zdot_defer_order: '$_from_name'→'$_to_name': unknown hook name '$_to_name'; skipping")
+            continue
+        fi
+
+        # Case 2: hook exists but isn't active in current context — expected
+        # for cross-context hooks; silently skip (no warning).
         if [[ -z "${in_degree[$_hid_a]+x}" || -z "${in_degree[$_hid_b]+x}" ]]; then
-            _ZDOT_DEFER_ORDER_WARNINGS+=("zdot_defer_order: '$_from_name'→'$_to_name': one or both hooks not active in current context; skipping")
             continue
         fi
 
@@ -1335,15 +1375,18 @@ _zdot_defer_record() {
 
 # Display the Defer Order Constraints section (shared by hooks_list and phases_list).
 _zdot_defer_order_display() {
-    if [[ ${#_ZDOT_DEFER_ORDER_PAIRS[@]} -gt 0 ]]; then
+    if [[ ${#_ZDOT_DEFER_ORDER_DEPENDENCIES[@]} -gt 0 ]]; then
         zdot_report "Defer Order Constraints:"
         zdot_info ""
         local _pi=1
-        while [[ $_pi -lt ${#_ZDOT_DEFER_ORDER_PAIRS[@]} ]]; do
-            local _fn="${_ZDOT_DEFER_ORDER_PAIRS[$_pi]}"
-            local _tn="${_ZDOT_DEFER_ORDER_PAIRS[$(( _pi + 1 ))]}"
-            (( _pi += 2 ))
-            zdot_info "  %F{cyan}${_fn}%f → %F{cyan}${_tn}%f"
+        while [[ $_pi -le $(( ${#_ZDOT_DEFER_ORDER_DEPENDENCIES[@]} - 2 )) ]]; do
+            local _ctx="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$_pi]}"
+            local _fn="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$(( _pi + 1 ))]}"
+            local _tn="${_ZDOT_DEFER_ORDER_DEPENDENCIES[$(( _pi + 2 ))]}"
+            (( _pi += 3 ))
+            local _ctx_label=""
+            [[ -n "$_ctx" ]] && _ctx_label=" %F{yellow}[ctx: ${_ctx}]%f"
+            zdot_info "  %F{cyan}${_fn}%f → %F{cyan}${_tn}%f${_ctx_label}"
         done
         zdot_info ""
     fi

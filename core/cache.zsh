@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="16"         # Cache format version (bump to invalidate stale plans)
+typeset -g _ZDOT_CACHE_VERSION="17"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -351,9 +351,9 @@ zdot_cache_save_plan() {
         done
 
         echo ""
-        echo "# Defer order pairs"
-        echo "typeset -ga _ZDOT_DEFER_ORDER_PAIRS=("
-        for _dop in "${_ZDOT_DEFER_ORDER_PAIRS[@]}"; do
+        echo "# Defer order dependencies (stride-3: context_spec from_name to_name)"
+        echo "typeset -ga _ZDOT_DEFER_ORDER_DEPENDENCIES=("
+        for _dop in "${_ZDOT_DEFER_ORDER_DEPENDENCIES[@]}"; do
             echo "    ${(q)_dop}"
         done
         echo ")"
