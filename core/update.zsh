@@ -55,15 +55,15 @@ _zdot_update_find_dotfiler_scripts() {
     # 2. Inside a parent repo that already has dotfiler scripts
     local _root
     _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
-    if [[ -n "$_root" && -f "$_root/scripts/setup.sh" && -f "$_root/scripts/update.sh" ]]; then
-        REPLY="$_root/scripts"; return 0
+    if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
+        REPLY="$_root/.nounpack/dotfiler"; return 0
     fi
 
     # 3. Plugin cache path — clone on demand if not yet present.
     # zdot_use_bundle already registered this repo at source time (for opted-in users)
     # so the clone will not be treated as an orphan by zdot_clean_plugins.
     local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
-    _candidate="$_cache/georgeharker/dotfiler/scripts"
+    _candidate="$_cache/georgeharker/dotfiler"
     if [[ ! -f "$_candidate/setup.sh" || ! -f "$_candidate/update.sh" ]]; then
         zdot_info "zdot: cloning dotfiler for update scripts..."
         zdot_plugin_clone "georgeharker/dotfiler" 2>/dev/null

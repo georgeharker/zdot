@@ -7,19 +7,19 @@ _dotfiler_init() {
 
     # Compile dotfiler scripts to .zwc for faster sourcing
     if zdot_cache_is_enabled; then
-        local _dotfiler_scripts="$HOME/.dotfiles/.nounpack/scripts"
+        local _dotfiler_scripts="$HOME/.dotfiles/.nounpack/dotfiler"
         zdot_cache_compile_functions "$_dotfiler_scripts" '*.sh'
         zdot_cache_compile_functions "$_dotfiler_scripts" '*.zsh'
         unset _dotfiler_scripts
     fi
 
     # Source dotfiles update checker (requires GH_TOKEN from 1Password)
-    [[ -f "$HOME/.dotfiles/.nounpack/scripts/check_update.sh" ]] && \
-        source "$HOME/.dotfiles/.nounpack/scripts/check_update.sh"
+    [[ -f "$HOME/.dotfiles/.nounpack/dotfiler/check_update.sh" ]] && \
+        source "$HOME/.dotfiles/.nounpack/dotfiler/check_update.sh"
 
     # Source dotfiles completions
-    [[ -f "$HOME/.dotfiles/.nounpack/scripts/completions.zsh" ]] && \
-        source "$HOME/.dotfiles/.nounpack/scripts/completions.zsh"
+    [[ -f "$HOME/.dotfiles/.nounpack/dotfiler/completions.zsh" ]] && \
+        source "$HOME/.dotfiles/.nounpack/dotfiler/completions.zsh"
 }
 
 # Register hook: requires secrets for GH_TOKEN
