@@ -52,9 +52,15 @@ _zdot_update_find_dotfiler_scripts() {
         REPLY=$_candidate; return 0
     fi
 
-    # 2. Inside a parent repo that already has dotfiler scripts
+    # 2. Inside a parent repo that already has dotfiler scripts.
+    # Use --show-superproject-working-tree: when ZDOT_DIR is a submodule,
+    # --show-toplevel returns the submodule's own root (not the parent), so
+    # the .nounpack/dotfiler lookup would fail.  The superproject option
+    # gives us the actual parent root directly.
     local _root
-    _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+    _root=$(git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+    # Fall back to --show-toplevel for standalone / subtree / subdir layouts
+    [[ -z "$_root" ]] && _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
     fi
@@ -154,7 +160,10 @@ _zdot_update_standalone_apply() {
 _zdot_update_submodule_apply() {
     # Same order: compute range pre-update, update, then apply.
     local _parent_root _zdot_real _parent_real _rel _remote _branch _old _new
-    _parent_root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null) || return 1
+    # Use --show-superproject-working-tree: ZDOT_DIR is a submodule, so
+    # --show-toplevel returns the submodule root not the parent repo root.
+    _parent_root=$(git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null) || return 1
+    [[ -z "$_parent_root" ]] && return 1
     _zdot_real=${ZDOT_DIR:A}
     _parent_real=${_parent_root:A}
     _rel=${_zdot_real#${_parent_real}/}
@@ -178,6 +187,8 @@ _zdot_update_subtree_apply() {
     # Subtree pull: fetch from the configured remote/branch, squash-merge
     # into the parent repo, then apply zdot's changed-file hooks.
     local _parent_root _zdot_real _parent_real _rel _subtree_spec _remote _branch _old _new
+    # For subtree topology ZDOT_DIR is not a submodule, so --show-toplevel
+    # correctly returns the parent repo root here.
     _parent_root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null) || return 1
     _zdot_real=${ZDOT_DIR:A}
     _parent_real=${_parent_root:A}
