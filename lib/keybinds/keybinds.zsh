@@ -4,8 +4,10 @@
 
 _keybinds_init() {
     # Word navigation
-    bindkey '[C' forward-word
-    bindkey '[D' backward-word
+    bindkey '^[C' forward-word
+    bindkey '^[D' backward-word
+    bindkey '^[[H' beginning-of-line
+    bindkey '^[[F' end-of-line
 }
 
 # Register hook: requires plugins to be loaded and post-configured
