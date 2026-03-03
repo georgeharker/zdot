@@ -2,7 +2,7 @@
 # zdot update implementation — pure functions, no side effects at source time.
 #
 # Callers must:
-#   1. Set ZDOT_DIR before sourcing this file.
+#   1. Set _ZDOT_BASE_DIR before sourcing this file.
 #   2. Source update_core.sh (provides _update_core_* helpers) before sourcing
 #      this file, OR ensure it is already loaded in the current shell.
 #   3. Define the logging shims  warn / info / error / verbose  before sourcing
@@ -33,10 +33,10 @@ _zdot_update_find_dotfiler_scripts() {
 
     # 2. Inside a parent repo that already has dotfiler scripts.
     #    _update_core_get_parent_root handles the superproject-then-toplevel
-    #    fallback so we get the real parent root whether ZDOT_DIR is a
+    #    fallback so we get the real parent root whether _ZDOT_BASE_DIR is a
     #    submodule, standalone, subtree, or subdir repo.
     local _root
-    _update_core_get_parent_root "$ZDOT_DIR"; _root=$REPLY
+    _update_core_get_parent_root "$_ZDOT_BASE_DIR"; _root=$REPLY
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" \
                        && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
@@ -91,7 +91,7 @@ _zdot_update_apply() {
     fi
 
     "$_scripts_dir/update.sh" \
-        --repo-dir "$ZDOT_DIR" \
+        --repo-dir "$_ZDOT_BASE_DIR" \
         --link-dest "$_destdir" \
         --range "${_old}..${_new}"
 }
@@ -102,13 +102,13 @@ _zdot_update_apply() {
 
 _zdot_update_standalone_apply() {
     local _remote _branch _old _new
-    _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
-    _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
-    _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
-    _new=$(git -C "$ZDOT_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
+    _remote=$(_update_core_get_default_remote "$_ZDOT_BASE_DIR")
+    _branch=$(_update_core_get_default_branch "$_ZDOT_BASE_DIR" "$_remote")
+    _old=$(git -C "$_ZDOT_BASE_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    _new=$(git -C "$_ZDOT_BASE_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
     [[ "$_old" == "$_new" ]] && return 0
 
-    git -C "$ZDOT_DIR" pull -q "$_remote" "$_branch" || {
+    git -C "$_ZDOT_BASE_DIR" pull -q "$_remote" "$_branch" || {
         warn "zdot: update failed — possibly modified files in the way"
         return 1
     }
@@ -118,15 +118,15 @@ _zdot_update_standalone_apply() {
 
 _zdot_update_submodule_apply() {
     local _zdot_real _parent_real _rel _remote _branch _old _new
-    # Returns 0 only when ZDOT_DIR is a registered submodule.
-    _update_core_get_parent_root "$ZDOT_DIR" || return 1
-    _zdot_real=${ZDOT_DIR:A}
+    # Returns 0 only when _ZDOT_BASE_DIR is a registered submodule.
+    _update_core_get_parent_root "$_ZDOT_BASE_DIR" || return 1
+    _zdot_real=${_ZDOT_BASE_DIR:A}
     _parent_real=$REPLY
     _rel=${_zdot_real#${_parent_real}/}
-    _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
-    _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
-    _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
-    _new=$(git -C "$ZDOT_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
+    _remote=$(_update_core_get_default_remote "$_ZDOT_BASE_DIR")
+    _branch=$(_update_core_get_default_branch "$_ZDOT_BASE_DIR" "$_remote")
+    _old=$(git -C "$_ZDOT_BASE_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    _new=$(git -C "$_ZDOT_BASE_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
     [[ "$_old" == "$_new" ]] && return 0
 
     git -C "$_parent_real" submodule update --remote -- "$_rel" || {
@@ -146,10 +146,10 @@ _zdot_update_subtree_apply() {
     local _parent_root _zdot_real _parent_real _rel
     local _subtree_spec _remote _branch _old _new
 
-    # For subtree topology ZDOT_DIR is NOT a submodule, so --show-toplevel
+    # For subtree topology _ZDOT_BASE_DIR is NOT a submodule, so --show-toplevel
     # correctly returns the parent repo root.
-    _parent_root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null) || return 1
-    _zdot_real=${ZDOT_DIR:A}
+    _parent_root=$(git -C "$_ZDOT_BASE_DIR" rev-parse --show-toplevel 2>/dev/null) || return 1
+    _zdot_real=${_ZDOT_BASE_DIR:A}
     _parent_real=${_parent_root:A}
     _rel=${_zdot_real#${_parent_real}/}
 
@@ -164,7 +164,7 @@ _zdot_update_subtree_apply() {
         return 1
     }
 
-    _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    _old=$(git -C "$_ZDOT_BASE_DIR" rev-parse HEAD 2>/dev/null) || return 1
 
     git -C "$_parent_real" subtree pull --prefix="$_rel" "$_remote" "$_branch" --squash || {
         warn "zdot: subtree pull failed"
@@ -173,18 +173,18 @@ _zdot_update_subtree_apply() {
 
     # Record the remote SHA so future is_available_subtree can compare.
     local _remote_url _pulled_sha
-    _remote_url=$(git -C "$ZDOT_DIR" config "remote.${_remote}.url" 2>/dev/null)
+    _remote_url=$(git -C "$_ZDOT_BASE_DIR" config "remote.${_remote}.url" 2>/dev/null)
     _pulled_sha=$(_update_core_resolve_remote_sha "$_remote_url" "$_branch" 2>/dev/null)
-    [[ -n "$_pulled_sha" ]] && _update_core_write_sha_marker "$ZDOT_DIR" "$_pulled_sha"
+    [[ -n "$_pulled_sha" ]] && _update_core_write_sha_marker "$_ZDOT_BASE_DIR" "$_pulled_sha"
 
-    _new=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    _new=$(git -C "$_ZDOT_BASE_DIR" rev-parse HEAD 2>/dev/null) || return 1
     [[ "$_old" == "$_new" ]] && return 0
 
     _zdot_update_apply "$_old" "$_new"
 
     local _itc_mode; zstyle -s ':zdot:update' in-tree-commit _itc_mode
     # Stage SHA marker alongside the subtree pointer when committing.
-    _update_core_sha_marker_path "$ZDOT_DIR"
+    _update_core_sha_marker_path "$_ZDOT_BASE_DIR"
     local _marker_path=$REPLY
     if [[ "$_itc_mode" != "none" && -f "$_marker_path" ]]; then
         git -C "$_parent_real" add "$_marker_path" 2>/dev/null
@@ -207,9 +207,9 @@ _zdot_update_handle_update() {
     [[ "${_mode:-disabled}" == disabled ]] && return 0
 
     # 2. Early-exit guards
-    [[ -n "$ZDOT_DIR" && -d "$ZDOT_DIR" ]] || return 0
+    [[ -n "$_ZDOT_BASE_DIR" && -d "$_ZDOT_BASE_DIR" ]] || return 0
     command -v git &>/dev/null || return 0
-    git -C "$ZDOT_DIR" rev-parse --is-inside-work-tree &>/dev/null || return 0
+    git -C "$_ZDOT_BASE_DIR" rev-parse --is-inside-work-tree &>/dev/null || return 0
 
     # 3. Acquire lock (prevents concurrent shells racing)
     local _lock_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/update.lock"
@@ -229,7 +229,7 @@ _zdot_update_handle_update() {
     # 5. Detect topology; check for update
     local _subtree_spec
     zstyle -s ':zdot:update' subtree-remote _subtree_spec
-    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"
+    _update_core_detect_deployment "$_ZDOT_BASE_DIR" "$_subtree_spec"
     local _deploy=$REPLY
 
     local _avail
@@ -238,13 +238,13 @@ _zdot_update_handle_update() {
         local _st_branch=${_subtree_spec#* }
         [[ "$_st_branch" == "$_st_remote" ]] && _st_branch=""
         [[ -z "$_st_branch" ]] && \
-            _st_branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_st_remote")
+            _st_branch=$(_update_core_get_default_branch "$_ZDOT_BASE_DIR" "$_st_remote")
         local _st_remote_url
-        _st_remote_url=$(git -C "$ZDOT_DIR" config "remote.${_st_remote}.url" 2>/dev/null)
-        _update_core_is_available_subtree "$ZDOT_DIR" "$_st_remote_url" "$_st_branch"
+        _st_remote_url=$(git -C "$_ZDOT_BASE_DIR" config "remote.${_st_remote}.url" 2>/dev/null)
+        _update_core_is_available_subtree "$_ZDOT_BASE_DIR" "$_st_remote_url" "$_st_branch"
         _avail=$?
     else
-        _update_core_is_available "$ZDOT_DIR"
+        _update_core_is_available "$_ZDOT_BASE_DIR"
         _avail=$?
     fi
 
@@ -275,7 +275,7 @@ _zdot_update_handle_update() {
     # 8. Dispatch by mode
     case $_mode in
         reminder)
-            zdot_info "zdot: update available (run: git -C \$ZDOT_DIR pull)"
+            zdot_info "zdot: update available (run: git -C \$_ZDOT_BASE_DIR pull)"
             _update_core_write_timestamp "$_ts" 0 ""
             ;;
         auto)
