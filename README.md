@@ -1,5 +1,5 @@
 
-![](docs/images/zdot.dot)
+![](docs/images/zdot.png)
 
 # zdot - Modular Zsh Configuration Framework
 
