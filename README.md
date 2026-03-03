@@ -7,6 +7,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 
 ## Table of Contents
 
+- [Motivation](#motivation)
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Creating Modules](#creating-modules)
@@ -15,6 +16,31 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 - [Hook System](#hook-system)
 - [Debugging](#debugging)
 - [Best Practices](#best-practices)
+
+## Motivation
+
+There are some fantastic, fast plugin managers out there - so why write another?
+
+Over time, my shell config increased in complexity.  I found that the traditional plugin managers wanted to be a single invocation, but often you had to configure plugins prior to loading, then do something with them after they were loaded:
+
+````
+#!/bin/zsh
+
+# Setup options
+zstyle...
+ENV_VAR=
+
+# invoke plugin manager
+antidote ...
+
+# Use your plugins
+````
+
+Already the logic for using a plugin was split into three places - init, load and use.
+
+As I tried to do more in my shell setup - bring in and set up shell secrets with onepassword, manage late-loading for `nvm` which is slow, ensure ssh uses onepassword... I found that there were interdependencies between plugin uses and between sections of my `.zshrc` and those became hard to manage, and were implicit in terms of the ordering in the file.
+
+Eventually this felt fragile.
 
 ## Overview
 
