@@ -62,6 +62,19 @@ function uses_brew() {      <----
 # Use your plugins
 ````
 
+more-over, perhaps some other function relies on the op secrets functions etc.. etc..
+
+Things that didn't work well:
+
+- single location for loading all plugins
+- init logic separate from usage logic
+- no clear dependencies
+
+What did work
+
+- compilation of plugins to zwc bytecode
+- cloning and pulling of plugins
+
 ## Overview
 
 ### Key Features
