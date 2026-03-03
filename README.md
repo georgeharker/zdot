@@ -1,3 +1,6 @@
+
+![](docs/images/zdot.dot)
+
 # zdot - Modular Zsh Configuration Framework
 
 zdot is a hook-based, dependency-aware configuration system for Zsh that makes it easy to organize your shell environment into modular, reusable components.
