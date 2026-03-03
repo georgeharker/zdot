@@ -42,6 +42,26 @@ As I tried to do more in my shell setup - bring in and set up shell secrets with
 
 Eventually this felt fragile.
 
+
+````
+#!/bin/zsh
+
+# Setup options
+zstyle...
+ENV_VAR=
+
+# setup brew paths          -----
+                                 |
+# invoke plugin manager          |
+antidote ...                <----|
+                                 |
+function uses_brew() {      <----
+
+}
+
+# Use your plugins
+````
+
 ## Overview
 
 ### Key Features
