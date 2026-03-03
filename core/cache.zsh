@@ -138,7 +138,7 @@ zdot_cache_compile_all() {
     local failed=0
 
     # Compile core modules
-    local core_dir="${_ZDOT_BASE_DIR}/core"
+    local core_dir="${ZDOT_DIR}/core"
     if [[ -d "$core_dir" ]]; then
         for core_file in "$core_dir"/*.zsh(N); do
             if [[ -f "$core_file" ]]; then
@@ -433,7 +433,7 @@ load_cache() {
 
     # Check if any source files are newer than the plan
     # This ensures cache invalidation when modules change
-    local core_dir="${_ZDOT_BASE_DIR}/core"
+    local core_dir="${ZDOT_DIR}/core"
     local lib_dir="${_ZDOT_LIB_DIR}"
 
     for core_file in "$core_dir"/*.zsh(N); do
@@ -452,7 +452,7 @@ load_cache() {
         fi
     done
 
-    local zdot_entry="${_ZDOT_BASE_DIR}/zdot.zsh"
+    local zdot_entry="${ZDOT_DIR}/zdot.zsh"
     if [[ -f "$zdot_entry" ]] && zdot_is_newer_or_missing "$zdot_entry" "$plan_file"; then
         zdot_verbose "zdot: cache: invalidated — zdot.zsh modified"
         return 1
@@ -520,7 +520,7 @@ zdot_cache_invalidate() {
     fi
 
     # Remove co-located .zwc files from core and lib directories
-    local core_dir="${_ZDOT_BASE_DIR}/core"
+    local core_dir="${ZDOT_DIR}/core"
     local lib_dir="${_ZDOT_LIB_DIR}"
 
     # Remove compiled core files
@@ -576,8 +576,8 @@ zdot_cache_stats() {
     local core_count=0
     local lib_count=0
     
-    if [[ -d "${_ZDOT_BASE_DIR}/core" ]]; then
-        core_count=$(find "${_ZDOT_BASE_DIR}/core" -name "*.zwc" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ -d "${ZDOT_DIR}/core" ]]; then
+        core_count=$(find "${ZDOT_DIR}/core" -name "*.zwc" 2>/dev/null | wc -l | tr -d ' ')
     fi
     
     if [[ -d "${_ZDOT_LIB_DIR}" ]]; then

@@ -305,7 +305,7 @@ zdot_cache_invalidate() {
         rm -rf "${cache_dir}/plans"
         zdot_cache_create_dirs
     fi
-    local core_dir="${_ZDOT_BASE_DIR}/core"
+    local core_dir="${ZDOT_DIR}/core"
     local lib_dir="${_ZDOT_LIB_DIR}"
     if [[ -d "$core_dir" ]]; then
         for zwc_file in "$core_dir"/*.zwc(N); do

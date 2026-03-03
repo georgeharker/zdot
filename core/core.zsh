@@ -10,14 +10,14 @@
 # This file is at: .config/zsh/zdot/core/core.zsh
 # NOTE: Using :a (absolute path without resolving symlinks) instead of :A
 # (which would follow symlinks to the real path). This is intentional:
-# _ZDOT_BASE_DIR must point at the linktree path (e.g. ~/.config/zdot)
+# ZDOT_DIR must point at the linktree path (e.g. ~/.config/zdot)
 # rather than the backing store (e.g. ~/.dotfiles/.config/zdot), so that
 # any paths derived from it remain consistent with how the user addresses
-# the directory. Mtime comparisons that use _ZDOT_BASE_DIR pass through
+# the directory. Mtime comparisons that use ZDOT_DIR pass through
 # zdot_is_newer_or_missing, which applies :A at comparison time.
 _zdot_this_script_file="${${(%):-%x}:a}"
 _zdot_base_dir="${_zdot_this_script_file:h:h}"     # .../zdot (go up twice from core/)
-typeset -g _ZDOT_BASE_DIR="${_zdot_base_dir}"              # Export as global
+typeset -g ZDOT_DIR="${_zdot_base_dir}"              # Export as global
 typeset -g _ZDOT_LIB_DIR="${_zdot_base_dir}/lib"            # .../zdot/lib
 unset _zdot_this_script_file _zdot_base_dir
 

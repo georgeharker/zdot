@@ -69,6 +69,7 @@ verbose() { [[ -n "${DOTFILES_DEBUG:-}" ]] && print "zdot-hook[v]: $*"; }
 # ---------------------------------------------------------------------------
 # Source shared implementation
 # ---------------------------------------------------------------------------
+# update-impl.zsh uses $ZDOT_DIR; bridge from the hook's $ZDOT_DIR.
 source "${ZDOT_DIR}/core/update-impl.zsh" || exit 2
 
 # ---------------------------------------------------------------------------

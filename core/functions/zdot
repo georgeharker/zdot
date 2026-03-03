@@ -322,7 +322,7 @@ function zdot() {
             zdot_report "zdot info"
             zdot_info ""
             zdot_info "Paths:"
-            zdot_info "  base:  ${_ZDOT_BASE_DIR:-<unset>}"
+            zdot_info "  base:  ${ZDOT_DIR:-<unset>}"
             zdot_info "  lib:   ${_ZDOT_LIB_DIR:-<unset>}"
             zdot_info "  cache: ${_ZDOT_CACHE_DIR:-<unset>}"
             zdot_info ""
@@ -383,7 +383,7 @@ function zdot() {
 
         # ── bench ─────────────────────────────────────────────────────────
         bench)
-            local bench_script="${_ZDOT_BASE_DIR}/scripts/benchmark.zsh"
+            local bench_script="${ZDOT_DIR}/scripts/benchmark.zsh"
             if [[ ! -f "$bench_script" ]]; then
                 zdot_error "zdot bench: benchmark script not found: $bench_script"
                 return 1
@@ -393,7 +393,7 @@ function zdot() {
 
         # ── profile ───────────────────────────────────────────────────────
         profile)
-            local profile_script="${_ZDOT_BASE_DIR}/scripts/profile.zsh"
+            local profile_script="${ZDOT_DIR}/scripts/profile.zsh"
             if [[ ! -f "$profile_script" ]]; then
                 zdot_error "zdot profile: profile script not found: $profile_script"
                 return 1
