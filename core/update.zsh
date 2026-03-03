@@ -101,7 +101,7 @@ _zdot_update_install_dotfiler_hook() {
     (( ${+functions[_update_core_get_parent_root]} )) || return 0
 
     _update_core_get_parent_root "$_ZDOT_BASE_DIR"
-    local _parent_root=$REPLY
+    local _parent_root=${reply[1]}
     [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.sh" ]] || return 0
 
     local _hooks_dir

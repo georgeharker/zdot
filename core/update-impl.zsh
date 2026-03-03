@@ -36,7 +36,7 @@ _zdot_update_find_dotfiler_scripts() {
     #    fallback so we get the real parent root whether _ZDOT_BASE_DIR is a
     #    submodule, standalone, subtree, or subdir repo.
     local _root
-    _update_core_get_parent_root "$_ZDOT_BASE_DIR"; _root=$REPLY
+    _update_core_get_parent_root "$_ZDOT_BASE_DIR"; _root=${reply[1]}
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" \
                        && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
@@ -118,10 +118,11 @@ _zdot_update_standalone_apply() {
 
 _zdot_update_submodule_apply() {
     local _zdot_real _parent_real _rel _remote _branch _old _new
-    # Returns 0 only when _ZDOT_BASE_DIR is a registered submodule.
-    _update_core_get_parent_root "$_ZDOT_BASE_DIR" || return 1
+    # Only applies when _ZDOT_BASE_DIR is a registered submodule.
+    _update_core_get_parent_root "$_ZDOT_BASE_DIR"
+    [[ "${reply[2]}" == superproject ]] || return 1
     _zdot_real=${_ZDOT_BASE_DIR:A}
-    _parent_real=$REPLY
+    _parent_real=${reply[1]}
     _rel=${_zdot_real#${_parent_real}/}
     _remote=$(_update_core_get_default_remote "$_ZDOT_BASE_DIR")
     _branch=$(_update_core_get_default_branch "$_ZDOT_BASE_DIR" "$_remote")
