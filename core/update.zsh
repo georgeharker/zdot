@@ -204,12 +204,30 @@ _zdot_update_subtree_apply() {
         return 1
     }
 
+    # Record the remote SHA we just pulled so future
+    # _update_core_is_available_subtree can compare against it.
+    local _remote_url _pulled_sha
+    _remote_url=$(git -C "$ZDOT_DIR" config "remote.${_remote}.url" 2>/dev/null)
+    _pulled_sha=$(_update_core_resolve_remote_sha "$_remote_url" "$_branch" 2>/dev/null)
+    if [[ -n "$_pulled_sha" ]]; then
+        _update_core_write_sha_marker "$ZDOT_DIR" "$_pulled_sha"
+    fi
+
     # Snapshot post-pull HEAD
     _new=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
     [[ "$_old" == "$_new" ]] && return 0
 
     _zdot_update_apply "$_old" "$_new"
     local _itc_mode; zstyle -s ':zdot:update' in-tree-commit _itc_mode
+
+    # Stage the SHA marker alongside the subtree when committing
+    # to the parent repo.
+    _update_core_sha_marker_path "$ZDOT_DIR"
+    local _marker_path=$REPLY
+    if [[ "$_itc_mode" != "none" && -f "$_marker_path" ]]; then
+        git -C "$_parent_real" add "$_marker_path" 2>/dev/null
+    fi
+
     _update_core_commit_parent "$_parent_real" "$_rel" "subtree updated" "zdot: update subtree ${_rel}" "$_itc_mode"
 }
 
@@ -244,8 +262,27 @@ _zdot_update_handle_update() {
     fi
 
     # 5. Check for update
-    _update_core_is_available "$ZDOT_DIR"
-    local _avail=$?
+    # Detect topology early so subtree deployments use the marker-based check
+    local _subtree_spec
+    zstyle -s ':zdot:update' subtree-remote _subtree_spec
+    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"   # sets REPLY
+    local _deploy=$REPLY
+
+    local _avail
+    if [[ "$_deploy" == subtree && -n "$_subtree_spec" ]]; then
+        local _st_remote=${_subtree_spec%% *}
+        local _st_branch=${_subtree_spec#* }
+        [[ "$_st_branch" == "$_st_remote" ]] && _st_branch=""
+        [[ -z "$_st_branch" ]] && \
+            _st_branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_st_remote")
+        local _st_remote_url
+        _st_remote_url=$(git -C "$ZDOT_DIR" config "remote.${_st_remote}.url" 2>/dev/null)
+        _update_core_is_available_subtree "$ZDOT_DIR" "$_st_remote_url" "$_st_branch"
+        _avail=$?
+    else
+        _update_core_is_available "$ZDOT_DIR"
+        _avail=$?
+    fi
     if (( _avail != 0 )); then
         # 2 = error fetching; 1 = up to date — either way, write timestamp and exit
         _update_core_write_timestamp "$_ts" $(( _avail == 2 ? _avail : 0 )) ""
@@ -253,13 +290,7 @@ _zdot_update_handle_update() {
         return 0
     fi
 
-    # 6. Detect deployment topology
-    local _subtree_spec
-    zstyle -s ':zdot:update' subtree-remote _subtree_spec
-    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"   # sets REPLY
-    local _deploy=$REPLY
-
-    # 6a. Subdir mode — zdot is a plain tracked subdir of a parent repo
+    # 6. Subdir mode — zdot is a plain tracked subdir of a parent repo
     #     (e.g. dotfiler); updates are the parent repo's responsibility.
     if [[ "$_deploy" == subdir ]]; then
         zdot_info "zdot: update available but zdot is a tracked subdir of a parent repo."
