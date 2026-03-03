@@ -75,7 +75,9 @@ source "${ZDOT_DIR}/core/update-impl.zsh" || exit 2
 # check-update verb
 # ---------------------------------------------------------------------------
 _zdot_hook_check_update() {
-    _update_core_is_available "$ZDOT_DIR"
+    # allow_diverged=1: dotfiler will call apply-update on rc=0, and git pull
+    # handles diverged histories via merge — so report diverged as available.
+    _update_core_is_available "$ZDOT_DIR" "" 1
 }
 
 # ---------------------------------------------------------------------------

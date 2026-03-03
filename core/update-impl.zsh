@@ -245,7 +245,8 @@ _zdot_update_handle_update() {
         _update_core_is_available_subtree "$_ZDOT_BASE_DIR" "$_st_remote_url" "$_st_branch"
         _avail=$?
     else
-        _update_core_is_available "$_ZDOT_BASE_DIR"
+        local _allow_div; [[ "$_mode" == auto ]] && _allow_div=1 || _allow_div=0
+        _update_core_is_available "$_ZDOT_BASE_DIR" "" "$_allow_div"
         _avail=$?
     fi
 
