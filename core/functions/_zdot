@@ -9,6 +9,7 @@ function _zdot() {
         'module:module management (list, user-list, user-clone)'
         'completion:shell completion management (refresh)'
         'secret:secret management (refresh)'
+        'update:self-update management (check-updates, apply)'
         'info:show zdot environment and runtime state'
         'debug:dump full internal state'
         'bench:run shell startup benchmark'
@@ -57,6 +58,12 @@ function _zdot() {
     verbs_secret=(
         'refresh:pull latest secrets from 1Password into the shell'
         'help:show help for secret'
+    )
+
+    verbs_update=(
+        'check-updates:check for available updates'
+        'apply:fetch and apply updates now'
+        'help:show help for update'
     )
 
     verbs_help=(
@@ -114,6 +121,7 @@ function _zdot() {
                 module)     _describe -t verbs 'module verb' verbs_module ;;
                 completion) _describe -t verbs 'completion verb' verbs_completion ;;
                 secret)     _describe -t verbs 'secret verb' verbs_secret ;;
+                update)     _describe -t verbs 'update verb' verbs_update ;;
                 help)       _describe -t nouns 'noun' verbs_help ;;
                 *)          ;;
             esac

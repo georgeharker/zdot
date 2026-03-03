@@ -96,6 +96,20 @@ function zdot() {
         zdot_info "  Runs scripts/profile.zsh. Additional args are forwarded."
     }
 
+    function _zdot_help_update() {
+        zdot_info "zdot update — self-update management"
+        zdot_info ""
+        zdot_info "  zdot update check-updates [--force]  Check for available updates"
+        zdot_info "  zdot update apply         [--force]  Fetch and apply updates now"
+        zdot_info ""
+        zdot_info "  --force  Bypass frequency check and run immediately"
+        zdot_info ""
+        zdot_info "  Update mode and behaviour are controlled via zstyle:"
+        zdot_info "    zstyle ':zdot:update' mode  disabled|reminder|prompt|auto"
+        zdot_info "    zstyle ':zdot:update' in-tree-commit  none|prompt|auto"
+        zdot_info "    zstyle ':zdot:update' link-tree  true|false"
+    }
+
     function _zdot_help_phase() {
         zdot_info "zdot phase — phase and tool phase inspection"
         zdot_info ""
@@ -120,6 +134,7 @@ function zdot() {
         zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
         zdot_info "  module     list | user-list | user-clone <name>"
+        zdot_info "  update     check-updates [--force] | apply [--force]"
         zdot_info "  completion refresh"
         zdot_info "  secret     refresh"
         zdot_info "  info"
@@ -256,6 +271,47 @@ function zdot() {
                 *)
                     zdot_error "zdot secret: unknown verb '${verb}'"
                     zdot_info "  verbs: refresh"
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        # ── update ────────────────────────────────────────────────────────
+        update)
+            local _force=""
+            [[ "${3:-}" == "--force" ]] && _force="--force"
+            case "$verb" in
+                check-updates)
+                    if (( ! ${+functions[_zdot_update_handle_update]} )); then
+                        zdot_error "zdot update: update hook not loaded (zstyle ':zdot:update' mode disabled?)"
+                        return 1
+                    fi
+                    # Bypass frequency check: remove timestamp so the epoch
+                    # test always passes, then call handle_update normally.
+                    local _ts="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/zdot_update"
+                    if [[ -n "$_force" && -f "$_ts" ]]; then
+                        command rm -f "$_ts"
+                    fi
+                    _zdot_update_handle_update
+                    ;;
+                apply)
+                    if (( ! ${+functions[_zdot_update_handle_update]} )); then
+                        zdot_error "zdot update: update hook not loaded (zstyle ':zdot:update' mode disabled?)"
+                        return 1
+                    fi
+                    local _ts="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/zdot_update"
+                    [[ -n "$_force" && -f "$_ts" ]] && command rm -f "$_ts"
+                    # Force auto mode for this invocation only
+                    local _saved_mode
+                    zstyle -s ':zdot:update' mode _saved_mode
+                    zstyle ':zdot:update' mode auto
+                    _zdot_update_handle_update
+                    zstyle ':zdot:update' mode "${_saved_mode:-disabled}"
+                    ;;
+                help|--help|-h) _zdot_help_update ;;
+                *)
+                    zdot_error "zdot update: unknown verb '${verb}'"
+                    zdot_info "  verbs: check-updates [--force] | apply [--force]"
                     return 1
                     ;;
             esac
