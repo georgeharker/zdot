@@ -105,14 +105,14 @@ _zdot_update_standalone_apply() {
     _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
     _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
     _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
-    _new=$(git -C "$ZDOT_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
-    [[ "$_old" == "$_new" ]] && return 0
 
     git -C "$ZDOT_DIR" pull -q "$_remote" "$_branch" || {
         warn "zdot: update failed — possibly modified files in the way"
         return 1
     }
 
+    _new=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    [[ "$_old" == "$_new" ]] && return 0
     _zdot_update_apply "$_old" "$_new"
 }
 
@@ -124,16 +124,17 @@ _zdot_update_submodule_apply() {
     _zdot_real=${ZDOT_DIR:A}
     _parent_real=${reply[1]}
     _rel=${_zdot_real#${_parent_real}/}
-    _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
-    _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
+
+    # Capture HEAD before the fetch — _new is read after update --remote.
     _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
-    _new=$(git -C "$ZDOT_DIR" rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 1
-    [[ "$_old" == "$_new" ]] && return 0
 
     git -C "$_parent_real" submodule update --remote -- "$_rel" || {
         warn "zdot: submodule update failed"
         return 1
     }
+
+    _new=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 1
+    [[ "$_old" == "$_new" ]] && return 0
 
     _zdot_update_apply "$_old" "$_new"
     local _itc_mode; zstyle -s ':zdot:update' in-tree-commit _itc_mode
