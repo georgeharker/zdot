@@ -19,8 +19,8 @@ function _zdot() {
 
     # ── verbs per noun ───────────────────────────────────────────────────────
 
-    local -a verbs_cache verbs_hook verbs_plugin verbs_module \
-             verbs_completion verbs_secret verbs_help
+    local -a verbs_cache verbs_hook verbs_phase verbs_plugin verbs_module \
+             verbs_completion verbs_secret verbs_update verbs_help
 
     verbs_cache=(
         'status:show cache stats and hit/miss counts'
@@ -33,6 +33,11 @@ function _zdot() {
         'list:list registered hooks'
         'plan:print the full execution plan'
         'help:show help for hook'
+    )
+
+    verbs_phase=(
+        'list:list all registered phases'
+        'help:show help for phase'
     )
 
     verbs_plugin=(
@@ -69,23 +74,31 @@ function _zdot() {
     verbs_help=(
         'cache:show help for cache'
         'hook:show help for hook'
+        'phase:show help for phase'
         'plugin:show help for plugin'
         'module:show help for module'
         'completion:show help for completion'
         'secret:show help for secret'
+        'update:show help for update'
         'info:show help for info'
         'debug:show help for debug'
         'bench:show help for bench'
         'profile:show help for profile'
+        'help:show help for help'
     )
 
     # ── flags per noun+verb ──────────────────────────────────────────────────
 
-    local -a flags_hook_list flags_plugin_list flags_plugin_clean
+    local -a flags_hook_list flags_plugin_list flags_plugin_clean \
+             flags_update_check flags_update_apply flags_phase_list
 
     flags_hook_list=(
-        '(-v --verbose)'{-v,--verbose}'[show full hook metadata]'
-        '(-a --all)'{-a,--all}'[include hooks from all contexts]'
+        '-v[show full hook metadata]'
+        '--verbose[show full hook metadata]'
+        '-a[show all contexts]'
+        '--all[show all contexts]'
+        '-o[show hooks in execution-plan order]'
+        '--ordered[show hooks in execution-plan order]'
     )
 
     flags_plugin_list=(
@@ -97,6 +110,14 @@ function _zdot() {
     flags_plugin_clean=(
         '--dry-run[show what would be removed without deleting]'
         '--remove-unused[also remove plugins not declared anywhere]'
+    )
+
+    flags_update=(
+        '--force[bypass frequency check and run immediately]'
+    )
+
+    flags_phase_list=(
+        '--context[filter to phases in the given context]:context:'
     )
 
     # ── dispatch on word position ────────────────────────────────────────────
@@ -117,6 +138,7 @@ function _zdot() {
             case "$noun" in
                 cache)      _describe -t verbs 'cache verb' verbs_cache ;;
                 hook)       _describe -t verbs 'hook verb' verbs_hook ;;
+                phase)      _describe -t verbs 'phase verb' verbs_phase ;;
                 plugin)     _describe -t verbs 'plugin verb' verbs_plugin ;;
                 module)     _describe -t verbs 'module verb' verbs_module ;;
                 completion) _describe -t verbs 'completion verb' verbs_completion ;;
@@ -130,15 +152,18 @@ function _zdot() {
         # ── completing flags (word 4+) ───────────────────────────────────────
         *)
             case "${noun}:${verb}" in
-                hook:list)         _arguments -s "${flags_hook_list[@]}" ;;
-                plugin:list)       _arguments -s "${flags_plugin_list[@]}" ;;
-                plugin:clean)      _arguments -s "${flags_plugin_clean[@]}" ;;
+                hook:list)              _arguments -s "${flags_hook_list[@]}" ;;
+                phase:list)             _arguments -s "${flags_phase_list[@]}" ;;
+                plugin:list)            _arguments -s "${flags_plugin_list[@]}" ;;
+                plugin:clean)           _arguments -s "${flags_plugin_clean[@]}" ;;
+                update:check-updates)   _arguments -s "${flags_update[@]}" ;;
+                update:apply)           _arguments -s "${flags_update[@]}" ;;
                 module:user-clone)
                     local -a builtin_modules
                     builtin_modules=( ${_ZDOT_LIB_DIR}/*(N/:t) )
                     _describe -t modules 'built-in module' builtin_modules
                     ;;
-                *)                 ;;
+                *)                      ;;
             esac
             ;;
 
