@@ -68,7 +68,8 @@ Things that didn't work well:
 
 - single location for loading all plugins
 - init logic separate from usage logic
-- no clear dependencies
+- no clear dependencies between parts of init scripts
+- plugins often comment (needs to be after), but plugins themselves also have no dependency chain
 - zsh-defer for delayed prompt etc submits in order which may not be ideal run order
 
 What did work
