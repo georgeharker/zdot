@@ -75,7 +75,7 @@ What did work
 
 - compilation of plugins to zwc bytecode
 - cloning and pulling of plugins
-- handles simpler setups reaonably
+- handles simpler setups reasonably
 
 ## Overview
 
