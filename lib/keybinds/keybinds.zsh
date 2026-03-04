@@ -4,10 +4,13 @@
 
 _keybinds_init() {
     # Word navigation
-    bindkey '^[C' forward-word
-    bindkey '^[D' backward-word
-    bindkey '^[[H' beginning-of-line
-    bindkey '^[[F' end-of-line
+    bindkey '\eC' forward-word
+    bindkey '\eD' backward-word
+    # mac fn-key navigation
+    bindkey '\e[H' beginning-of-line
+    bindkey '\e[F' end-of-line
+    bindkey '\e[5~' history-search-backward
+    bindkey '\e[6~' history-search-forward
 }
 
 # Register hook: requires plugins to be loaded and post-configured
