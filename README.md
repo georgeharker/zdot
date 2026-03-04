@@ -69,11 +69,13 @@ Things that didn't work well:
 - single location for loading all plugins
 - init logic separate from usage logic
 - no clear dependencies
+- zsh-defer for delayed prompt etc submits in order which may not be ideal run order
 
 What did work
 
 - compilation of plugins to zwc bytecode
 - cloning and pulling of plugins
+- handles simpler setups reaonably
 
 ## Overview
 
