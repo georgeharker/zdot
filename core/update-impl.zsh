@@ -71,6 +71,17 @@ _zdot_update_find_dotfiler_scripts() {
 # check: is an update available?
 # Returns 0=available, 1=up-to-date, 2=error.
 _zdot_update_hook_check() {
+    local _subtree_spec
+    zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
+        || _subtree_spec=""
+
+    _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
+    local _topology="$REPLY"
+
+    # All topologies: check zdot's own remote directly.
+    # For submodule: if zdot's remote is ahead, the pull + post phases
+    # will update the submodule checkout and commit the new pointer in
+    # the parent repo (governed by the in-tree-commit zstyle).
     _update_core_is_available "$ZDOT_REPO" "" 1
     return $?
 }
@@ -167,8 +178,14 @@ _zdot_update_hook_pull() {
     local _remote="${_dotfiler_plan_zdot_remote:-}"
     local _branch="${_dotfiler_plan_zdot_branch:-}"
 
+    # If plan didn't set topology, there's nothing for us to pull.
+    if [[ -z "$_topology" ]]; then
+        log_debug "zdot: no plan topology set, skipping pull"
+        return 0
+    fi
+
     case "$_topology" in
-        standalone|'')
+        standalone)
             git -C "$_repo_dir" pull -q "$_remote" "$_branch" || {
                 warn "zdot: pull failed"; return 1
             }
