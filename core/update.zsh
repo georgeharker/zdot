@@ -160,8 +160,9 @@ _zdot_update_cleanup() {
         _zdot_update_install_dotfiler_hook \
         warn info error verbose \
         2>/dev/null
-    { (( ${+functions[_update_core_cleanup]} )) \
-        && _update_core_cleanup; } 2>/dev/null || true
+    # _update_core_* functions are NOT cleaned up here: they are runtime
+    # dependencies of _zdot_update_handle_update (via _zdot_update_hook_*).
+    # _update_core_cleanup is for update.sh (subprocess) use only.
     unset -f _zdot_update_cleanup 2>/dev/null
 }
 
