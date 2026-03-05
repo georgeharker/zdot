@@ -109,20 +109,31 @@ _max() {
 # Touches _BENCH_ZSHRC before warmup to bust the zdot cache.
 _bench_variant() {
     local label=$1 zsh_flags=$2 old_setup_val=${3:-}
-    local env_prefix=""
-    [[ -n $old_setup_val ]] && env_prefix="ZDOT_OLD_SETUP=${old_setup_val} "
     local raw elapsed
     _bench_samples=()
+
+    # Build the command as an array so env vars and flags are passed cleanly
+    # without going through eval (which breaks the TIMEFMT/time capture).
+    local -a cmd
+    if [[ -n $old_setup_val ]]; then
+        cmd=(env ZDOT_OLD_SETUP=$old_setup_val zsh)
+    else
+        cmd=(zsh)
+    fi
+    [[ -n $zsh_flags ]] && cmd+=("${(s: :)zsh_flags}")
+    cmd+=(-c exit)
 
     printf "  %-50s " "$label"
 
     # Bust cache then warmup to rebuild cache for this variant.
     touch "$_BENCH_ZSHRC"
-    eval "${env_prefix}zsh ${zsh_flags} -c exit" >/dev/null 2>&1
+    "${cmd[@]}" >/dev/null 2>&1
 
     for i in $(seq 1 $ITERATIONS); do
-        raw=$( { TIMEFMT="%E"; time eval "${env_prefix}zsh ${zsh_flags} -c exit" \
-            >/dev/null 2>&1 } 2>&1 )
+        # Suppress child stdout and stderr so they don't contaminate the capture.
+        # time writes TIMEFMT output to the enclosing shell's stderr, which the
+        # outer { } 2>&1 then captures into $raw.
+        raw=$( { TIMEFMT="%E"; time "${cmd[@]}" >/dev/null 2>/dev/null } 2>&1 )
         elapsed=$(_parse_time "$raw")
         _bench_samples+=($elapsed)
         printf "."
