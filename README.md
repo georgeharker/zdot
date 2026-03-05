@@ -180,7 +180,7 @@ _mymodule_init() {
 
     # Do your initialization
     export MYMODULE_PATH="/path/to/config"
-    source "${MYMODULE_PATH}/config.sh"
+    source "${MYMODULE_PATH}/config.zsh"
 
     zdot_success "mymodule initialized"
     return 0

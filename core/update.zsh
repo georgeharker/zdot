@@ -39,15 +39,15 @@
         [[ -z "$_zdot_update_init_parent" ]] && \
             _zdot_update_init_parent=$(
                 git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
-        if [[ ! -f "${_zdot_update_init_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
+        if [[ ! -f "${_zdot_update_init_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
             zdot_use_bundle "georgeharker/dotfiler"
         fi
     fi
 }
 
 # ---------------------------------------------------------------------------
-# Logging shims — map update_core.sh log functions to zdot equivalents.
-# Defined before sourcing update_core.sh / update-impl.zsh so that any
+# Logging shims — map update_core.zsh log functions to zdot equivalents.
+# Defined before sourcing update_core.zsh / update-impl.zsh so that any
 # logging during source is routed correctly.
 # Removed by _zdot_update_cleanup after the shell hook is registered.
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ verbose()   { zdot_verbose "$*"; }
 log_debug() { zdot_log_debug "$*"; }
 
 # ---------------------------------------------------------------------------
-# Source update_core.sh shared primitives
+# Source update_core.zsh shared primitives
 # 3-step priority matching dotfiler-hook.zsh:
 #   1. zstyle ':zdot:dotfiler' scripts-dir override
 #   2. Parent repo .nounpack/dotfiler
@@ -71,7 +71,7 @@ log_debug() { zdot_log_debug "$*"; }
     local _zdot_update_zstyle_dir
     zstyle -s ':zdot:dotfiler' scripts-dir _zdot_update_zstyle_dir 2>/dev/null
     if [[ -n "$_zdot_update_zstyle_dir" \
-       && -f "${_zdot_update_zstyle_dir}/update_core.sh" ]]; then
+       && -f "${_zdot_update_zstyle_dir}/update_core.zsh" ]]; then
         _zdot_update_core_dir="$_zdot_update_zstyle_dir"
     fi
 
@@ -83,7 +83,7 @@ log_debug() { zdot_log_debug "$*"; }
         [[ -z "$_zdot_update_parent" ]] && \
             _zdot_update_parent=$(
                 git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
-        if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
+        if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
             _zdot_update_core_dir="${_zdot_update_parent}/.nounpack/dotfiler"
         fi
     fi
@@ -92,13 +92,13 @@ log_debug() { zdot_log_debug "$*"; }
     if [[ -z "$_zdot_update_core_dir" ]]; then
         local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
         local _candidate="${_cache}/georgeharker/dotfiler"
-        [[ -f "${_candidate}/update_core.sh" ]] && \
+        [[ -f "${_candidate}/update_core.zsh" ]] && \
             _zdot_update_core_dir="$_candidate"
     fi
 
     if [[ -n "$_zdot_update_core_dir" ]]; then
         _zdot_dotfiler_scripts_dir="$_zdot_update_core_dir"
-        source "${_zdot_update_core_dir}/update_core.sh" 2>/dev/null || true
+        source "${_zdot_update_core_dir}/update_core.zsh" 2>/dev/null || true
     fi
 }
 
@@ -117,12 +117,12 @@ source "${ZDOT_DIR}/core/update-impl.zsh"
 # Runs at source time; cheap ([[ -f ]] checks only).
 
 _zdot_update_install_dotfiler_hook() {
-    # Only install if _update_core_get_parent_root is available (update_core.sh loaded)
+    # Only install if _update_core_get_parent_root is available (update_core.zsh loaded)
     (( ${+functions[_update_core_get_parent_root]} )) || return 0
 
     _update_core_get_parent_root "$ZDOT_REPO"
     local _parent_root=${reply[1]}
-    [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.sh" ]] || return 0
+    [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.zsh" ]] || return 0
 
     local _hooks_dir
     zstyle -s ':dotfiler:hooks' dir _hooks_dir \
@@ -163,7 +163,7 @@ _zdot_update_cleanup() {
         2>/dev/null
     # _update_core_* functions are NOT cleaned up here: they are runtime
     # dependencies of _zdot_update_handle_update (via _zdot_update_hook_*).
-    # _update_core_cleanup is for update.sh (subprocess) use only.
+    # _update_core_cleanup is for update.zsh (subprocess) use only.
     unset -f _zdot_update_cleanup 2>/dev/null
 }
 

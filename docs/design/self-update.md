@@ -22,10 +22,10 @@ The update system is **opt-in by default**: users must set
 ### Deployment scenario 4: defer entirely to dotfiler
 
 If zdot is part of a dotfiler-managed repo and the user is happy with dotfiler's
-own `check_update.sh` / `update.sh` cycle handling everything (including zdot
+own `check_updatecheck_update.zsh` / `updateupdate.zsh` cycle handling everything (including zdot
 files), they simply leave zdot's update mode as `disabled`. dotfiler already
 handles the `git pull` of the parent repo and re-symlinks all changed files via
-`setup.sh`. In this scenario zdot's self-update system is a no-op and there is
+`setupsetup.zsh`. In this scenario zdot's self-update system is a no-op and there is
 zero overhead. This is the recommended setup for integrated dotfiler users who
 do not need zdot-specific update control (e.g. submodule pointer management or
 a separate update frequency).
@@ -93,9 +93,9 @@ in `REPLY`, or returns 1 if not found.
 Priority order:
 
 1. `zstyle ':zdot:dotfiler' scripts-dir` override (explicit path)
-2. Parent repo (in submodule/subdir mode) contains `scripts/setup.sh`
+2. Parent repo (in submodule/subdir mode) contains `scripts/setupsetup.zsh`
 3. dotfiler loaded as a zdot plugin: `zdot_plugin_path georgeharker/dotfiler`
-   and `$REPLY/scripts/setup.sh` exists
+   and `$REPLY/scripts/setupsetup.zsh` exists
 4. Not found → warn, fall back to inline minimal symlink logic
 
 ### dotfiler as a zdot plugin
@@ -113,17 +113,17 @@ function in `core/update.zsh` locates the scripts directly in the plugin cache.
 
 ---
 
-## Phase 1: setup.sh Modifications (dotfiler)
+## Phase 1: setupsetup.zsh Modifications (dotfiler)
 
 ### Goal
 
-Make `setup.sh` accept two new options so it can operate on an arbitrary source
+Make `setupsetup.zsh` accept two new options so it can operate on an arbitrary source
 repo and plant symlinks at an arbitrary destination, while preserving 100%
 backward compatibility when neither option is supplied.
 
 ### Variable name constraints
 
-The following names are already in use inside `setup.sh` and MUST NOT be reused
+The following names are already in use inside `setupsetup.zsh` and MUST NOT be reused
 as the new script-level parameter variable names:
 
 | Existing name | Scope | Used for |
@@ -176,24 +176,24 @@ dotfiles_dir=$_setup_repo_dir
 
 ### Backward compatibility guarantee
 
-- All existing callers (`update.sh`, manual invocations) pass neither option →
+- All existing callers (`updateupdate.zsh`, manual invocations) pass neither option →
   `_setup_link_dest=$HOME`, `_setup_repo_dir` from `find_dotfiles_directory()` →
   identical behavior to today.
 - `--dry-run` mode tests both old and new paths before merging.
 
 ---
 
-## Phase 2: update.sh Modifications (dotfiler)
+## Phase 2: updateupdate.zsh Modifications (dotfiler)
 
-`update.sh` calls `setup.sh -u <files>` internally. It must forward `--repo-dir`
+`updateupdate.zsh` calls `setupsetup.zsh -u <files>` internally. It must forward `--repo-dir`
 and `--link-dest` through to that call.
 
 ### Changes
 
-- Add `--repo-dir:` and `--link-dest:` to `update.sh`'s own `zparseopts`
+- Add `--repo-dir:` and `--link-dest:` to `updateupdate.zsh`'s own `zparseopts`
 - Store in `_update_repo_dir` / `_update_link_dest` (avoid collisions with
-  existing locals `src`, `dest`, `destdir` present in `update.sh` too)
-- Pass them through: `setup.sh --repo-dir "$_update_repo_dir" --link-dest "$_update_link_dest" -u ...`
+  existing locals `src`, `dest`, `destdir` present in `updateupdate.zsh` too)
+- Pass them through: `setupsetup.zsh --repo-dir "$_update_repo_dir" --link-dest "$_update_link_dest" -u ...`
 - Default `_update_repo_dir` from `find_dotfiles_directory()` and
   `_update_link_dest` from `$HOME` — identical to current behavior when omitted
 
@@ -210,19 +210,19 @@ _zdot_update_find_dotfiler_scripts() {
     local _reply
     # 1. Explicit zstyle override
     zstyle -s ':zdot:dotfiler' scripts-dir _reply
-    if [[ -n "$_reply" && -f "$_reply/setup.sh" ]]; then
+    if [[ -n "$_reply" && -f "$_reply/setupsetup.zsh" ]]; then
         REPLY=$_reply; return 0
     fi
     # 2. Are we inside a parent repo that has dotfiler scripts?
     local _root
     _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
-    if [[ -n "$_root" && -f "$_root/scripts/setup.sh" ]]; then
+    if [[ -n "$_root" && -f "$_root/scripts/setupsetup.zsh" ]]; then
         REPLY="$_root/scripts"; return 0
     fi
     # 3. Try plugin cache path directly
     local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
     local _candidate="$_cache/georgeharker/dotfiler/scripts"
-    if [[ -f "$_candidate/setup.sh" ]]; then
+    if [[ -f "$_candidate/setupsetup.zsh" ]]; then
         REPLY=$_candidate; return 0
     fi
     REPLY=""; return 1
@@ -273,7 +273,7 @@ zstyle ':zdot:dotfiler' scripts-dir  ""
 ### Function inventory
 
 All functions are prefixed `_zdot_update_` and unset after the update check
-runs — same cleanup pattern as dotfiler's `check_update.sh`.
+runs — same cleanup pattern as dotfiler's `check_updatecheck_update.zsh`.
 
 ```
 _zdot_update_current_epoch          zsh/datetime EPOCHSECONDS
@@ -285,11 +285,11 @@ _zdot_update_acquire_lock           mkdir lock; stale cleanup >24h
 _zdot_update_release_lock           rmdir lock
 _zdot_update_find_dotfiler_scripts  4-step detection (Phase 3)
 _zdot_update_detect_deployment      standalone | submodule | subdir | none
-_zdot_update_apply                  diff old..new → delete symlinks + setup.sh -u
+_zdot_update_apply                  diff old..new → delete symlinks + setupsetup.zsh -u
 _zdot_update_standalone_apply       git pull + apply
 _zdot_update_submodule_apply        git submodule update --remote + apply
 _zdot_update_handle_submodule_ptr   none | prompt | auto-commit parent
-_zdot_update_has_typed_input        zsh/zselect stdin poll (from check_update.sh)
+_zdot_update_has_typed_input        zsh/zselect stdin poll (from check_updatecheck_update.zsh)
 _zdot_update_handle_update          top-level orchestration
 _zdot_update_cleanup                unset -f all of the above
 ```
@@ -322,7 +322,7 @@ Cache dir: ${XDG_CACHE_HOME:-$HOME/.cache}/zdot/
 
 Separate from dotfiler's `~/.cache/dotfiles/` to keep concerns fully isolated.
 
-### Lock protocol (mirrors check_update.sh exactly)
+### Lock protocol (mirrors check_updatecheck_update.zsh exactly)
 
 ```zsh
 _zdot_update_acquire_lock() {
@@ -381,7 +381,7 @@ _zdot_update_is_available() {
 ### _zdot_update_apply old_sha new_sha
 
 This function is called after any pull/submodule-update succeeds and the SHA
-has changed. It uses dotfiler's `setup.sh` with the new options from Phase 1.
+has changed. It uses dotfiler's `setupsetup.zsh` with the new options from Phase 1.
 
 ```zsh
 _zdot_update_apply() {
@@ -410,10 +410,10 @@ _zdot_update_apply() {
         [[ -L "$_dest_path" ]] && rm -f "$_dest_path"
     done
 
-    # Apply added/modified via dotfiler setup.sh or inline fallback
-    if [[ -n "$_scripts_dir" && -x "$_scripts_dir/setup.sh" ]]; then
+    # Apply added/modified via dotfiler setupsetup.zsh or inline fallback
+    if [[ -n "$_scripts_dir" && -x "$_scripts_dir/setupsetup.zsh" ]]; then
         (( ${#_added[@]} > 0 )) && \
-            zsh -f "$_scripts_dir/setup.sh" \
+            zsh -f "$_scripts_dir/setupsetup.zsh" \
                 --repo-dir "$ZDOT_DIR" \
                 --link-dest "$_destdir" \
                 -u "${_added[@]}"
@@ -631,8 +631,8 @@ The hook body captures the function references before cleanup runs.
 
 | Risk | Mitigation |
 |---|---|
-| `setup.sh --repo-dir/--link-dest` breaks existing dotfiler users | Defaults identical to current behavior; test with `--dry-run` first |
-| `normalize_path_to_home_relative` rename breaks callers | All 6 call sites are internal to `setup.sh`; renamed atomically, no alias needed |
+| `setupsetup.zsh --repo-dir/--link-dest` breaks existing dotfiler users | Defaults identical to current behavior; test with `--dry-run` first |
+| `normalize_path_to_home_relative` rename breaks callers | All 6 call sites are internal to `setupsetup.zsh`; renamed atomically, no alias needed |
 | `git submodule update --remote` on wrong path | Validate `_rel` exists as registered submodule before running |
 | `auto` pointer commit surprises user | Default is `none`; user must explicitly opt in |
 | dotfiler plugin clone fails (no network at startup) | Graceful fallback to inline symlink logic; warn clearly |
@@ -644,8 +644,8 @@ The hook body captures the function references before cleanup runs.
 
 ## Implementation Order
 
-1. `setup.sh`: add `--repo-dir` / `--link-dest` (rename to `normalize_path_to_dest_relative` done)
-2. `update.sh`: forward new options to `setup.sh`
+1. `setupsetup.zsh`: add `--repo-dir` / `--link-dest` (rename to `normalize_path_to_dest_relative` done)
+2. `updateupdate.zsh`: forward new options to `setupsetup.zsh`
 3. `core/update.zsh`: full implementation (Phases 4–8 above)
 4. `zdot.zsh`: add `source core/update.zsh`
 5. Docs: mark item 3 done in `api-improvements.md`

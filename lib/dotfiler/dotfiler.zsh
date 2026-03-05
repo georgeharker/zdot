@@ -8,14 +8,13 @@ _dotfiler_init() {
     # Compile dotfiler scripts to .zwc for faster sourcing
     if zdot_cache_is_enabled; then
         local _dotfiler_scripts="$HOME/.dotfiles/.nounpack/dotfiler"
-        zdot_cache_compile_functions "$_dotfiler_scripts" '*.sh'
         zdot_cache_compile_functions "$_dotfiler_scripts" '*.zsh'
         unset _dotfiler_scripts
     fi
 
     # Source dotfiles update checker (requires GH_TOKEN from 1Password)
-    [[ -f "$HOME/.dotfiles/.nounpack/dotfiler/check_update.sh" ]] && \
-        source "$HOME/.dotfiles/.nounpack/dotfiler/check_update.sh"
+    [[ -f "$HOME/.dotfiles/.nounpack/dotfiler/check_update.zsh" ]] && \
+        source "$HOME/.dotfiles/.nounpack/dotfiler/check_update.zsh"
 
     # Source dotfiles completions
     [[ -f "$HOME/.dotfiles/.nounpack/dotfiler/completions.zsh" ]] && \

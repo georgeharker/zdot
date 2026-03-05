@@ -4,7 +4,7 @@
 # Callers must:
 #   1. Set ZDOT_DIR (linktree path) and ZDOT_REPO (real repo path) before sourcing this file.
 #   2. Set _zdot_dotfiler_scripts_dir to the dotfiler scripts path.
-#   3. Source update_core.sh before sourcing this file (provides _update_core_*).
+#   3. Source update_core.zsh before sourcing this file (provides _update_core_*).
 #   4. Define warn / info / error / verbose shims (only called at runtime).
 #
 # Public entry points:
@@ -13,14 +13,14 @@
 #   _zdot_update_hook_plan               → populate _dotfiler_plan_zdot_* in-process
 #                                          returns 0=populated, 0=nothing-to-do
 #                                          (check _dotfiler_plan_zdot_range for empty)
-#   _zdot_update_hook_pull               → git operations only (no setup.sh)
-#   _zdot_update_hook_unpack             → setup.sh operations (post all-pulls)
+#   _zdot_update_hook_pull               → git operations only (no setup.zsh)
+#   _zdot_update_hook_unpack             → setup.zsh operations (post all-pulls)
 #   _zdot_update_hook_post               → commit parents, SHA markers
 #   _zdot_update_hook_register           → SOURCE mode entry: check availability
 #   _zdot_update_handle_update           → shell-hook orchestrator (standalone zdot)
 #
 # Internal shared primitive:
-#   _zdot_update_apply_range <old> <new> → build file lists then call setup.sh
+#   _zdot_update_apply_range <old> <new> → build file lists then call setup.zsh
 
 # ---------------------------------------------------------------------------
 # dotfiler scripts detection (3-step priority)
@@ -32,29 +32,29 @@ _zdot_update_find_dotfiler_scripts() {
 
     # 1. Explicit zstyle override
     zstyle -s ':zdot:dotfiler' scripts-dir _candidate
-    if [[ -n "$_candidate" && -f "$_candidate/setup.sh" \
-                           && -f "$_candidate/update.sh" ]]; then
+    if [[ -n "$_candidate" && -f "$_candidate/setup.zsh" \
+                           && -f "$_candidate/update.zsh" ]]; then
         REPLY=$_candidate; return 0
     fi
 
     # 2. Inside a parent repo that already has dotfiler scripts
     local _root
     _update_core_get_parent_root "$ZDOT_REPO"; _root=${reply[1]}
-    if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" \
-                       && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
+    if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.zsh" \
+                       && -f "$_root/.nounpack/dotfiler/update.zsh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
     fi
 
     # 3. Plugin cache — clone on demand if not yet present
     local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
     _candidate="$_cache/georgeharker/dotfiler"
-    if [[ ! -f "$_candidate/setup.sh" || ! -f "$_candidate/update.sh" ]]; then
+    if [[ ! -f "$_candidate/setup.zsh" || ! -f "$_candidate/update.zsh" ]]; then
         if (( ${+functions[zdot_plugin_clone]} )); then
             zdot_info "zdot: cloning dotfiler for update scripts..."
             zdot_plugin_clone "georgeharker/dotfiler" 2>/dev/null
         fi
     fi
-    if [[ -f "$_candidate/setup.sh" && -f "$_candidate/update.sh" ]]; then
+    if [[ -f "$_candidate/setup.zsh" && -f "$_candidate/update.zsh" ]]; then
         REPLY=$_candidate; return 0
     fi
 
@@ -89,7 +89,7 @@ _zdot_update_hook_plan() {
     local _topology="$REPLY"
 
     # Resolve old/new SHAs — use hint range from dotfiler if provided
-    # (set when update.sh is run with --range or --commit-hash and was able
+    # (set when update.zsh is run with --range or --commit-hash and was able
     # to resolve the zdot component range from the dotfiles range via markers).
     local _old _new _remote _branch
     _old=$(git -C "$ZDOT_REPO" rev-parse HEAD 2>/dev/null) || return 0
@@ -159,7 +159,7 @@ ${#_update_core_files_to_remove[@]} to remove"
     return 0
 }
 
-# pull: git operations only — no setup.sh, no new zsh processes.
+# pull: git operations only — no setup.zsh, no new zsh processes.
 # Reads topology and remote/branch from _dotfiler_plan_zdot_* vars set by plan.
 _zdot_update_hook_pull() {
     local _topology="${_dotfiler_plan_zdot_topology:-}"
@@ -204,7 +204,7 @@ _zdot_update_hook_pull() {
     return 0
 }
 
-# unpack: setup.sh for zdot files — called after ALL pulls complete.
+# unpack: setup.zsh for zdot files — called after ALL pulls complete.
 # By this point every repo is at new HEAD.
 _zdot_update_hook_unpack() {
     local _link_tree
@@ -228,8 +228,8 @@ _zdot_update_hook_unpack() {
 
     [[ ${#_to_unpack[@]} -eq 0 ]] && return 0
 
-    # setup.sh subprocess — all repos at new HEAD at this point
-    "${_zdot_dotfiler_scripts_dir}/setup.sh" \
+    # setup.zsh subprocess — all repos at new HEAD at this point
+    "${_zdot_dotfiler_scripts_dir}/setup.zsh" \
         --repo-dir "$_repo_dir" \
         --link-dest "$_link_dest" \
         -u \
@@ -319,7 +319,7 @@ _zdot_update_hook_post() {
 # ---------------------------------------------------------------------------
 # Internal shared primitive: apply_range
 # ---------------------------------------------------------------------------
-# Build file lists for old..new then call setup.sh in-process.
+# Build file lists for old..new then call setup.zsh in-process.
 # Used by the apply-update backward-compat verb and directly if needed.
 
 _zdot_update_apply_range() {
@@ -344,7 +344,7 @@ _zdot_update_apply_range() {
 
     [[ ${#_update_core_files_to_unpack[@]} -eq 0 ]] && return 0
 
-    "${_zdot_dotfiler_scripts_dir}/setup.sh" \
+    "${_zdot_dotfiler_scripts_dir}/setup.zsh" \
         --repo-dir "$ZDOT_REPO" \
         --link-dest "$_destdir" \
         -u \
@@ -476,7 +476,7 @@ _zdot_update_handle_update() {
         return 1
     }
 
-    # 10. Unpack — setup.sh subprocess; all repos at new HEAD
+    # 10. Unpack — setup.zsh subprocess; all repos at new HEAD
     _zdot_update_hook_unpack || {
         warn "zdot: unpack failed"
         _update_core_write_timestamp "$_ts" 1 "Unpack failed"

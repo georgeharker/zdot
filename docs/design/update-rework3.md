@@ -2,18 +2,18 @@
 
 ## Goal
 
-Add timestamp/interval gating to the dotfiler self-update path (`update_self.sh`)
+Add timestamp/interval gating to the dotfiler self-update path (`update_selfupdate_self.zsh`)
 so it skips the git pull if checked recently — matching the behaviour already
-implemented for user dotfiles in `check_update.sh`. The self-update check should
-also trigger on **shell start** via `check_update.sh` (not only on explicit
+implemented for user dotfiles in `check_updatecheck_update.zsh`. The self-update check should
+also trigger on **shell start** via `check_updatecheck_update.zsh` (not only on explicit
 `dotfiler update-self`).
 
 ---
 
 ## Approach
 
-**Option C:** add shared primitives to `update_core.sh`, call them from both
-`check_update.sh` and `update_self.sh`.
+**Option C:** add shared primitives to `update_coreupdate_core.zsh`, call them from both
+`check_updatecheck_update.zsh` and `update_selfupdate_self.zsh`.
 
 ---
 
@@ -21,31 +21,31 @@ also trigger on **shell start** via `check_update.sh` (not only on explicit
 
 ```
 dotfiler.zsh  (zdot module, shell start)
-  └── check_update.sh          ← Steps 1-4
+  └── check_updatecheck_update.zsh          ← Steps 1-4
         ├── handle_update()     user dotfiles timestamp/lock/interval/mode
         └── handle_self_update() NEW — dotfiler scripts check on shell start
 
 dotfiler CLI
-  └── update_self.sh            ← Steps 5-8
+  └── update_selfupdate_self.zsh            ← Steps 5-8
         topology-aware self-update, now with timestamp gate + API-first
 
-update_core.sh                  ← Step 0 (done)
+update_coreupdate_core.zsh                  ← Step 0 (done)
   shared primitives used by both callers
 ```
 
 **Entrypoint chain:**
 
 - `zdot/lib/dotfiler/dotfiler.zsh` — zdot module; sets
-  `zstyle ':dotfiler:update' mode prompt`, sources `check_update.sh` on shell
+  `zstyle ':dotfiler:update' mode prompt`, sources `check_updatecheck_update.zsh` on shell
   start.
-- `check_update.sh` — sourced on shell start; implements `handle_update` with
+- `check_updatecheck_update.zsh` — sourced on shell start; implements `handle_update` with
   full timestamp/lock/interval/mode logic for user dotfiles. **Steps 1-4** replace
   the old fetch-first `is_update_available()` with an API-first thin wrap and add
   `handle_self_update()`.
-- `update_self.sh` — invoked by `dotfiler update-self` CLI command.
+- `update_selfupdate_self.zsh` — invoked by `dotfiler update-self` CLI command.
   Topology-aware self-update. **Steps 5-8** add a timestamp gate and switch to
   API-first availability check.
-- `update_core.sh` — shared primitives. **Step 0** already added
+- `update_coreupdate_core.zsh` — shared primitives. **Step 0** already added
   `_update_core_is_available`.
 
 ---
@@ -78,22 +78,22 @@ which does API-first with a `merge-base` check to handle diverged histories.
 
 ### Argument passing convention
 
-Core functions (`update_core.sh`) take **explicit arguments** — no globals, no
+Core functions (`update_coreupdate_core.zsh`) take **explicit arguments** — no globals, no
 zstyle reads. Callers read zstyle and pass resolved values in. **Exception:**
-`update_self.sh` is a dotfiler caller script, so it reads zstyle directly.
+`update_selfupdate_self.zsh` is a dotfiler caller script, so it reads zstyle directly.
 
 zstyle namespaces: dotfiler uses `':dotfiler:update'`, zdot uses
 `':zdot:update'`.
 
 ### Stamp files
 
-- **`check_update.sh`:**
+- **`check_updatecheck_update.zsh`:**
   `${dotfiles_cache_dir}/dotfiler_scripts_update` (uses already-set ambient var)
-- **`update_self.sh`:**
+- **`update_selfupdate_self.zsh`:**
   `${XDG_CACHE_DIR:-$HOME/.cache}/dotfiles/dotfiler_scripts_update`
   (computed independently — no ambient vars available)
 
-### Force flag in `update_self.sh`
+### Force flag in `update_selfupdate_self.zsh`
 
 Stored as integer `_force`, converted to string `"true"`/`"false"` before
 passing to `_update_core_should_update`.
@@ -102,19 +102,19 @@ passing to `_update_core_should_update`.
 
 ## Edit Plan
 
-### Step 0 — `update_core.sh`: Replace fetch-first function with API-first  DONE
+### Step 0 — `update_coreupdate_core.zsh`: Replace fetch-first function with API-first  DONE
 
 - Removed `_update_core_is_available_with_api_fallback` (lines 295-365).
 - Inserted `_update_core_is_available` in its place (originally named
   `_update_core_is_available_api_first`, later renamed — see Progress).
 
-### Step 0b — `update_core.sh`: Fix `_update_core_cleanup` unset list  DONE
+### Step 0b — `update_coreupdate_core.zsh`: Fix `_update_core_cleanup` unset list  DONE
 
 - At line 395 in `_update_core_cleanup`, replace
   `_update_core_is_available_with_api_fallback` with
   `_update_core_is_available`.
 
-### Step 1 — `check_update.sh`: Replace `is_update_available()` body (lines 71-140)
+### Step 1 — `check_updatecheck_update.zsh`: Replace `is_update_available()` body (lines 71-140)
 
 Replace the entire 70-line body with a thin wrap:
 
@@ -128,7 +128,7 @@ The old body did fetch-first with API as fallback. The new
 `_update_core_is_available` already does API-first with git-fetch
 fallback for non-GitHub remotes.
 
-### Step 2 — `check_update.sh`: Refactor `handle_update()` timestamp block (lines 194-221)
+### Step 2 — `check_updatecheck_update.zsh`: Refactor `handle_update()` timestamp block (lines 194-221)
 
 Replace the manual `LAST_EPOCH` sourcing + frequency check block with:
 
@@ -143,7 +143,7 @@ Replace the manual `LAST_EPOCH` sourcing + frequency check block with:
 Also remove `epoch_target` and `LAST_EPOCH` from the `local` declaration on
 line 171 (keep `mtime` and `option`).
 
-### Step 3 — `check_update.sh`: Add `handle_self_update()` after line 265
+### Step 3 — `check_updatecheck_update.zsh`: Add `handle_self_update()` after line 265
 
 Insert after `handle_update`'s closing `}`:
 
@@ -184,13 +184,13 @@ function handle_self_update() {
             return
         fi
 
-        zsh -f "${script_dir}/update_self.sh" --force \
+        zsh -f "${script_dir}/update_selfupdate_self.zsh" --force \
             && _update_core_write_timestamp "$_self_stamp"
     }
 }
 ```
 
-### Step 4 — `check_update.sh`: Update dispatch block + unset lists
+### Step 4 — `check_updatecheck_update.zsh`: Update dispatch block + unset lists
 
 Four specific changes:
 
@@ -217,14 +217,14 @@ Four specific changes:
        handle_self_update ;;
    ```
 
-### Step 5 — `update_self.sh`: Parse `-f`/`--force` flag
+### Step 5 — `update_selfupdate_self.zsh`: Parse `-f`/`--force` flag
 
 - Update usage comment on line 10 to mention `-f|--force`.
 - Add `local _force=0` before the `for _arg` loop (before line 35).
 - Add `-f|--force) _force=1 ;;` inside the `case $_arg in` block (after
   `--dry-run` line).
 
-### Step 6 — `update_self.sh`: Add stamp + frequency locals after line 46
+### Step 6 — `update_selfupdate_self.zsh`: Add stamp + frequency locals after line 46
 
 After `_subtree_spec` assignment:
 
@@ -234,7 +234,7 @@ local _self_freq
 zstyle -s ':dotfiler:update' frequency _self_freq 2>/dev/null || _self_freq=3600
 ```
 
-### Step 7 — `update_self.sh`: Insert gate block before `case $_topology in`
+### Step 7 — `update_selfupdate_self.zsh`: Insert gate block before `case $_topology in`
 
 Before line 62:
 
@@ -248,7 +248,7 @@ if ! _update_core_should_update "$_self_stamp" "$_self_freq" "$_force_str"; then
 fi
 ```
 
-### Step 8 — `update_self.sh`: Switch to API-first + write timestamps
+### Step 8 — `update_selfupdate_self.zsh`: Switch to API-first + write timestamps
 
 **`standalone` case (around lines 69-88):**
 - Call `_update_core_is_available "$script_dir"` (API-first wrapper).
@@ -274,23 +274,23 @@ call: add `(( _dry_run )) || _update_core_write_timestamp "$_self_stamp"`.
 ### Complete
 
 - Design fully worked out and documented.
-- **Step 0**: `update_core.sh` — `_update_core_is_available_with_api_fallback`
+- **Step 0**: `update_coreupdate_core.zsh` — `_update_core_is_available_with_api_fallback`
   replaced with API-first wrapper (now named `_update_core_is_available`).
-- **Step 0b**: `update_core.sh` — `_update_core_cleanup` unset list updated.
-- **Step 1**: `check_update.sh` — `is_update_available()` wraps
+- **Step 0b**: `update_coreupdate_core.zsh` — `_update_core_cleanup` unset list updated.
+- **Step 1**: `check_updatecheck_update.zsh` — `is_update_available()` wraps
   `_update_core_is_available`.
-- **Step 2**: `check_update.sh` — `handle_update()` timestamp block uses
+- **Step 2**: `check_updatecheck_update.zsh` — `handle_update()` timestamp block uses
   `_update_core_should_update`.
-- **Step 3**: `check_update.sh` — `handle_self_update()` function added.
-- **Step 4**: `check_update.sh` — trap unset, outer unset, background-alpha,
+- **Step 3**: `check_updatecheck_update.zsh` — `handle_self_update()` function added.
+- **Step 4**: `check_updatecheck_update.zsh` — trap unset, outer unset, background-alpha,
   and `*` case all updated.
-- **Step 5**: `update_self.sh` — usage comment updated, `-f|--force` flag
+- **Step 5**: `update_selfupdate_self.zsh` — usage comment updated, `-f|--force` flag
   added.
-- **Step 6**: `update_self.sh` — stamp + frequency locals added after
+- **Step 6**: `update_selfupdate_self.zsh` — stamp + frequency locals added after
   `_subtree_spec` assignment.
-- **Step 7**: `update_self.sh` — gate block inserted before
+- **Step 7**: `update_selfupdate_self.zsh` — gate block inserted before
   `case $_topology in`.
-- **Step 8**: `update_self.sh` — standalone case switched to API-first with
+- **Step 8**: `update_selfupdate_self.zsh` — standalone case switched to API-first with
   timestamp writes; submodule and subtree cases write timestamps after
   `_update_core_commit_parent`.
 - **Rename**: `_update_core_is_available` (git-fetch) renamed to
@@ -303,16 +303,16 @@ call: add `(( _dry_run )) || _update_core_write_timestamp "$_self_stamp"`.
   `handle_update()` to a top-level function with its own lock
   (`self_update.lock`), trap, and cleanup. Call order swapped so
   self-update runs before dotfiles update.
-- **Cleanup 1 — shebangs**: `update_self.sh` and `update.sh` shebangs set
-  to `#!/bin/zsh` (no `-f`); `check_update.sh` call sites invoke scripts
+- **Cleanup 1 — shebangs**: `update_selfupdate_self.zsh` and `updateupdate.zsh` shebangs set
+  to `#!/bin/zsh` (no `-f`); `check_updatecheck_update.zsh` call sites invoke scripts
   directly instead of via `zsh -f`.
 - **Cleanup 2 — anonymous functions**: Removed unnecessary `() { ... }`
   wrappers from both `handle_self_update` and `handle_update`; `emulate
   -L zsh` moved to function top.
 - **Cleanup 3 — cache separation**: Self-update lock and stamp now live
   under `~/.cache/dotfiler/` (`dotfiler_cache_dir`) instead of sharing
-  `~/.cache/dotfiles/`. Updated `check_update.sh` (var, mkdir, lock path,
-  stamp path, trap) and `update_self.sh` (stamp path).
+  `~/.cache/dotfiles/`. Updated `check_updatecheck_update.zsh` (var, mkdir, lock path,
+  stamp path, trap) and `update_selfupdate_self.zsh` (stamp path).
 - **Trap ordering**: Reordered `handle_self_update` trap so lock release
   happens before `unset dotfiler_cache_dir` for readability (functionally
   equivalent since path is baked in at definition time).
@@ -325,17 +325,17 @@ call: add `(( _dry_run )) || _update_core_write_timestamp "$_self_stamp"`.
 
 | File | Status |
 |------|--------|
-| `.nounpack/scripts/update_core.sh` (~402 lines) | Steps 0/0b done, rename applied |
-| `.nounpack/scripts/check_update.sh` (~273 lines) | Steps 1-4 done, rename applied |
-| `.nounpack/scripts/update_self.sh` (~189 lines) | Steps 5-8 done, rename applied |
+| `.nounpack/scripts/update_coreupdate_core.zsh` (~402 lines) | Steps 0/0b done, rename applied |
+| `.nounpack/scripts/check_updatecheck_update.zsh` (~273 lines) | Steps 1-4 done, rename applied |
+| `.nounpack/scripts/update_selfupdate_self.zsh` (~189 lines) | Steps 5-8 done, rename applied |
 
 ### Reference only
 
 | File | Purpose |
 |------|---------|
 | `.nounpack/scripts/dotfiler` | CLI entrypoint |
-| `.nounpack/scripts/update.sh` | ref-walk logic for user dotfiles |
-| `.nounpack/scripts/logging.sh` | logging macros (`info`, `warn`, `error`, `verbose`) |
-| `.nounpack/scripts/helpers.sh` | helper utilities |
-| `.config/zdot/lib/dotfiler/dotfiler.zsh` | sources `check_update.sh` on shell start |
+| `.nounpack/scripts/updateupdate.zsh` | ref-walk logic for user dotfiles |
+| `.nounpack/scripts/logginglogging.zsh` | logging macros (`info`, `warn`, `error`, `verbose`) |
+| `.nounpack/scripts/helpershelpers.zsh` | helper utilities |
+| `.config/zdot/lib/dotfiler/dotfiler.zsh` | sources `check_updatecheck_update.zsh` on shell start |
 | [ohmyzsh check_for_upgrade.sh](https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/refs/heads/master/tools/check_for_upgrade.sh) | API-first reference implementation |
