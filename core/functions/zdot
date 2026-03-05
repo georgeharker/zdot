@@ -86,15 +86,33 @@ function zdot() {
     }
 
     function _zdot_help_bench() {
-        zdot_info "zdot bench — run shell startup benchmark"
+        zdot_info "zdot bench — measure zsh startup time across all four shell contexts"
         zdot_info ""
-        zdot_info "  Runs scripts/benchmark.zsh. Additional args are forwarded."
+        zdot_info "  Usage: zdot bench [--compare] [ITERATIONS]"
+        zdot_info ""
+        zdot_info "  Times startup for: interactive non-login, interactive login,"
+        zdot_info "  non-interactive non-login, non-interactive login."
+        zdot_info ""
+        zdot_info "  --compare   A/B mode: run each context twice with ZDOT_OLD_SETUP=true"
+        zdot_info "              and ZDOT_OLD_SETUP=false.  Requires your dotfiles to honour"
+        zdot_info "              ZDOT_OLD_SETUP.  See 'docs/COMMANDS.md' for details."
+        zdot_info "  ITERATIONS  Number of timed runs per variant (default: 20)."
     }
 
     function _zdot_help_profile() {
-        zdot_info "zdot profile — run shell startup profiler"
+        zdot_info "zdot profile — profile zsh startup with zprof to find slow functions"
         zdot_info ""
-        zdot_info "  Runs scripts/profile.zsh. Additional args are forwarded."
+        zdot_info "  Usage: zdot profile [--warm]"
+        zdot_info ""
+        zdot_info "  Wraps your shell in a zprof instrumentation layer and prints a"
+        zdot_info "  function-level timing breakdown.  Use bench for total wall-clock"
+        zdot_info "  timing; use profile to diagnose what to optimise."
+        zdot_info ""
+        zdot_info "  --warm   Symlink existing compdump files so compinit is skipped."
+        zdot_info ""
+        zdot_info "  To compare setups, set ZDOT_OLD_SETUP before running:"
+        zdot_info "    ZDOT_OLD_SETUP=true  zdot profile"
+        zdot_info "    ZDOT_OLD_SETUP=false zdot profile"
     }
 
     function _zdot_help_update() {

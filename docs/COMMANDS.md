@@ -166,21 +166,105 @@ zdot debug
 
 ## bench
 
-Run the shell startup benchmark script.
+Measure zsh startup time across all four shell contexts.
 
 ```
-zdot bench [args...]   # Runs scripts/benchmark.zsh; extra args are forwarded
+zdot bench [--compare] [ITERATIONS]
 ```
+
+Zsh can be started in four different contexts depending on how it is invoked
+and which dotfiles it sources.  `zdot bench` times all four:
+
+| Context | zsh invocation | Dotfiles sourced |
+|---|---|---|
+| interactive non-login | `zsh -i` | `.zshenv`, `.zshrc` |
+| interactive login | `zsh -il` | `.zshenv`, `.zprofile`, `.zshrc`, `.zlogin` |
+| non-interactive non-login | `zsh` | `.zshenv` |
+| non-interactive login | `zsh -l` | `.zshenv`, `.zprofile`, `.zlogin` |
+
+Because zdot can bootstrap from `.zshenv`, `.zprofile`, or `.zshrc` depending
+on how your dotfiles are structured, all four contexts are meaningful.
+
+`ITERATIONS` (default: 20) controls how many timed runs are averaged per
+variant.  Each variant also runs one warmup invocation first to ensure the
+zdot startup cache is warm before timing begins.
+
+**Default mode**: prints a summary table with mean, min, max, and stddev for
+each of the four contexts.
+
+**Comparison mode** (`--compare`): runs each context twice — once with
+`ZDOT_OLD_SETUP=true` and once with `ZDOT_OLD_SETUP=false` — and reports a
+percentage change and `new faster / new slower / same` verdict per context.
+This requires your dotfiles to honour `ZDOT_OLD_SETUP` (see below).
+
+Environment variables:
+
+| Variable | Description |
+|---|---|
+| `ZDOTDIR` | Standard zsh variable. Cache-busting touches `$ZDOTDIR/.zshrc` (falls back to `$HOME/.zshrc`). |
+
+### A/B comparison with `ZDOT_OLD_SETUP`
+
+If your dotfiles have an old and a new setup that can be selected at startup
+time, you can expose a `ZDOT_OLD_SETUP` variable that your dotfiles check.
+For example, in your `.zshenv` or `.zshrc`:
+
+```zsh
+if [[ "${ZDOT_OLD_SETUP:-false}" == "true" ]]; then
+    # source old plugin manager / config
+else
+    # source new setup
+fi
+```
+
+Then run:
+
+```zsh
+zdot bench --compare
+```
+
+The benchmark will run all four contexts with both values of `ZDOT_OLD_SETUP`
+and show the impact across every startup mode.
 
 ---
 
 ## profile
 
-Run the shell startup profiler.
+Profile zsh startup using `zprof` to identify which functions are slowest.
 
 ```
-zdot profile [args...]   # Runs scripts/profile.zsh; extra args are forwarded
+zdot profile [--warm]
 ```
+
+Runs `scripts/profile.zsh`.  Creates a temporary `ZDOTDIR` containing a
+wrapper `.zshrc` that loads `zprof` instrumentation before sourcing your real
+`.zshrc`, then prints the function-level timing breakdown.
+
+**`bench` vs `profile`**: `bench` measures *total* wall-clock startup time
+with statistical rigour across multiple runs and contexts.  `profile` runs
+*once* and shows a breakdown by function — it tells you *where* time is being
+spent, not *how much* total time is used.  Use `bench` to track regressions
+and compare setups; use `profile` to diagnose what to optimise.
+
+Options:
+
+| Flag | Description |
+|---|---|
+| `--warm` | Symlink existing compdump files into the temp dir so `compinit` is skipped, simulating a normal (non-first) startup |
+
+To compare old vs new setups, set `ZDOT_OLD_SETUP` yourself and run twice:
+
+```zsh
+ZDOT_OLD_SETUP=true  zdot profile
+ZDOT_OLD_SETUP=false zdot profile
+```
+
+Environment variables:
+
+| Variable | Description |
+|---|---|
+| `ZDOTDIR` | Respected automatically. The real `.zshrc` is sourced from `$ZDOTDIR/.zshrc` (falls back to `$HOME/.zshrc`). |
+| `ZDOT_OLD_SETUP` | Passed through unchanged into the profiled shell. Set it in the environment before running if your dotfiles honour it. |
 
 ---
 

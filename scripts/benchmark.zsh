@@ -1,16 +1,58 @@
 #!/usr/bin/env zsh
-# Benchmark zsh startup time for both plugin configurations and shell modes.
+# Benchmark zsh startup time across all four shell contexts.
 #
-# Usage: zsh benchmark.zsh [ITERATIONS]
+# Usage: zdot bench [--compare] [ITERATIONS]
 #
-# Compares OLD_PLUGINS=true (old) vs OLD_PLUGINS=false (new) for both
-# interactive (-i) and non-interactive shells.
+# The four contexts cover every combination of login/non-login and
+# interactive/non-interactive, because zdot can bootstrap from .zshenv,
+# .zprofile, or .zshrc depending on context:
 #
-# Note: OLD_PLUGINS=true is only supported in interactive shells (.zshrc is
-# sourced). Non-interactive shells source only .zshenv; the old-plugins module
-# is not loaded there, so that combination is skipped.
+#   interactive   non-login    zsh -i  -c exit
+#   interactive   login        zsh -il -c exit
+#   non-interactive non-login  zsh     -c exit
+#   non-interactive login      zsh -l  -c exit
+#
+# Flags:
+#
+#   --compare   Enable A/B comparison mode.  Runs each context twice:
+#               once with ZDOT_OLD_SETUP=true and once with
+#               ZDOT_OLD_SETUP=false.  Prints a verdict (new faster /
+#               new slower / same) per context.
+#               Requires your dotfiles to honour ZDOT_OLD_SETUP.
+#
+#   ITERATIONS  Positional integer argument — number of timed runs per
+#               variant (default: 20).  Can appear before or after --compare.
+#
+# Environment variables:
+#
+#   ZDOTDIR     Standard zsh variable.  When set, the benchmark touches
+#               $ZDOTDIR/.zshrc to bust the zdot startup cache before each
+#               variant's warmup run.  Defaults to $HOME.
+#
+#   ZDOT_OLD_SETUP   Your dotfiles' A/B flag.  Only used when --compare is
+#               passed.  The benchmark sets it to "true" (old setup) and
+#               "false" (new setup) in the child environment.  It is never
+#               read from the caller's environment — pass --compare instead.
 
-ITERATIONS=${1:-20}
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+ITERATIONS=20
+_BENCH_COMPARE=0
+
+for _arg in "$@"; do
+    case $_arg in
+        --compare) _BENCH_COMPARE=1 ;;
+        <->) ITERATIONS=$_arg ;;
+        *) echo "Usage: zdot bench [--compare] [ITERATIONS]" >&2; exit 1 ;;
+    esac
+done
+unset _arg
+
+# Resolve the zshrc path used for cache busting.
+_BENCH_ZSHRC="${ZDOTDIR:-${HOME}}/.zshrc"
+
 zmodload zsh/mathfunc
 
 # ---------------------------------------------------------------------------
@@ -20,9 +62,7 @@ zmodload zsh/mathfunc
 # Parse the output of TIMEFMT="%E" (format: [[h:]m:]ss.ms[s]) into seconds.
 _parse_time() {
     local raw=$1
-    # Remove trailing 's' if present (some zsh versions append it).
     raw=${raw%s}
-    # Split on ':' — last field is always seconds.fractions.
     local parts=("${(@s/:/)raw}")
     local secs=${parts[-1]}
     local mins=${parts[-2]:-0}
@@ -30,7 +70,6 @@ _parse_time() {
     printf "%.4f" $(( hours * 3600 + mins * 60 + secs ))
 }
 
-# Compute mean of an array of floats.
 _mean() {
     local -a vals=("$@")
     local total=0
@@ -38,7 +77,6 @@ _mean() {
     printf "%.3f" $(( total / ${#vals} ))
 }
 
-# Compute stddev of an array of floats (population stddev).
 _stddev() {
     local -a vals=("$@")
     local n=${#vals}
@@ -48,14 +86,12 @@ _stddev() {
     printf "%.3f" $(( sqrt(sumsq / n) ))
 }
 
-# Min of an array of floats.
 _min() {
     local m=$1; shift
     for v in "$@"; do (( v < m )) && m=$v; done
     printf "%.3f" $m
 }
 
-# Max of an array of floats.
 _max() {
     local m=$1; shift
     for v in "$@"; do (( v > m )) && m=$v; done
@@ -63,26 +99,30 @@ _max() {
 }
 
 # Run one benchmark variant.
-# Usage: _bench_variant LABEL OLD_PLUGINS_VALUE INTERACTIVE_FLAG
-# Sets _bench_samples (array of raw floats).
+# Usage: _bench_variant LABEL ZSH_FLAGS [ZDOT_OLD_SETUP_VAL]
+#   LABEL              Display name printed before the progress dots.
+#   ZSH_FLAGS          Flags passed to zsh (e.g. "-i", "-il", "-l", "").
+#   ZDOT_OLD_SETUP_VAL Optional.  When provided, sets ZDOT_OLD_SETUP=VAL
+#                      in the child environment.
 #
-# Cache invalidation: touches ~/.zshrc (which load_cache() checks via :A mtime)
-# then does one warmup run to rebuild cache for this variant before timing.
+# Sets _bench_samples (array of floats) on return.
+# Touches _BENCH_ZSHRC before warmup to bust the zdot cache.
 _bench_variant() {
-    local label=$1 old_plugins=$2 interactive=$3
+    local label=$1 zsh_flags=$2 old_setup_val=${3:-}
+    local env_prefix=""
+    [[ -n $old_setup_val ]] && env_prefix="ZDOT_OLD_SETUP=${old_setup_val} "
     local raw elapsed
     _bench_samples=()
 
-    printf "  %-42s " "$label"
+    printf "  %-50s " "$label"
 
-    # Bust cache then warmup (rebuilds cache for this variant).
-    touch ~/.zshrc
-    OLD_PLUGINS=$old_plugins zsh ${interactive:+-i} -c exit >/dev/null 2>&1
+    # Bust cache then warmup to rebuild cache for this variant.
+    touch "$_BENCH_ZSHRC"
+    eval "${env_prefix}zsh ${zsh_flags} -c exit" >/dev/null 2>&1
 
     for i in $(seq 1 $ITERATIONS); do
-        # Redirect the child zsh's stdout+stderr to /dev/null; time writes to
-        # stderr of the outer group, which is captured via 2>&1.
-        raw=$( { TIMEFMT="%E"; time OLD_PLUGINS=$old_plugins zsh ${interactive:+-i} -c exit >/dev/null 2>&1 } 2>&1 )
+        raw=$( { TIMEFMT="%E"; time eval "${env_prefix}zsh ${zsh_flags} -c exit" \
+            >/dev/null 2>&1 } 2>&1 )
         elapsed=$(_parse_time "$raw")
         _bench_samples+=($elapsed)
         printf "."
@@ -92,76 +132,117 @@ _bench_variant() {
     printf " mean=%ss\n" "$mean"
 }
 
+# Summarise a set of samples: mean/min/max/stddev.
+_summarise() {
+    local -a s=("$@")
+    echo "$(_mean $s) $(_min $s) $(_max $s) $(_stddev $s)"
+}
+
+# ---------------------------------------------------------------------------
+# Context definitions: (label, zsh_flags)
+# ---------------------------------------------------------------------------
+
+_context_labels=(
+    "interactive non-login"
+    "interactive login"
+    "non-interactive non-login"
+    "non-interactive login"
+)
+_context_flags=(
+    "-i"
+    "-il"
+    ""
+    "-l"
+)
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 echo "Benchmarking zsh startup ($ITERATIONS iterations, 1 warmup per variant)"
+echo "  zshrc for cache busting: $_BENCH_ZSHRC"
+(( _BENCH_COMPARE )) && echo "  mode: A/B compare (ZDOT_OLD_SETUP=true vs false)"
 echo ""
 
-# Interactive shells (both old and new plugins supported)
-echo "Interactive (zsh -i -c exit):"
-_bench_variant "old-plugins (OLD_PLUGINS=true)"  "true"  "-i"
-old_i_samples=($_bench_samples)
-_bench_variant "new-plugins (OLD_PLUGINS=false)" "false" "-i"
-new_i_samples=($_bench_samples)
+if (( _BENCH_COMPARE )); then
+    # -----------------------------------------------------------------------
+    # Comparison mode: each context run twice, old vs new
+    # -----------------------------------------------------------------------
 
-echo ""
+    typeset -A old_means new_means old_mins new_mins old_maxs new_maxs old_sds new_sds
 
-# Non-interactive shells (new plugins only — old-plugins module requires .zshrc)
-echo "Non-interactive (zsh -c exit):"
-echo "  (OLD_PLUGINS=true skipped: old-plugins module only loads via .zshrc)"
-_bench_variant "new-plugins (OLD_PLUGINS=false)" "false" ""
-new_ni_samples=($_bench_samples)
+    for i in $(seq 1 ${#_context_labels}); do
+        local ctx="${_context_labels[$i]}"
+        local flags="${_context_flags[$i]}"
 
-echo ""
+        echo "${ctx}:"
+        _bench_variant "  old (ZDOT_OLD_SETUP=true)  [${ctx}]" "$flags" "true"
+        old_means[$ctx]=$(_mean $_bench_samples)
+        old_mins[$ctx]=$( _min  $_bench_samples)
+        old_maxs[$ctx]=$( _max  $_bench_samples)
+        old_sds[$ctx]=$(  _stddev $_bench_samples)
 
-# ---------------------------------------------------------------------------
-# Summary table
-# ---------------------------------------------------------------------------
+        _bench_variant "  new (ZDOT_OLD_SETUP=false) [${ctx}]" "$flags" "false"
+        new_means[$ctx]=$(_mean $_bench_samples)
+        new_mins[$ctx]=$( _min  $_bench_samples)
+        new_maxs[$ctx]=$( _max  $_bench_samples)
+        new_sds[$ctx]=$(  _stddev $_bench_samples)
+        echo ""
+    done
 
-_diff_pct() {
-    local old=$1 new=$2
-    if (( old == 0 )); then
-        printf "n/a"
-    else
+    _diff_pct() {
+        local old=$1 new=$2
+        (( old == 0 )) && { printf "n/a"; return }
         printf "%+.1f%%" $(( (new - old) / old * 100 ))
-    fi
-}
+    }
 
-_verdict() {
-    local old=$1 new=$2
-    if (( old == 0 )); then
-        printf "n/a"
-    elif (( new < old - 0.005 )); then
-        printf "new faster"
-    elif (( new > old + 0.005 )); then
-        printf "new slower"
-    else
-        printf "same"
-    fi
-}
+    _verdict() {
+        local old=$1 new=$2
+        (( old == 0 )) && { printf "n/a"; return }
+        if   (( new < old - 0.005 )); then printf "new faster"
+        elif (( new > old + 0.005 )); then printf "new slower"
+        else printf "same"
+        fi
+    }
 
-old_i_mean=$(_mean  $old_i_samples)
-old_i_min=$( _min   $old_i_samples)
-old_i_max=$( _max   $old_i_samples)
-old_i_sd=$(  _stddev $old_i_samples)
+    fmt="%-30s  %-3s  %8s  %8s  %8s  %8s  %s\n"
+    printf "$fmt" "Context" "var" "mean" "min" "max" "stddev" "verdict"
+    printf "$fmt" "------------------------------" "---" "--------" "--------" "--------" "--------" "----------"
 
-new_i_mean=$(_mean  $new_i_samples)
-new_i_min=$( _min   $new_i_samples)
-new_i_max=$( _max   $new_i_samples)
-new_i_sd=$(  _stddev $new_i_samples)
+    for i in $(seq 1 ${#_context_labels}); do
+        local ctx="${_context_labels[$i]}"
+        printf "$fmt" "$ctx" "old" \
+            "${old_means[$ctx]}s" "${old_mins[$ctx]}s" "${old_maxs[$ctx]}s" "${old_sds[$ctx]}s" ""
+        printf "$fmt" "" "new" \
+            "${new_means[$ctx]}s" "${new_mins[$ctx]}s" "${new_maxs[$ctx]}s" "${new_sds[$ctx]}s" \
+            "$(_verdict ${old_means[$ctx]} ${new_means[$ctx]}) ($(_diff_pct ${old_means[$ctx]} ${new_means[$ctx]}))"
+    done
+    echo ""
 
-new_ni_mean=$(_mean  $new_ni_samples)
-new_ni_min=$( _min   $new_ni_samples)
-new_ni_max=$( _max   $new_ni_samples)
-new_ni_sd=$(  _stddev $new_ni_samples)
+else
+    # -----------------------------------------------------------------------
+    # Default mode: all four contexts, no A/B
+    # -----------------------------------------------------------------------
 
-fmt="%-20s  %8s  %8s  %8s  %8s  %8s  %s\n"
-printf "$fmt" "Mode" "variant" "mean" "min" "max" "stddev" "verdict"
-printf "$fmt" "--------------------" "--------" "--------" "--------" "--------" "--------" "----------"
-printf "$fmt" "interactive" "old" "${old_i_mean}s" "${old_i_min}s" "${old_i_max}s" "${old_i_sd}s" ""
-printf "$fmt" "" "new" "${new_i_mean}s" "${new_i_min}s" "${new_i_max}s" "${new_i_sd}s" \
-    "$(_verdict $old_i_mean $new_i_mean) ($(_diff_pct $old_i_mean $new_i_mean))"
-printf "$fmt" "non-interactive" "new" "${new_ni_mean}s" "${new_ni_min}s" "${new_ni_max}s" "${new_ni_sd}s" "n/a"
-echo ""
+    typeset -A means mins maxs sds
+
+    for i in $(seq 1 ${#_context_labels}); do
+        local ctx="${_context_labels[$i]}"
+        local flags="${_context_flags[$i]}"
+        _bench_variant "$ctx" "$flags"
+        means[$ctx]=$(_mean $_bench_samples)
+        mins[$ctx]=$( _min  $_bench_samples)
+        maxs[$ctx]=$( _max  $_bench_samples)
+        sds[$ctx]=$(  _stddev $_bench_samples)
+    done
+
+    echo ""
+    fmt="%-30s  %8s  %8s  %8s  %8s\n"
+    printf "$fmt" "Context" "mean" "min" "max" "stddev"
+    printf "$fmt" "------------------------------" "--------" "--------" "--------" "--------"
+    for i in $(seq 1 ${#_context_labels}); do
+        local ctx="${_context_labels[$i]}"
+        printf "$fmt" "$ctx" "${means[$ctx]}s" "${mins[$ctx]}s" "${maxs[$ctx]}s" "${sds[$ctx]}s"
+    done
+    echo ""
+fi
