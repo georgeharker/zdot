@@ -141,6 +141,10 @@ function _zdot_emit() {
     fi
 }
 
+function _zdot_emit_err() {
+    print -P "$1" >&2
+}
+
 # Helper output functions that respect zdot_quiet_mode
 function zdot_verbose(){
     [[ "$zdot_verbose_mode" = true ]] || return 0
@@ -180,11 +184,9 @@ function zdot_action(){
 }
 
 function zdot_error(){
-    [[ "$zdot_quiet_mode" = true ]] && return 0
-    _zdot_emit "%F{red}$*%f"
+    _zdot_emit_err "%F{red}$*%f"
 }
 
 function zdot_warn(){
-    [[ "$zdot_quiet_mode" = true ]] && return 0
-    _zdot_emit "%F{yellow}$*%f"
+    _zdot_emit_err "%F{yellow}$*%f"
 }

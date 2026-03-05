@@ -58,26 +58,45 @@ verbose() { zdot_verbose "$@"; }
 
 # ---------------------------------------------------------------------------
 # Source update_core.sh shared primitives
+# 3-step priority matching dotfiler-hook.zsh:
+#   1. zstyle ':zdot:dotfiler' scripts-dir override
+#   2. Parent repo .nounpack/dotfiler
+#   3. Plugin cache
 # ---------------------------------------------------------------------------
 {
-    # Step 2 of the find logic (parent repo) without a full find call —
-    # _update_core_get_parent_root isn't available yet so use git directly.
-    local _zdot_update_parent
-    _zdot_update_parent=$(
-        git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
-    [[ -z "$_zdot_update_parent" ]] && \
-        _zdot_update_parent=$(
-            git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+    local _zdot_update_core_dir=""
 
-    local _zdot_update_core_dir
-    if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
-        _zdot_update_core_dir="${_zdot_update_parent}/.nounpack/dotfiler"
-    else
-        local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
-        _zdot_update_core_dir="${_cache}/georgeharker/dotfiler"
+    # 1. zstyle override
+    local _zdot_update_zstyle_dir
+    zstyle -s ':zdot:dotfiler' scripts-dir _zdot_update_zstyle_dir 2>/dev/null
+    if [[ -n "$_zdot_update_zstyle_dir" \
+       && -f "${_zdot_update_zstyle_dir}/update_core.sh" ]]; then
+        _zdot_update_core_dir="$_zdot_update_zstyle_dir"
     fi
 
-    if [[ -f "${_zdot_update_core_dir}/update_core.sh" ]]; then
+    # 2. Parent repo
+    if [[ -z "$_zdot_update_core_dir" ]]; then
+        local _zdot_update_parent
+        _zdot_update_parent=$(
+            git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+        [[ -z "$_zdot_update_parent" ]] && \
+            _zdot_update_parent=$(
+                git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+        if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
+            _zdot_update_core_dir="${_zdot_update_parent}/.nounpack/dotfiler"
+        fi
+    fi
+
+    # 3. Plugin cache
+    if [[ -z "$_zdot_update_core_dir" ]]; then
+        local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
+        local _candidate="${_cache}/georgeharker/dotfiler"
+        [[ -f "${_candidate}/update_core.sh" ]] && \
+            _zdot_update_core_dir="$_candidate"
+    fi
+
+    if [[ -n "$_zdot_update_core_dir" ]]; then
+        _zdot_dotfiler_scripts_dir="$_zdot_update_core_dir"
         source "${_zdot_update_core_dir}/update_core.sh" 2>/dev/null || true
     fi
 }
@@ -114,13 +133,12 @@ _zdot_update_install_dotfiler_hook() {
 
     local _hook_link="${_hooks_dir}/zdot.zsh"
 
-    # Install/update symlink — dotfiler invokes hooks as direct executables so
-    # %x:A in dotfiler-hook.zsh resolves the symlink to the real file correctly.
+    # Install/update symlink — dotfiler sources hooks (not exec's them),
+    # so no +x needed. %x:A in dotfiler-hook.zsh resolves the symlink correctly.
     local _current
     [[ -L "$_hook_link" ]] && _current=$(readlink "$_hook_link" 2>/dev/null)
     if [[ "$_current" != "$_hook_src" ]]; then
         ln -sf "$_hook_src" "$_hook_link" 2>/dev/null
-        chmod +x "$_hook_link" 2>/dev/null
     fi
 }
 
@@ -134,14 +152,16 @@ _zdot_update_install_dotfiler_hook() {
 # ---------------------------------------------------------------------------
 
 _zdot_update_cleanup() {
-    # Unset functions defined in update-impl.zsh
-    { command -v _zdot_update_impl_cleanup &>/dev/null && _zdot_update_impl_cleanup; } 2>/dev/null || true
+    # Unset functions defined in update-impl.zsh that are not needed at runtime
+    { (( ${+functions[_zdot_update_impl_cleanup_shell]} )) \
+        && _zdot_update_impl_cleanup_shell; } 2>/dev/null || true
     # Unset functions local to this file
     unset -f \
         _zdot_update_install_dotfiler_hook \
         warn info error verbose \
         2>/dev/null
-    { command -v _update_core_cleanup &>/dev/null && _update_core_cleanup; } 2>/dev/null || true
+    { (( ${+functions[_update_core_cleanup]} )) \
+        && _update_core_cleanup; } 2>/dev/null || true
     unset -f _zdot_update_cleanup 2>/dev/null
 }
 

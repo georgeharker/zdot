@@ -1,25 +1,22 @@
-#!/usr/bin/env zsh
 # core/dotfiler-hook.zsh
-# zdot update hook — thin dispatcher for the dotfiler hook system.
+# zdot update hook for the dotfiler hook system.
 #
 # Installed into the dotfiler hooks directory as a symlink pointing back here.
-# Because dotfiler invokes hooks as direct executables (never via `zsh -c`),
-# %x is the symlink path and :A resolves it to this file's real location,
+# %x resolves (via :A) to this file's real location inside ZDOT_DIR/core/,
 # giving us ZDOT_DIR reliably without any stub or pre-set variable.
 #
-# Interface (called by dotfiler's check_update.sh / update.sh):
-#   zdot.zsh check-update            → 0 available | 1 up-to-date | 2 error
-#   zdot.zsh apply-update            → 0 applied   | 1 nothing    | 2 error
-#   zdot.zsh apply-update --dry-run
-
-emulate -L zsh
-setopt pipe_fail no_unset
+# Always sourced — never exec'd.
+# Callers (dotfiler's update.sh and check_update.sh) source this file directly.
+# All _zdot_update_hook_* functions are defined in-process.
+# _zdot_update_hook_register registers phase functions into the caller's registry
+# via _update_register_hook (defined by the caller — real in update.sh, shim in
+# check_update.sh). No DOTFILER_HOOK_MODE or branching needed.
 
 # Self-location: :A resolves the symlink to the real file inside ZDOT_DIR/core/
 ZDOT_DIR="${${${(%):-%x}:A}:h:h}"
 
 # ---------------------------------------------------------------------------
-# Locate and source update_core.sh
+# Locate update_core.sh
 # Priority: 1. zstyle override  2. parent repo .nounpack/dotfiler  3. plugin cache
 # ---------------------------------------------------------------------------
 _zdot_hook_find_update_core() {
@@ -31,9 +28,10 @@ _zdot_hook_find_update_core() {
         REPLY=$_candidate; return 0
     fi
 
-    # 2. Parent repo (superproject-then-toplevel fallback, same as update_core logic)
+    # 2. Parent repo (superproject-then-toplevel fallback)
     local _root
-    _root=$(git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+    _root=$(git -C "$ZDOT_DIR" \
+        rev-parse --show-superproject-working-tree 2>/dev/null)
     [[ -z "$_root" ]] && \
         _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/update_core.sh" ]]; then
@@ -52,70 +50,33 @@ _zdot_hook_find_update_core() {
 
 _zdot_hook_find_update_core || {
     print "zdot dotfiler-hook: could not find update_core.sh" >&2
-    exit 2
+    return 2
 }
+_zdot_dotfiler_scripts_dir="$REPLY"
 unset -f _zdot_hook_find_update_core
 
-source "${REPLY}/update_core.sh" || exit 2
+source "${_zdot_dotfiler_scripts_dir}/update_core.sh" || return 2
 
 # ---------------------------------------------------------------------------
-# Logging shims (update_core.sh + update-impl.zsh use warn/info/verbose/error)
+# Logging shims
+# info/verbose → stdout (user-facing progress)
+# warn/error   → stderr (diagnostics)
 # ---------------------------------------------------------------------------
-warn()    { print "zdot-hook: $*" >&2; }
-info()    { print "zdot-hook: $*"; }
-error()   { print "zdot-hook: $*" >&2; }
-verbose() { [[ -n "${DOTFILES_DEBUG:-}" ]] && print "zdot-hook[v]: $*"; }
-
-# ---------------------------------------------------------------------------
-# Source shared implementation
-# ---------------------------------------------------------------------------
-source "${ZDOT_DIR}/core/update-impl.zsh" || exit 2
-
-# ---------------------------------------------------------------------------
-# check-update verb
-# ---------------------------------------------------------------------------
-_zdot_hook_check_update() {
-    # allow_diverged=1: dotfiler will call apply-update on rc=0, and git pull
-    # handles diverged histories via merge — so report diverged as available.
-    _update_core_is_available "$ZDOT_DIR" "" 1
+warn()    { print "zdot-hook: $*" >&2; return 0; }
+info()    { print "zdot-hook: $*"; return 0; }
+error()   { print "zdot-hook: $*" >&2; return 0; }
+verbose() {
+    { [[ -n "${DOTFILES_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] } \
+        && print "[debug] zdot-hook: $*"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
-# apply-update verb
+# Source shared implementation (all hook logic lives here)
 # ---------------------------------------------------------------------------
-_zdot_hook_apply_update() {
-    local _dry_run="${1:-}"
-    local _subtree_spec
-    zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null || _subtree_spec=""
-    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"
-    local _deploy=$REPLY
-
-    if [[ -n "$_dry_run" ]]; then
-        # Delegate dry-run info to the relevant apply function via a dry_run flag;
-        # but the apply functions don't take flags — so just check availability
-        # and report what would happen.
-        _zdot_hook_check_update || return $?
-        info "dry-run: update available for topology=${_deploy}"
-        return 0
-    fi
-
-    case $_deploy in
-        standalone) _zdot_update_standalone_apply ;;
-        submodule)  _zdot_update_submodule_apply  ;;
-        subtree)    _zdot_update_subtree_apply     ;;
-        subdir|*)   return 1                       ;;
-    esac
-}
+source "${ZDOT_DIR}/core/update-impl.zsh" || return 2
 
 # ---------------------------------------------------------------------------
-# Dispatch
+# Entry point — register phase functions into the caller's registry
 # ---------------------------------------------------------------------------
-case "${1:-}" in
-    check-update)  _zdot_hook_check_update ;;
-    apply-update)  _zdot_hook_apply_update "${2:-}" ;;
-    *)
-        print "zdot dotfiler-hook: unknown verb '${1:-}'" >&2
-        print "  usage: $(basename $0) check-update | apply-update [--dry-run]" >&2
-        exit 2
-        ;;
-esac
+_zdot_update_hook_register
