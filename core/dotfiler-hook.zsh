@@ -2,8 +2,8 @@
 # zdot update hook for the dotfiler hook system.
 #
 # Installed into the dotfiler hooks directory as a symlink pointing back here.
-# %x resolves (via :A) to this file's real location inside ZDOT_DIR/core/,
-# giving us ZDOT_DIR reliably without any stub or pre-set variable.
+# %x resolves (via :A) to this file's real location inside ZDOT_REPO/core/,
+# giving us ZDOT_REPO reliably without any stub or pre-set variable.
 #
 # Always sourced — never exec'd.
 # Callers (dotfiler's update.sh and check_update.sh) source this file directly.
@@ -12,8 +12,9 @@
 # via _update_register_hook (defined by the caller — real in update.sh, shim in
 # check_update.sh). No DOTFILER_HOOK_MODE or branching needed.
 
-# Self-location: :A resolves the symlink to the real file inside ZDOT_DIR/core/
-ZDOT_DIR="${${${(%):-%x}:A}:h:h}"
+# Self-location: :A resolves the symlink to the real backing repo inside ZDOT_REPO/core/
+# ZDOT_DIR (the linktree path) must NOT be clobbered here — core.zsh sets it correctly.
+ZDOT_REPO="${${${(%):-%x}:A}:h:h}"
 
 # ---------------------------------------------------------------------------
 # Locate update_core.sh
@@ -29,11 +30,12 @@ _zdot_hook_find_update_core() {
     fi
 
     # 2. Parent repo (superproject-then-toplevel fallback)
+    # Use ZDOT_REPO (real worktree) so git can resolve .git correctly.
     local _root
-    _root=$(git -C "$ZDOT_DIR" \
+    _root=$(git -C "$ZDOT_REPO" \
         rev-parse --show-superproject-working-tree 2>/dev/null)
     [[ -z "$_root" ]] && \
-        _root=$(git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+        _root=$(git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/update_core.sh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
     fi

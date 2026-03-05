@@ -15,11 +15,18 @@
 # any paths derived from it remain consistent with how the user addresses
 # the directory. Mtime comparisons that use ZDOT_DIR pass through
 # zdot_is_newer_or_missing, which applies :A at comparison time.
+#
+# ZDOT_REPO always points at the real backing repo (symlinks resolved via :A).
+# Use ZDOT_REPO wherever git operations need the actual worktree, not the
+# linktree — e.g. update scripts calling git rev-parse.
 _zdot_this_script_file="${${(%):-%x}:a}"
 _zdot_base_dir="${_zdot_this_script_file:h:h}"     # .../zdot (go up twice from core/)
-typeset -g ZDOT_DIR="${_zdot_base_dir}"              # Export as global
+typeset -g ZDOT_DIR="${_zdot_base_dir}"              # Export as global (linktree path)
 typeset -g _ZDOT_LIB_DIR="${_zdot_base_dir}/lib"            # .../zdot/lib
-unset _zdot_this_script_file _zdot_base_dir
+_zdot_this_real_script_file="${${(%):-%x}:A}"
+_zdot_repo_dir="${_zdot_this_real_script_file:h:h}" # .../zdot real path (symlinks resolved)
+typeset -g ZDOT_REPO="${_zdot_repo_dir}"             # Export as global (real repo path)
+unset _zdot_this_script_file _zdot_base_dir _zdot_this_real_script_file _zdot_repo_dir
 
 # ============================================================================
 # Lazy Path Evaluation - XDG-Dependent

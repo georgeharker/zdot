@@ -35,10 +35,10 @@
         # or subtree inside a dotfiler-managed dotfiles repo.
         local _zdot_update_init_parent
         _zdot_update_init_parent=$(
-            git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+            git -C "$ZDOT_REPO" rev-parse --show-superproject-working-tree 2>/dev/null)
         [[ -z "$_zdot_update_init_parent" ]] && \
             _zdot_update_init_parent=$(
-                git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+                git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
         if [[ ! -f "${_zdot_update_init_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
             zdot_use_bundle "georgeharker/dotfiler"
         fi
@@ -78,10 +78,10 @@ verbose() { zdot_verbose "$@"; }
     if [[ -z "$_zdot_update_core_dir" ]]; then
         local _zdot_update_parent
         _zdot_update_parent=$(
-            git -C "$ZDOT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+            git -C "$ZDOT_REPO" rev-parse --show-superproject-working-tree 2>/dev/null)
         [[ -z "$_zdot_update_parent" ]] && \
             _zdot_update_parent=$(
-                git -C "$ZDOT_DIR" rev-parse --show-toplevel 2>/dev/null)
+                git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
         if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.sh" ]]; then
             _zdot_update_core_dir="${_zdot_update_parent}/.nounpack/dotfiler"
         fi
@@ -110,16 +110,16 @@ source "${ZDOT_DIR}/core/update-impl.zsh"
 # Hook self-installation
 # ---------------------------------------------------------------------------
 # When zdot is running inside a dotfiler-managed repo, write a stub hook
-# script into the dotfiler hooks directory.  The stub hard-codes ZDOT_DIR
-# so the hook can locate its source repo without relying on symlink resolution
-# (same pattern as dotfiler's own scripts referencing each other via %x:A).
+# script into the dotfiler hooks directory.  Uses ZDOT_REPO (the real backing
+# repo path, symlinks resolved) so git operations work correctly regardless of
+# whether the linktree has a symlinked .git file.
 # Runs at source time; cheap ([[ -f ]] checks only).
 
 _zdot_update_install_dotfiler_hook() {
     # Only install if _update_core_get_parent_root is available (update_core.sh loaded)
     (( ${+functions[_update_core_get_parent_root]} )) || return 0
 
-    _update_core_get_parent_root "$ZDOT_DIR"
+    _update_core_get_parent_root "$ZDOT_REPO"
     local _parent_root=${reply[1]}
     [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.sh" ]] || return 0
 
@@ -128,7 +128,7 @@ _zdot_update_install_dotfiler_hook() {
         || _hooks_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiler/hooks"
     [[ -d "$_hooks_dir" ]] || mkdir -p "$_hooks_dir" 2>/dev/null || return 0
 
-    local _hook_src="${ZDOT_DIR}/core/dotfiler-hook.zsh"
+    local _hook_src="${ZDOT_REPO}/core/dotfiler-hook.zsh"
     [[ -f "$_hook_src" ]] || return 0
 
     local _hook_link="${_hooks_dir}/zdot.zsh"

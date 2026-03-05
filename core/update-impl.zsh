@@ -2,7 +2,7 @@
 # zdot update implementation — pure functions, no side effects at source time.
 #
 # Callers must:
-#   1. Set ZDOT_DIR before sourcing this file.
+#   1. Set ZDOT_DIR (linktree path) and ZDOT_REPO (real repo path) before sourcing this file.
 #   2. Set _zdot_dotfiler_scripts_dir to the dotfiler scripts path.
 #   3. Source update_core.sh before sourcing this file (provides _update_core_*).
 #   4. Define warn / info / error / verbose shims (only called at runtime).
@@ -39,7 +39,7 @@ _zdot_update_find_dotfiler_scripts() {
 
     # 2. Inside a parent repo that already has dotfiler scripts
     local _root
-    _update_core_get_parent_root "$ZDOT_DIR"; _root=${reply[1]}
+    _update_core_get_parent_root "$ZDOT_REPO"; _root=${reply[1]}
     if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/setup.sh" \
                        && -f "$_root/.nounpack/dotfiler/update.sh" ]]; then
         REPLY="$_root/.nounpack/dotfiler"; return 0
@@ -71,7 +71,7 @@ _zdot_update_find_dotfiler_scripts() {
 # check: is an update available?
 # Returns 0=available, 1=up-to-date, 2=error.
 _zdot_update_hook_check() {
-    _update_core_is_available "$ZDOT_DIR" "" 1
+    _update_core_is_available "$ZDOT_REPO" "" 1
     return $?
 }
 
@@ -85,14 +85,14 @@ _zdot_update_hook_plan() {
     zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
         || _subtree_spec=""
 
-    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"
+    _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
 
     # Resolve old/new SHAs — use hint range from dotfiler if provided
     # (set when update.sh is run with --range or --commit-hash and was able
     # to resolve the zdot component range from the dotfiles range via markers).
     local _old _new _remote _branch
-    _old=$(git -C "$ZDOT_DIR" rev-parse HEAD 2>/dev/null) || return 0
+    _old=$(git -C "$ZDOT_REPO" rev-parse HEAD 2>/dev/null) || return 0
 
     if [[ -n "${_dotfiler_hint_range_zdot:-}" ]]; then
         # Hint range: "old_comp_sha..new_comp_sha" resolved by dotfiler
@@ -100,8 +100,8 @@ _zdot_update_hook_plan() {
         _new="${_dotfiler_hint_range_zdot#*..}"
         verbose "zdot hook plan: using hint range ${_dotfiler_hint_range_zdot}"
         # Still need remote/branch for pull phase
-        _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
-        _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
+        _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
+        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
     else
         case "$_topology" in
             subtree)
@@ -109,18 +109,18 @@ _zdot_update_hook_plan() {
                 _branch="${_subtree_spec#* }"
                 [[ "$_branch" == "$_remote" ]] && _branch=""
                 [[ -z "$_branch" ]] && \
-                    _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
+                    _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
                 local _remote_url
-                _remote_url=$(git -C "$ZDOT_DIR" \
+                _remote_url=$(git -C "$ZDOT_REPO" \
                     config "remote.${_remote}.url" 2>/dev/null) || return 0
                 _update_core_resolve_remote_sha "$_remote_url" "$_branch"
                 _new="$REPLY"
                 ;;
             submodule|standalone|*)
-                _remote=$(_update_core_get_default_remote "$ZDOT_DIR")
-                _branch=$(_update_core_get_default_branch "$ZDOT_DIR" "$_remote")
-                git -C "$ZDOT_DIR" fetch -q "$_remote" "$_branch" 2>/dev/null
-                _new=$(git -C "$ZDOT_DIR" \
+                _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
+                _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+                git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>/dev/null
+                _new=$(git -C "$ZDOT_REPO" \
                     rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 0
                 ;;
         esac
@@ -137,7 +137,7 @@ _zdot_update_hook_plan() {
 
     # Build file lists using the shared update_core helper
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
-    _update_core_build_file_lists "$ZDOT_DIR" "${_old}..${_new}"
+    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
     verbose "zdot hook plan: ${#_update_core_files_to_unpack[@]} to unpack, \
 ${#_update_core_files_to_remove[@]} to remove"
@@ -147,7 +147,7 @@ ${#_update_core_files_to_remove[@]} to remove"
     # or called directly (_zdot_update_handle_update standalone path).
     # to_unpack/to_remove are additive (typeset -gaU ensures uniqueness).
     typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
-    _dotfiler_plan_zdot_repo_dir="$ZDOT_DIR"
+    _dotfiler_plan_zdot_repo_dir="$ZDOT_REPO"
     _dotfiler_plan_zdot_link_dest="$_link_dest"
     _dotfiler_plan_zdot_topology="$_topology"
     _dotfiler_plan_zdot_range="${_old}..${_new}"
@@ -163,7 +163,7 @@ ${#_update_core_files_to_remove[@]} to remove"
 # Reads topology and remote/branch from _dotfiler_plan_zdot_* vars set by plan.
 _zdot_update_hook_pull() {
     local _topology="${_dotfiler_plan_zdot_topology:-}"
-    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_DIR}"
+    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _remote="${_dotfiler_plan_zdot_remote:-}"
     local _branch="${_dotfiler_plan_zdot_branch:-}"
 
@@ -211,7 +211,7 @@ _zdot_update_hook_unpack() {
     zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
     [[ "$_link_tree" == false ]] && return 0
 
-    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_DIR}"
+    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _link_dest="${_dotfiler_plan_zdot_link_dest}"
     local -a _to_unpack=("${_dotfiler_plan_zdot_to_unpack[@]}")
     local -a _to_remove=("${_dotfiler_plan_zdot_to_remove[@]}")
@@ -240,7 +240,7 @@ _zdot_update_hook_unpack() {
 # post: commit parent pointer, write SHA marker if subtree.
 _zdot_update_hook_post() {
     local _topology="${_dotfiler_plan_zdot_topology:-}"
-    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_DIR}"
+    local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _itc_mode
     zstyle -s ':zdot:update' in-tree-commit _itc_mode
 
@@ -334,7 +334,7 @@ _zdot_update_apply_range() {
     : ${_destdir:=${XDG_CONFIG_HOME:-$HOME/.config}/zdot}
 
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
-    _update_core_build_file_lists "$ZDOT_DIR" "${_old}..${_new}"
+    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
     local _f _dest
     for _f in "${_update_core_files_to_remove[@]}"; do
@@ -345,7 +345,7 @@ _zdot_update_apply_range() {
     [[ ${#_update_core_files_to_unpack[@]} -eq 0 ]] && return 0
 
     "${_zdot_dotfiler_scripts_dir}/setup.sh" \
-        --repo-dir "$ZDOT_DIR" \
+        --repo-dir "$ZDOT_REPO" \
         --link-dest "$_destdir" \
         -u \
         "${_update_core_files_to_unpack[@]}"
@@ -362,7 +362,7 @@ _zdot_update_hook_register() {
     local _subtree_spec
     zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
         || _subtree_spec=""
-    _update_core_detect_deployment "$ZDOT_DIR" "$_subtree_spec"
+    _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
     _update_register_hook zdot \
         _zdot_update_hook_check \
@@ -371,7 +371,7 @@ _zdot_update_hook_register() {
         _zdot_update_hook_unpack \
         _zdot_update_hook_post \
         _zdot_update_impl_cleanup_hook \
-        "$ZDOT_DIR" \
+        "$ZDOT_REPO" \
         "$_topology"
 }
 
@@ -391,9 +391,9 @@ _zdot_update_handle_update() {
     [[ "${_mode:-disabled}" == disabled ]] && return 0
 
     # 2. Early-exit guards
-    [[ -n "$ZDOT_DIR" && -d "$ZDOT_DIR" ]] || return 0
+    [[ -n "$ZDOT_REPO" && -d "$ZDOT_REPO" ]] || return 0
     command -v git &>/dev/null || return 0
-    git -C "$ZDOT_DIR" rev-parse --is-inside-work-tree &>/dev/null || return 0
+    git -C "$ZDOT_REPO" rev-parse --is-inside-work-tree &>/dev/null || return 0
 
     # 3. Acquire lock (prevents concurrent shells racing)
     local _lock_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/update.lock"
@@ -418,7 +418,7 @@ _zdot_update_handle_update() {
     # 6. Dispatch by mode
     case "$_mode" in
         reminder)
-            zdot_info "zdot: update available (run: git -C \$ZDOT_DIR pull)"
+            zdot_info "zdot: update available (run: git -C \$ZDOT_REPO pull)"
             _update_core_write_timestamp "$_ts" 0 ""
             _update_core_release_lock "$_lock_dir"
             return 0
