@@ -54,7 +54,7 @@
 warn()    { zdot_warn "$@"; }
 info()    { zdot_info "$@"; }
 error()   { zdot_warn "$@"; }
-verbose() { zdot_verbose "$@"; }
+verbose() { zdot_verbose "%F{cyan}[debug]%f $*"; }
 
 # ---------------------------------------------------------------------------
 # Source update_core.sh shared primitives

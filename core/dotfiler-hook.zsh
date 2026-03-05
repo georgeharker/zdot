@@ -69,7 +69,7 @@ info()    { print "zdot-hook: $*"; return 0; }
 error()   { print "zdot-hook: $*" >&2; return 0; }
 verbose() {
     { [[ -n "${DOTFILES_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] } \
-        && print "[debug] zdot-hook: $*"
+        && print -P "%F{cyan}[debug]%f zdot-hook: $*"
     return 0
 }
 
