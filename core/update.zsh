@@ -53,8 +53,9 @@
 # ---------------------------------------------------------------------------
 warn()    { zdot_warn "$@"; }
 info()    { zdot_info "$@"; }
-error()   { zdot_warn "$@"; }
-verbose() { zdot_verbose "%F{cyan}[debug]%f $*"; }
+error()     { zdot_error "$@"; }
+verbose()   { zdot_verbose "$*"; }
+log_debug() { zdot_log_debug "$*"; }
 
 # ---------------------------------------------------------------------------
 # Source update_core.sh shared primitives
@@ -158,7 +159,7 @@ _zdot_update_cleanup() {
     # Unset functions local to this file
     unset -f \
         _zdot_update_install_dotfiler_hook \
-        warn info error verbose \
+        warn info error verbose log_debug \
         2>/dev/null
     # _update_core_* functions are NOT cleaned up here: they are runtime
     # dependencies of _zdot_update_handle_update (via _zdot_update_hook_*).

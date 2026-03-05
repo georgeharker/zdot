@@ -5,9 +5,8 @@
 #   zstyle ':zdot:logging' quiet   true
 #   zstyle ':zdot:logging' verbose true
 zdot_quiet_mode=false
-zdot_verbose_mode=false
 zstyle -t ':zdot:logging' quiet   && zdot_quiet_mode=true
-zstyle -t ':zdot:logging' verbose && zdot_verbose_mode=true
+zstyle -t ':zdot:logging' verbose && export ZDOT_VERBOSE=1
 
 # ---------------------------------------------------------------------------
 # Deferred-execution logging state
@@ -86,7 +85,6 @@ function zdot_show_deferred_log() {
 function zdot_cleanup_logging(){
     # Unset variables
     unset zdot_quiet_mode 2>/dev/null
-    unset zdot_verbose_mode 2>/dev/null
     unset _ZDOT_DEFERRED_ACTIVE 2>/dev/null
     unset _ZDOT_DEFERRED_SHOWN 2>/dev/null
     unset _ZDOT_DEFERRED_MESSAGES 2>/dev/null
@@ -101,6 +99,8 @@ function zdot_cleanup_logging(){
     unset -f zdot_action 2>/dev/null
     unset -f zdot_error 2>/dev/null
     unset -f zdot_warn 2>/dev/null
+    unset -f zdot_verbose 2>/dev/null
+    unset -f zdot_log_debug 2>/dev/null
     unset -f zdot_show_deferred_log 2>/dev/null
     unset -f _zdot_flush_handler 2>/dev/null
     unset -f _zdot_deferred_progress_print 2>/dev/null
@@ -147,8 +147,15 @@ function _zdot_emit_err() {
 
 # Helper output functions that respect zdot_quiet_mode
 function zdot_verbose(){
-    [[ "$zdot_verbose_mode" = true ]] || return 0
-    _zdot_emit "$*"
+    { [[ -n "${ZDOT_VERBOSE:-}" ]] \
+        || [[ -n "${ZDOT_DEBUG:-}" ]]; } || return 0
+    _zdot_emit "%F{cyan}[verbose]%f $*"
+    return 0
+}
+
+function zdot_log_debug(){
+    [[ -n "${ZDOT_DEBUG:-}" ]] || return 0
+    _zdot_emit "%F{magenta}[debug]%f $*"
     return 0
 }
 

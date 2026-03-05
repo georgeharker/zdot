@@ -64,12 +64,19 @@ source "${_zdot_dotfiler_scripts_dir}/update_core.sh" || return 2
 # info/verbose → stdout (user-facing progress)
 # warn/error   → stderr (diagnostics)
 # ---------------------------------------------------------------------------
-warn()    { print "zdot-hook: $*" >&2; return 0; }
-info()    { print "zdot-hook: $*"; return 0; }
-error()   { print "zdot-hook: $*" >&2; return 0; }
+warn()      { print "zdot-hook: $*" >&2; return 0; }
+info()      { print "zdot-hook: $*"; return 0; }
+error()     { print "zdot-hook: $*" >&2; return 0; }
 verbose() {
-    { [[ -n "${DOTFILES_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] } \
-        && print -P "%F{cyan}[debug]%f zdot-hook: $*"
+    [[ -n "${DOTFILER_VERBOSE:-}" ]] || [[ -n "${ZDOT_VERBOSE:-}" ]] \
+        || return 0
+    print -P "%F{cyan}[verbose]%f zdot-hook: $*"
+    return 0
+}
+log_debug() {
+    [[ -n "${DOTFILER_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] \
+        || return 0
+    print -P "%F{magenta}[debug]%f zdot-hook: $*"
     return 0
 }
 
