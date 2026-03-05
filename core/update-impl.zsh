@@ -137,14 +137,29 @@ _zdot_update_hook_plan() {
         esac
     fi
 
-    # Nothing to do — leave _dotfiler_plan_zdot_range unset
-    [[ "$_old" == "$_new" ]] && return 0
-
-    verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
-
+    # Always populate topology/remote/branch so pull knows what it's
+    # dealing with.  An empty _dotfiler_plan_zdot_range signals "nothing
+    # to do" — pull will skip the git operation but the type is known.
     local _link_dest
     zstyle -s ':zdot:update' destdir _link_dest \
         || _link_dest="${XDG_CONFIG_HOME:-$HOME/.config}/zdot"
+
+    typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
+    _dotfiler_plan_zdot_repo_dir="$ZDOT_REPO"
+    _dotfiler_plan_zdot_link_dest="$_link_dest"
+    _dotfiler_plan_zdot_topology="$_topology"
+    _dotfiler_plan_zdot_remote="$_remote"
+    _dotfiler_plan_zdot_branch="$_branch"
+    _dotfiler_plan_zdot_subtree_spec="$_subtree_spec"
+
+    # Nothing changed — topology is set but range stays empty.
+    if [[ "$_old" == "$_new" ]]; then
+        log_debug "zdot hook plan: topology=${_topology}, nothing to do (${_old[1,12]})"
+        _dotfiler_plan_zdot_range=""
+        return 0
+    fi
+
+    verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
 
     # Build file lists using the shared update_core helper
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
@@ -153,18 +168,7 @@ _zdot_update_hook_plan() {
     verbose "zdot hook plan: ${#_update_core_files_to_unpack[@]} to unpack, \
 ${#_update_core_files_to_remove[@]} to remove"
 
-    # Direct assignment into caller's scope — no print, no eval needed.
-    # Phase functions are registered via _update_register_hook (dotfiler path)
-    # or called directly (_zdot_update_handle_update standalone path).
-    # to_unpack/to_remove are additive (typeset -gaU ensures uniqueness).
-    typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
-    _dotfiler_plan_zdot_repo_dir="$ZDOT_REPO"
-    _dotfiler_plan_zdot_link_dest="$_link_dest"
-    _dotfiler_plan_zdot_topology="$_topology"
     _dotfiler_plan_zdot_range="${_old}..${_new}"
-    _dotfiler_plan_zdot_remote="$_remote"
-    _dotfiler_plan_zdot_branch="$_branch"
-    _dotfiler_plan_zdot_subtree_spec="$_subtree_spec"
     _dotfiler_plan_zdot_to_unpack+=("${_update_core_files_to_unpack[@]}")
     _dotfiler_plan_zdot_to_remove+=("${_update_core_files_to_remove[@]}")
     return 0
@@ -177,10 +181,11 @@ _zdot_update_hook_pull() {
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _remote="${_dotfiler_plan_zdot_remote:-}"
     local _branch="${_dotfiler_plan_zdot_branch:-}"
+    local _range="${_dotfiler_plan_zdot_range:-}"
 
-    # If plan didn't set topology, there's nothing for us to pull.
-    if [[ -z "$_topology" ]]; then
-        log_debug "zdot: no plan topology set, skipping pull"
+    # Empty range means plan found nothing to do — skip the git operation.
+    if [[ -z "$_range" ]]; then
+        log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping pull"
         return 0
     fi
 
@@ -258,8 +263,15 @@ _zdot_update_hook_unpack() {
 _zdot_update_hook_post() {
     local _topology="${_dotfiler_plan_zdot_topology:-}"
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
+    local _range="${_dotfiler_plan_zdot_range:-}"
     local _itc_mode
     zstyle -s ':zdot:update' in-tree-commit _itc_mode
+
+    # No range means plan found nothing to do — no pointer to commit.
+    if [[ -z "$_range" ]]; then
+        log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping post"
+        return 0
+    fi
 
     case "$_topology" in
         submodule)
