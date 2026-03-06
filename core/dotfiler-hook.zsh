@@ -19,19 +19,21 @@ ZDOT_REPO="${${${(%):-%x}:A}:h:h}"
 # ---------------------------------------------------------------------------
 # Logging shims
 # Defined early so they are available during bootstrap (e.g. find_update_core).
+# Guarded: when sourced into dotfiler's process (update.zsh / check_update.zsh),
+# logging.zsh functions are already defined — don't clobber them.
 # info/verbose → stdout (user-facing progress)
 # warn/error   → stderr (diagnostics)
 # ---------------------------------------------------------------------------
-warn()      { print "zdot-hook: $*" >&2; return 0; }
-info()      { print "zdot-hook: $*"; return 0; }
-error()     { print "zdot-hook: $*" >&2; return 0; }
-verbose() {
+(( $+functions[warn] ))  || function warn()  { print "zdot-hook: $*" >&2; return 0; }
+(( $+functions[info] ))  || function info()  { print "zdot-hook: $*"; return 0; }
+(( $+functions[error] )) || function error() { print "zdot-hook: $*" >&2; return 0; }
+(( $+functions[verbose] )) || function verbose() {
     [[ -n "${DOTFILER_VERBOSE:-}" ]] || [[ -n "${ZDOT_VERBOSE:-}" ]] \
         || return 0
     print -P "%F{cyan}[verbose]%f zdot-hook: $*"
     return 0
 }
-log_debug() {
+(( $+functions[log_debug] )) || function log_debug() {
     [[ -n "${DOTFILER_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] \
         || return 0
     print -P "%F{magenta}[debug]%f zdot-hook: $*"

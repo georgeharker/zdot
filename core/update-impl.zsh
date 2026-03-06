@@ -18,9 +18,7 @@
 #   _zdot_update_hook_post               → commit parents, SHA markers
 #   _zdot_update_hook_register           → SOURCE mode entry: check availability
 #   _zdot_update_handle_update           → shell-hook orchestrator (standalone zdot)
-#
-# Internal shared primitive:
-#   _zdot_update_apply_range <old> <new> → build file lists then call setup.zsh
+
 
 # ---------------------------------------------------------------------------
 # dotfiler scripts detection (3-step priority)
@@ -244,18 +242,34 @@ _zdot_update_hook_unpack() {
         _dest="${_link_dest}/${_f}"
         if [[ -L "$_dest" ]]; then
             verbose "zdot: removing symlink ${_dest}"
-            rm -f "$_dest"
+            _update_safe_rm "$_dest"
+        else
+            warn "zdot: ${_dest} is not a symlink, not removing"
         fi
     done
 
     [[ ${#_to_unpack[@]} -eq 0 ]] && return 0
 
-    # setup.zsh subprocess — all repos at new HEAD at this point
-    "${_zdot_dotfiler_scripts_dir}/setup.zsh" \
-        --repo-dir "$_repo_dir" \
-        --link-dest "$_link_dest" \
-        -u \
+    # Source setup.zsh in a subshell — same pattern as _update_main_unpack.
+    # Namespace is discarded on exit; setup_unload is belt-and-braces.
+    # -U = force-unpack, -u = normal. force[] comes from update.zsh's
+    # _update_parse_args; empty in shell-hook path (correct: never force at startup).
+    local _unpack_flag="-u"
+    [[ ${#force[@]} -gt 0 ]] && _unpack_flag="-U"
+
+    local -a _setup_args=(
+        "$_unpack_flag"
+        ${dry_run:+"-D"}
+        ${quiet:+"-q"}
+        "--repo-dir=${_repo_dir}"
+        "--link-dest=${_link_dest}"
         "${_to_unpack[@]}"
+    )
+    (
+        source "${_zdot_dotfiler_scripts_dir}/setup.zsh"
+        setup_main "${_setup_args[@]}"
+        setup_unload
+    )
     return $?
 }
 
@@ -345,41 +359,6 @@ _zdot_update_hook_post() {
     return 0
 }
 
-# ---------------------------------------------------------------------------
-# Internal shared primitive: apply_range
-# ---------------------------------------------------------------------------
-# Build file lists for old..new then call setup.zsh in-process.
-# Used by the apply-update backward-compat verb and directly if needed.
-
-_zdot_update_apply_range() {
-    local _old=$1 _new=$2
-
-    local _link_tree
-    zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
-    [[ "$_link_tree" == false ]] && return 0
-
-    local _destdir
-    zstyle -s ':zdot:update' destdir _destdir
-    : ${_destdir:=${XDG_CONFIG_HOME:-$HOME/.config}/zdot}
-
-    typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
-    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
-
-    local _f _dest
-    for _f in "${_update_core_files_to_remove[@]}"; do
-        _dest="${_destdir}/${_f}"
-        [[ -L "$_dest" ]] && rm -f "$_dest"
-    done
-
-    [[ ${#_update_core_files_to_unpack[@]} -eq 0 ]] && return 0
-
-    "${_zdot_dotfiler_scripts_dir}/setup.zsh" \
-        --repo-dir "$ZDOT_REPO" \
-        --link-dest "$_destdir" \
-        -u \
-        "${_update_core_files_to_unpack[@]}"
-    return $?
-}
 
 # _zdot_update_hook_register
 # Called when dotfiler sources this hook.
@@ -505,7 +484,7 @@ _zdot_update_handle_update() {
         return 1
     }
 
-    # 10. Unpack — setup.zsh subprocess; all repos at new HEAD
+    # 10. Unpack — setup.zsh sourced in subshell; all repos at new HEAD
     _zdot_update_hook_unpack || {
         warn "zdot: unpack failed"
         _update_core_write_timestamp "$_ts" 1 "Unpack failed"
@@ -536,7 +515,7 @@ _zdot_update_handle_update() {
 #   Called by update.zsh after zdot_register_hook.
 #   Keeps all functions that _zdot_update_handle_update calls at runtime:
 #     _zdot_update_hook_{check,plan,pull,unpack,post}
-#     _zdot_update_apply_range (called internally by pull/unpack/post)
+#     _zdot_update_handle_update — IS the shell-hook body
 #   Unsets bootstrap / registration helpers not needed at runtime.
 
 _zdot_update_impl_cleanup_hook() {
@@ -547,7 +526,6 @@ _zdot_update_impl_cleanup_hook() {
         _zdot_update_hook_pull \
         _zdot_update_hook_unpack \
         _zdot_update_hook_post \
-        _zdot_update_apply_range \
         _zdot_update_hook_register \
         _zdot_update_handle_update \
         _zdot_update_impl_cleanup_shell \
@@ -565,7 +543,6 @@ _zdot_update_impl_cleanup_shell() {
         _zdot_update_impl_cleanup_shell \
         2>/dev/null
     # _zdot_update_hook_{check,plan,pull,unpack,post} — kept (called by _zdot_update_handle_update)
-    # _zdot_update_apply_range — kept (used internally by pull/unpack/post primitives)
     # _zdot_update_handle_update — kept (IS the hook body)
     return 0
 }
