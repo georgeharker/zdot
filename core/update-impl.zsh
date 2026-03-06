@@ -76,10 +76,16 @@ _zdot_update_hook_check() {
     _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
 
-    # All topologies: check zdot's own remote directly.
-    # For submodule: if zdot's remote is ahead, the pull + post phases
-    # will update the submodule checkout and commit the new pointer in
-    # the parent repo (governed by the in-tree-commit zstyle).
+    if [[ "$_topology" == subtree ]]; then
+        # zdot lives as a subtree prefix inside the dotfiles repo.
+        # The local SHA is stored in a marker file, not in git rev-parse HEAD
+        # (which would give the parent repo's SHA, not zdot's source SHA).
+        _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec"
+        return $?
+    fi
+
+    # standalone / submodule / subdir: compare zdot's own HEAD against remote.
+    # allow_diverged=1: warn and proceed rather than treating diverged as error.
     _update_core_is_available "$ZDOT_REPO" "" 1
     return $?
 }
@@ -114,14 +120,10 @@ _zdot_update_hook_plan() {
     else
         case "$_topology" in
             subtree)
-                _remote="${_subtree_spec%% *}"
-                _branch="${_subtree_spec#* }"
-                [[ "$_branch" == "$_remote" ]] && _branch=""
-                [[ -z "$_branch" ]] && \
-                    _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
                 local _remote_url
-                _remote_url=$(git -C "$ZDOT_REPO" \
-                    config "remote.${_remote}.url" 2>/dev/null) || return 0
+                _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
+                    || return 0
+                _remote="${reply[1]}" _branch="${reply[2]}" _remote_url="${reply[3]}"
                 _update_core_resolve_remote_sha "$_remote_url" "$_branch"
                 _new="$REPLY"
                 ;;
@@ -204,8 +206,8 @@ _zdot_update_hook_pull() {
             ;;
         subtree)
             local _parent
-            _parent=$(git -C "$_repo_dir" \
-                rev-parse --show-toplevel 2>/dev/null) || return 1
+            _update_core_get_parent_root "$_repo_dir"
+            _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             git -C "$_parent" subtree pull \
                 --prefix="$_rel" "$_remote" "$_branch" --squash || {
@@ -301,8 +303,8 @@ _zdot_update_hook_post() {
             ;;
         subtree)
             local _parent
-            _parent=$(git -C "$_repo_dir" \
-                rev-parse --show-toplevel 2>/dev/null) || return 1
+            _update_core_get_parent_root "$_repo_dir"
+            _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             local _remote="${_dotfiler_plan_zdot_remote}"
             local _branch="${_dotfiler_plan_zdot_branch}"
