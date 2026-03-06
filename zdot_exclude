@@ -1,0 +1,5 @@
+# zdot_exclude — zdot infrastructure files not installed as dotfiles.
+# Patterns are relative to the zdot repo root.
+
+# Documentation only — everything else in zdot is installed.
+docs/

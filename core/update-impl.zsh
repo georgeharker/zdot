@@ -265,6 +265,8 @@ _zdot_update_hook_unpack() {
         ${quiet:+"-q"}
         "--repo-dir=${_repo_dir}"
         "--link-dest=${_link_dest}"
+        "--excludes=${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
+        "--excludes=${ZDOT_REPO}/zdot_exclude"
         "${_to_unpack[@]}"
     )
     (
