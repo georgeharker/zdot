@@ -70,6 +70,24 @@ zdot_is_debian() {
     [[ "$OSTYPE" == linux* && -f /etc/debian_version ]]
 }
 
+# Check if the current platform matches any of the given names or globs.
+# Available from bootstrap (before xdg loads), unlike is-platform() in xdg.zsh.
+# Friendly aliases: 'mac' -> darwin*, 'linux' -> linux*, 'debian' -> linux* + /etc/debian_version
+# Raw $OSTYPE globs (e.g. 'darwin*', 'linux-gnu*') are also accepted.
+# Usage: if zdot_is_platform mac debian; then ...
+zdot_is_platform() {
+    local name
+    for name in "$@"; do
+        case "$name" in
+            mac)    [[ "$OSTYPE" == darwin* ]]                                && return 0 ;;
+            linux)  [[ "$OSTYPE" == linux* ]]                                 && return 0 ;;
+            debian) [[ "$OSTYPE" == linux* && -f /etc/debian_version ]]       && return 0 ;;
+            *)      [[ "$OSTYPE" == ${~name} ]]                               && return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # ============================================================================
 # Host Detection
 # ============================================================================
