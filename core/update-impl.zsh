@@ -59,28 +59,27 @@ _zdot_update_find_dotfiler_scripts() {
     REPLY=""; return 1
 }
 
-# ---------------------------------------------------------------------------
-# Hook phase functions (_zdot_update_hook_*)
-# ---------------------------------------------------------------------------
-# These are the phase primitives shared between:
-#   - dotfiler orchestrator (SOURCE mode: all fns defined in-process)
-#   - zdot standalone orchestrator (_zdot_update_handle_update)
+# Reads ':zdot:update' subtree-remote / subtree-url zstyles with sensible
+# defaults. Sets _subtree_spec and _subtree_url in the caller's scope.
+_zdot_update_init() {
+    zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
+        || _subtree_spec="zdot main"
+    zstyle -s ':zdot:update' subtree-url _subtree_url 2>/dev/null \
+        || _subtree_url="https://github.com/georgeharker/zdot.git"
+}
+
 
 # check: is an update available?
 # Returns 0=available, 1=up-to-date, 2=error.
 _zdot_update_hook_check() {
-    local _subtree_spec
-    zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
-        || _subtree_spec=""
+    local _subtree_spec _subtree_url
+    _zdot_update_init
 
     _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
 
     if [[ "$_topology" == subtree ]]; then
-        # zdot lives as a subtree prefix inside the dotfiles repo.
-        # The local SHA is stored in a marker file, not in git rev-parse HEAD
-        # (which would give the parent repo's SHA, not zdot's source SHA).
-        _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec"
+        _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url"
         return $?
     fi
 
@@ -96,9 +95,8 @@ _zdot_update_hook_check() {
 # Caller must pre-declare: typeset -gaU _dotfiler_plan_zdot_to_unpack
 #                                        _dotfiler_plan_zdot_to_remove
 _zdot_update_hook_plan() {
-    local _subtree_spec
-    zstyle -s ':zdot:update' subtree-remote _subtree_spec 2>/dev/null \
-        || _subtree_spec=""
+    local _subtree_spec _subtree_url
+    _zdot_update_init
 
     _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
@@ -122,7 +120,7 @@ _zdot_update_hook_plan() {
             subtree)
                 local _remote_url
                 _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
-                    || return 0
+                    "$_subtree_url" || return 0
                 _remote="${reply[1]}" _branch="${reply[2]}" _remote_url="${reply[3]}"
                 _update_core_resolve_remote_sha "$_remote_url" "$_branch"
                 _new="$REPLY"
@@ -151,6 +149,7 @@ _zdot_update_hook_plan() {
     _dotfiler_plan_zdot_remote="$_remote"
     _dotfiler_plan_zdot_branch="$_branch"
     _dotfiler_plan_zdot_subtree_spec="$_subtree_spec"
+    _dotfiler_plan_zdot_subtree_url="$_subtree_url"
 
     # Nothing changed — topology is set but range stays empty.
     if [[ "$_old" == "$_new" ]]; then
