@@ -190,6 +190,7 @@ _zdot_update_hook_pull() {
 
     case "$_topology" in
         standalone)
+            verbose "zdot: pull: git pull ${_remote} ${_branch}"
             git -C "$_repo_dir" pull -q "$_remote" "$_branch" || {
                 warn "zdot: pull failed"; return 1
             }
@@ -199,6 +200,8 @@ _zdot_update_hook_pull() {
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
+            verbose "zdot: pull: git submodule update --remote -- ${_rel}"
+            log_debug "zdot: pull: parent=${_parent}"
             git -C "$_parent" submodule update --remote -- "$_rel" || {
                 warn "zdot: submodule update failed"; return 1
             }
@@ -208,6 +211,8 @@ _zdot_update_hook_pull() {
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
+            verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
+            log_debug "zdot: pull: parent=${_parent}"
             git -C "$_parent" subtree pull \
                 --prefix="$_rel" "$_remote" "$_branch" --squash || {
                 warn "zdot: subtree pull failed"; return 1
@@ -262,10 +267,10 @@ _zdot_update_hook_unpack() {
         "$_unpack_flag"
         ${dry_run:+"-D"}
         ${quiet:+"-q"}
-        "--repo-dir=${_repo_dir}"
-        "--link-dest=${_link_dest}"
-        "--excludes=${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
-        "--excludes=${ZDOT_REPO}/zdot_exclude"
+        "--repo-dir ${_repo_dir}"
+        "--link-dest ${_link_dest}"
+        "--excludes ${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
+        "--excludes ${ZDOT_REPO}/zdot_exclude"
         "${_to_unpack[@]}"
     )
     (
@@ -297,6 +302,7 @@ _zdot_update_hook_post() {
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             local _new="${_dotfiler_plan_zdot_range#*..}"
+            log_debug "zdot: post: submodule parent=${_parent} rel=${_rel} new=${_new[1,12]}"
             _update_core_commit_parent "$_parent" "$_rel" \
                 "submodule pointer updated" \
                 "zdot: update submodule to ${_new[1,12]}" \
@@ -314,13 +320,16 @@ _zdot_update_hook_post() {
                 config "remote.${_remote}.url" 2>/dev/null)
             _pulled_sha=$(_update_core_resolve_remote_sha \
                 "$_remote_url" "$_branch" 2>/dev/null)
-            [[ -n "$_pulled_sha" ]] && \
+            if [[ -n "$_pulled_sha" ]]; then
+                log_debug "zdot: post: writing SHA marker ${_pulled_sha[1,12]}"
                 _update_core_write_sha_marker "$_repo_dir" "$_pulled_sha"
+            fi
             _update_core_sha_marker_path "$_repo_dir"
             local _marker_path="$REPLY"
             if [[ "$_itc_mode" != none && -f "$_marker_path" ]]; then
                 git -C "$_parent" add "$_marker_path" 2>/dev/null
             fi
+            log_debug "zdot: post: subtree parent=${_parent} rel=${_rel}"
             _update_core_commit_parent "$_parent" "$_rel" \
                 "subtree updated" "zdot: update subtree ${_rel}" "$_itc_mode"
             ;;
@@ -336,6 +345,7 @@ _zdot_update_hook_post() {
             _pulled_sha=$(_update_core_resolve_remote_sha \
                 "$_remote_url" "$_dotfiler_plan_zdot_branch" 2>/dev/null)
             if [[ -n "$_pulled_sha" ]]; then
+                log_debug "zdot: post: writing ext SHA marker ${_pulled_sha[1,12]}"
                 _update_core_write_ext_marker "$_repo_dir" "$_pulled_sha"
                 _update_core_ext_marker_path "$_repo_dir"
                 local _marker_path="$REPLY"
@@ -427,6 +437,7 @@ _zdot_update_handle_update() {
     }
 
     # 6. Dispatch by mode
+    verbose "zdot: shell-hook update: mode=${_mode}"
     case "$_mode" in
         reminder)
             zdot_info "zdot: update available (run: git -C \$ZDOT_REPO pull)"
@@ -465,10 +476,12 @@ _zdot_update_handle_update() {
     }
     if [[ -z "${_dotfiler_plan_zdot_range:-}" ]]; then
         # Nothing to do (old==new)
+        log_debug "zdot: shell-hook: nothing to do (old==new)"
         _update_core_write_timestamp "$_ts"
         _update_core_release_lock "$_lock_dir"
         return 0
     fi
+    verbose "zdot: shell-hook: range=${_dotfiler_plan_zdot_range} topology=${_dotfiler_plan_zdot_topology}"
 
     # 8. Subdir mode — parent repo manages updates
     if [[ "${_dotfiler_plan_zdot_topology:-}" == subdir ]]; then
