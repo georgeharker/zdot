@@ -190,8 +190,9 @@ _zdot_update_hook_pull() {
 
     case "$_topology" in
         standalone)
-            verbose "zdot: pull: git pull ${_remote} ${_branch}"
-            git -C "$_repo_dir" pull -q "$_remote" "$_branch" || {
+            _update_core_prompt_dirty "$_repo_dir" "zdot standalone" || return 1
+            verbose "zdot: pull: git pull --autostash ${_remote} ${_branch}"
+            git -C "$_repo_dir" pull -q --autostash "$_remote" "$_branch" || {
                 warn "zdot: pull failed"; return 1
             }
             ;;
@@ -200,10 +201,11 @@ _zdot_update_hook_pull() {
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-            verbose "zdot: pull: git submodule update --remote -- ${_rel}"
             log_debug "zdot: pull: parent=${_parent}"
+            _update_core_prompt_dirty "$_parent" "zdot submodule" || return 1
+            verbose "zdot: pull: git submodule update --autostash --remote -- ${_rel}"
             local _sub_out _sub_rc
-            _sub_out=$(git -C "$_parent" submodule update --remote -- "$_rel" 2>&1)
+            _sub_out=$(git -C "$_parent" submodule update --autostash --remote -- "$_rel" 2>&1)
             _sub_rc=$?
             log_debug "zdot: pull: submodule output: ${_sub_out}"
             (( _sub_rc == 0 )) || { warn "zdot: submodule update failed"; return 1; }
@@ -215,12 +217,18 @@ _zdot_update_hook_pull() {
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
             log_debug "zdot: pull: parent=${_parent}"
+            _update_core_maybe_stash "$_parent" "zdot subtree" || return 1
             local _subtree_out _subtree_rc
             _subtree_out=$(git -C "$_parent" subtree pull \
                 --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
             _subtree_rc=$?
             log_debug "zdot: pull: subtree output: ${_subtree_out}"
-            (( _subtree_rc == 0 )) || { warn "zdot: subtree pull failed"; return 1; }
+            if (( _subtree_rc == 0 )); then
+                _update_core_pop_stash "zdot subtree"
+            else
+                _update_core_pop_stash "zdot subtree"
+                warn "zdot: subtree pull failed"; return 1
+            fi
             ;;
         subdir)
             verbose "zdot: subdir topology — parent repo manages updates"
@@ -291,7 +299,7 @@ _zdot_update_hook_post() {
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _range="${_dotfiler_plan_zdot_range:-}"
     local _itc_mode
-    zstyle -s ':zdot:update' in-tree-commit _itc_mode
+    _update_core_get_in_tree_commit_mode ':zdot:update'; local _itc_mode=$REPLY
 
     # No range means plan found nothing to do — no pointer to commit.
     if [[ -z "$_range" ]]; then
@@ -427,7 +435,7 @@ _zdot_update_handle_update() {
     # 4. Frequency check
     local _ts _freq
     _ts="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/zdot_update"
-    zstyle -s ':zdot:update' frequency _freq; : ${_freq:=3600}
+    _update_core_get_update_frequency ':zdot:update'; local _freq=$REPLY
     _update_core_should_update "$_ts" "$_freq" false || {
         _update_core_release_lock "$_lock_dir"
         return 0
