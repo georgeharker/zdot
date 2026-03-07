@@ -45,17 +45,8 @@
     fi
 }
 
-# ---------------------------------------------------------------------------
-# Logging shims — map update_core.zsh log functions to zdot equivalents.
-# Defined before sourcing update_core.zsh / update-impl.zsh so that any
-# logging during source is routed correctly.
-# Removed by _zdot_update_cleanup after the shell hook is registered.
-# ---------------------------------------------------------------------------
-warn()    { zdot_warn "$@"; }
-info()    { zdot_info "$@"; }
-error()     { zdot_error "$@"; }
-verbose()   { zdot_verbose "$*"; }
-log_debug() { zdot_log_debug "$*"; }
+# No logging shims needed here — update-impl.zsh uses zdot_* natively,
+# and zdot_* functions are always defined in the zdot shell context.
 
 # ---------------------------------------------------------------------------
 # Source update_core.zsh shared primitives
@@ -153,17 +144,10 @@ _zdot_update_install_dotfiler_hook() {
 # ---------------------------------------------------------------------------
 
 _zdot_update_cleanup() {
-    # Unset functions defined in update-impl.zsh that are not needed at runtime
     { (( ${+functions[_zdot_update_impl_cleanup_shell]} )) \
         && _zdot_update_impl_cleanup_shell; } 2>/dev/null || true
-    # Unset functions local to this file
-    unset -f \
-        _zdot_update_install_dotfiler_hook \
-        warn info error verbose log_debug \
-        2>/dev/null
-    # _update_core_* functions are NOT cleaned up here: they are runtime
-    # dependencies of _zdot_update_handle_update (via _zdot_update_hook_*).
-    # _update_core_cleanup is for update.zsh (subprocess) use only.
+    # verbose/log_debug shims are NOT unset — runtime deps of _zdot_update_handle_update.
+    unset -f _zdot_update_install_dotfiler_hook 2>/dev/null
     unset -f _zdot_update_cleanup 2>/dev/null
 }
 

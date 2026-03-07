@@ -5,11 +5,11 @@
 #   1. Set ZDOT_DIR (linktree path) and ZDOT_REPO (real repo path) before sourcing this file.
 #   2. Set _zdot_dotfiler_scripts_dir to the dotfiler scripts path.
 #   3. Source update_core.zsh before sourcing this file (provides _update_core_*).
-#   4. Define warn / info / error / verbose shims (only called at runtime).
+#   4. Define zdot_warn / zdot_info / zdot_error / zdot_verbose shims (only called at runtime).
 #
 # Public entry points:
 #   _zdot_update_find_dotfiler_scripts   → REPLY = scripts dir; rc 0/1
-#   _zdot_update_hook_check              → 0=available, 1=up-to-date, 2=error
+#   _zdot_update_hook_check              → 0=available, 1=up-to-date, 2=zdot_error
 #   _zdot_update_hook_plan               → populate _dotfiler_plan_zdot_* in-process
 #                                          returns 0=populated, 0=nothing-to-do
 #                                          (check _dotfiler_plan_zdot_range for empty)
@@ -70,7 +70,7 @@ _zdot_update_init() {
 
 
 # check: is an update available?
-# Returns 0=available, 1=up-to-date, 2=error.
+# Returns 0=available, 1=up-to-date, 2=zdot_error.
 _zdot_update_hook_check() {
     local _subtree_spec _subtree_url
     _zdot_update_init
@@ -84,7 +84,7 @@ _zdot_update_hook_check() {
     fi
 
     # standalone / submodule / subdir: compare zdot's own HEAD against remote.
-    # allow_diverged=1: warn and proceed rather than treating diverged as error.
+    # allow_diverged=1: zdot_warn and proceed rather than treating diverged as zdot_error.
     _update_core_is_available "$ZDOT_REPO" "" 1
     return $?
 }
@@ -111,7 +111,7 @@ _zdot_update_hook_plan() {
         # Hint range: "old_comp_sha..new_comp_sha" resolved by dotfiler
         _old="${_dotfiler_hint_range_zdot%%..*}"
         _new="${_dotfiler_hint_range_zdot#*..}"
-        verbose "zdot hook plan: using hint range ${_dotfiler_hint_range_zdot}"
+        zdot_verbose "zdot hook plan: using hint range ${_dotfiler_hint_range_zdot}"
         # Still need remote/branch for pull phase
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
@@ -153,18 +153,18 @@ _zdot_update_hook_plan() {
 
     # Nothing changed — topology is set but range stays empty.
     if [[ "$_old" == "$_new" ]]; then
-        log_debug "zdot hook plan: topology=${_topology}, nothing to do (${_old[1,12]})"
+        zdot_log_debug "zdot hook plan: topology=${_topology}, nothing to do (${_old[1,12]})"
         _dotfiler_plan_zdot_range=""
         return 0
     fi
 
-    verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
+    zdot_verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
 
     # Build file lists using the shared update_core helper
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
     _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
-    verbose "zdot hook plan: ${#_update_core_files_to_unpack[@]} to unpack, \
+    zdot_verbose "zdot hook plan: ${#_update_core_files_to_unpack[@]} to unpack, \
 ${#_update_core_files_to_remove[@]} to remove"
 
     _dotfiler_plan_zdot_range="${_old}..${_new}"
@@ -184,16 +184,16 @@ _zdot_update_hook_pull() {
 
     # Empty range means plan found nothing to do — skip the git operation.
     if [[ -z "$_range" ]]; then
-        log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping pull"
+        zdot_log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping pull"
         return 0
     fi
 
     case "$_topology" in
         standalone)
             _update_core_prompt_dirty "$_repo_dir" "zdot standalone" || return 1
-            verbose "zdot: pull: git pull --autostash ${_remote} ${_branch}"
+            zdot_verbose "zdot: pull: git pull --autostash ${_remote} ${_branch}"
             git -C "$_repo_dir" pull -q --autostash "$_remote" "$_branch" || {
-                warn "zdot: pull failed"; return 1
+                zdot_warn "zdot: pull failed"; return 1
             }
             ;;
         submodule)
@@ -201,41 +201,41 @@ _zdot_update_hook_pull() {
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-            log_debug "zdot: pull: parent=${_parent}"
+            zdot_log_debug "zdot: pull: parent=${_parent}"
             _update_core_prompt_dirty "$_parent" "zdot submodule" || return 1
-            verbose "zdot: pull: git submodule update --autostash --remote -- ${_rel}"
+            zdot_verbose "zdot: pull: git submodule update --autostash --remote -- ${_rel}"
             local _sub_out _sub_rc
             _sub_out=$(git -C "$_parent" submodule update --autostash --remote -- "$_rel" 2>&1)
             _sub_rc=$?
-            log_debug "zdot: pull: submodule output: ${_sub_out}"
-            (( _sub_rc == 0 )) || { warn "zdot: submodule update failed"; return 1; }
+            zdot_log_debug "zdot: pull: submodule output: ${_sub_out}"
+            (( _sub_rc == 0 )) || { zdot_warn "zdot: submodule update failed"; return 1; }
             ;;
         subtree)
             local _parent
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-            verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
-            log_debug "zdot: pull: parent=${_parent}"
+            zdot_verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
+            zdot_log_debug "zdot: pull: parent=${_parent}"
             _update_core_maybe_stash "$_parent" "zdot subtree" || return 1
             local _subtree_out _subtree_rc
             _subtree_out=$(git -C "$_parent" subtree pull \
                 --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
             _subtree_rc=$?
-            log_debug "zdot: pull: subtree output: ${_subtree_out}"
+            zdot_log_debug "zdot: pull: subtree output: ${_subtree_out}"
             if (( _subtree_rc == 0 )); then
                 _update_core_pop_stash "zdot subtree"
             else
                 _update_core_pop_stash "zdot subtree"
-                warn "zdot: subtree pull failed"; return 1
+                zdot_warn "zdot: subtree pull failed"; return 1
             fi
             ;;
         subdir)
-            verbose "zdot: subdir topology — parent repo manages updates"
+            zdot_verbose "zdot: subdir topology — parent repo manages updates"
             return 0
             ;;
         *)
-            warn "zdot: unhandled topology '${_topology}' in pull"
+            zdot_warn "zdot: unhandled topology '${_topology}' in pull"
             return 1
             ;;
     esac
@@ -259,10 +259,10 @@ _zdot_update_hook_unpack() {
     for _f in "${_to_remove[@]}"; do
         _dest="${_link_dest}/${_f}"
         if [[ -L "$_dest" ]]; then
-            verbose "zdot: removing symlink ${_dest}"
+            zdot_verbose "zdot: removing symlink ${_dest}"
             _update_safe_rm "$_dest"
         else
-            warn "zdot: ${_dest} is not a symlink, not removing"
+            zdot_warn "zdot: ${_dest} is not a symlink, not removing"
         fi
     done
 
@@ -303,7 +303,7 @@ _zdot_update_hook_post() {
 
     # No range means plan found nothing to do — no pointer to commit.
     if [[ -z "$_range" ]]; then
-        log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping post"
+        zdot_log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping post"
         return 0
     fi
 
@@ -314,7 +314,7 @@ _zdot_update_hook_post() {
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             local _new="${_dotfiler_plan_zdot_range#*..}"
-            log_debug "zdot: post: submodule parent=${_parent} rel=${_rel} new=${_new[1,12]}"
+            zdot_log_debug "zdot: post: submodule parent=${_parent} rel=${_rel} new=${_new[1,12]}"
             _update_core_commit_parent "$_parent" "$_rel" \
                 "submodule pointer updated" \
                 "zdot: update submodule to ${_new[1,12]}" \
@@ -333,7 +333,7 @@ _zdot_update_hook_post() {
             _pulled_sha=$(_update_core_resolve_remote_sha \
                 "$_remote_url" "$_branch" 2>/dev/null)
             if [[ -n "$_pulled_sha" ]]; then
-                log_debug "zdot: post: writing SHA marker ${_pulled_sha[1,12]}"
+                zdot_log_debug "zdot: post: writing SHA marker ${_pulled_sha[1,12]}"
                 _update_core_write_sha_marker "$_repo_dir" "$_pulled_sha"
             fi
             _update_core_sha_marker_path "$_repo_dir"
@@ -341,7 +341,7 @@ _zdot_update_hook_post() {
             if [[ "$_itc_mode" != none && -f "$_marker_path" ]]; then
                 git -C "$_parent" add "$_marker_path" 2>/dev/null
             fi
-            log_debug "zdot: post: subtree parent=${_parent} rel=${_rel}"
+            zdot_log_debug "zdot: post: subtree parent=${_parent} rel=${_rel}"
             _update_core_commit_parent "$_parent" "$_rel" \
                 "subtree updated" "zdot: update subtree ${_rel}" "$_itc_mode"
             ;;
@@ -357,7 +357,7 @@ _zdot_update_hook_post() {
             _pulled_sha=$(_update_core_resolve_remote_sha \
                 "$_remote_url" "$_dotfiler_plan_zdot_branch" 2>/dev/null)
             if [[ -n "$_pulled_sha" ]]; then
-                log_debug "zdot: post: writing ext SHA marker ${_pulled_sha[1,12]}"
+                zdot_log_debug "zdot: post: writing ext SHA marker ${_pulled_sha[1,12]}"
                 _update_core_write_ext_marker "$_repo_dir" "$_pulled_sha"
                 _update_core_ext_marker_path "$_repo_dir"
                 local _marker_path="$REPLY"
@@ -375,10 +375,10 @@ _zdot_update_hook_post() {
             ;;
         subdir)
             # subdir: component is part of dotfiles tree — parent manages versioning
-            verbose "zdot: post: subdir topology — parent repo tracks versioning"
+            zdot_verbose "zdot: post: subdir topology — parent repo tracks versioning"
             ;;
         *)
-            verbose "zdot: post: unknown topology '${_topology}' — nothing to do"
+            zdot_verbose "zdot: post: unknown topology '${_topology}' — nothing to do"
             ;;
     esac
     return 0
@@ -449,7 +449,7 @@ _zdot_update_handle_update() {
     }
 
     # 6. Dispatch by mode
-    verbose "zdot: shell-hook update: mode=${_mode}"
+    zdot_verbose "zdot: shell-hook update: mode=${_mode}"
     case "$_mode" in
         reminder)
             zdot_info "zdot: update available (run: git -C \$ZDOT_REPO pull)"
@@ -481,19 +481,19 @@ _zdot_update_handle_update() {
     typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
     _dotfiler_plan_zdot_range=""
     _zdot_update_hook_plan || {
-        warn "zdot: plan failed"
+        zdot_warn "zdot: plan failed"
         _update_core_write_timestamp "$_ts" 1 "Plan failed"
         _update_core_release_lock "$_lock_dir"
         return 1
     }
     if [[ -z "${_dotfiler_plan_zdot_range:-}" ]]; then
         # Nothing to do (old==new)
-        log_debug "zdot: shell-hook: nothing to do (old==new)"
+        zdot_log_debug "zdot: shell-hook: nothing to do (old==new)"
         _update_core_write_timestamp "$_ts"
         _update_core_release_lock "$_lock_dir"
         return 0
     fi
-    verbose "zdot: shell-hook: range=${_dotfiler_plan_zdot_range} topology=${_dotfiler_plan_zdot_topology}"
+    zdot_verbose "zdot: shell-hook: range=${_dotfiler_plan_zdot_range} topology=${_dotfiler_plan_zdot_topology}"
 
     # 8. Subdir mode — parent repo manages updates
     if [[ "${_dotfiler_plan_zdot_topology:-}" == subdir ]]; then
@@ -506,7 +506,7 @@ _zdot_update_handle_update() {
 
     # 9. Pull — git only, no zsh subprocesses
     _zdot_update_hook_pull || {
-        warn "zdot: pull failed"
+        zdot_warn "zdot: pull failed"
         _update_core_write_timestamp "$_ts" 1 "Pull failed"
         _update_core_release_lock "$_lock_dir"
         return 1
@@ -514,7 +514,7 @@ _zdot_update_handle_update() {
 
     # 10. Unpack — setup.zsh sourced in subshell; all repos at new HEAD
     _zdot_update_hook_unpack || {
-        warn "zdot: unpack failed"
+        zdot_warn "zdot: unpack failed"
         _update_core_write_timestamp "$_ts" 1 "Unpack failed"
         _update_core_release_lock "$_lock_dir"
         return 1
@@ -522,7 +522,7 @@ _zdot_update_handle_update() {
 
     # 11. Post — commit parents, SHA markers etc.
     _zdot_update_hook_post || {
-        warn "zdot: post-update steps failed (non-fatal)"
+        zdot_warn "zdot: post-update steps failed (non-fatal)"
     }
 
     _update_core_write_timestamp "$_ts" 0 "Update successful"
@@ -547,6 +547,11 @@ _zdot_update_handle_update() {
 #   Unsets bootstrap / registration helpers not needed at runtime.
 
 _zdot_update_impl_cleanup_hook() {
+    # If dotfiler-hook.zsh defined zdot_* shims, remove them now.
+    if (( ${_zdot_hook_defined_log_shims:-0} )); then
+        unset -f zdot_warn zdot_info zdot_error zdot_verbose zdot_log_debug 2>/dev/null
+        unset _zdot_hook_defined_log_shims
+    fi
     unset -f \
         _zdot_update_find_dotfiler_scripts \
         _zdot_update_hook_check \

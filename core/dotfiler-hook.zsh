@@ -18,27 +18,23 @@ ZDOT_REPO="${${${(%):-%x}:A}:h:h}"
 
 # ---------------------------------------------------------------------------
 # Logging shims
-# Defined early so they are available during bootstrap (e.g. find_update_core).
-# Guarded: when sourced into dotfiler's process (update.zsh / check_update.zsh),
-# logging.zsh functions are already defined — don't clobber them.
-# info/verbose → stdout (user-facing progress)
-# warn/error   → stderr (diagnostics)
+# update-impl.zsh uses zdot_* logging functions natively (zdot's API).
+# When sourced into dotfiler's process (check_update.zsh), zdot_* functions
+# won't exist — define them mapped to dotfiler's equivalents, and set a flag
+# so the cleanup knows to undefine them.
+# Check all five — any missing means we need to define the full set.
 # ---------------------------------------------------------------------------
-(( $+functions[warn] ))  || function warn()  { print "zdot-hook: $*" >&2; return 0; }
-(( $+functions[info] ))  || function info()  { print "zdot-hook: $*"; return 0; }
-(( $+functions[error] )) || function error() { print "zdot-hook: $*" >&2; return 0; }
-(( $+functions[verbose] )) || function verbose() {
-    [[ -n "${DOTFILER_VERBOSE:-}" ]] || [[ -n "${ZDOT_VERBOSE:-}" ]] \
-        || return 0
-    print -P "%F{cyan}[verbose]%f zdot-hook: $*"
-    return 0
-}
-(( $+functions[log_debug] )) || function log_debug() {
-    [[ -n "${DOTFILER_DEBUG:-}" ]] || [[ -n "${ZDOT_DEBUG:-}" ]] \
-        || return 0
-    print -P "%F{magenta}[debug]%f zdot-hook: $*"
-    return 0
-}
+typeset -g _zdot_hook_defined_log_shims=0
+if (( ! $+functions[zdot_warn] || ! $+functions[zdot_info] || \
+      ! $+functions[zdot_error] || ! $+functions[zdot_verbose] || \
+      ! $+functions[zdot_log_debug] )); then
+    _zdot_hook_defined_log_shims=1
+    function zdot_warn()      { warn "$@"; }
+    function zdot_info()      { info "$@"; }
+    function zdot_error()     { error "$@"; }
+    function zdot_verbose()   { verbose "$@"; }
+    function zdot_log_debug() { log_debug "$@"; }
+fi
 
 # ---------------------------------------------------------------------------
 # Locate update_core.zsh
