@@ -275,8 +275,8 @@ _zdot_update_hook_unpack() {
 
     [[ ${#_to_unpack[@]} -eq 0 ]] && return 0
 
-    # Source setup.zsh in a subshell — same pattern as _update_main_unpack.
-    # Namespace is discarded on exit; setup_unload is belt-and-braces.
+    # Source setup_core.zsh in a subshell — same pattern as _update_main_unpack.
+    # Namespace is discarded on exit; setup_core_unload is belt-and-braces.
     # -U = force-unpack, -u = normal. force[] comes from update.zsh's
     # _update_parse_args; empty in shell-hook path (correct: never force at startup).
     local _unpack_flag="-u"
@@ -286,16 +286,22 @@ _zdot_update_hook_unpack() {
         "$_unpack_flag"
         ${dry_run:+"-D"}
         ${quiet:+"-q"}
+        ${debug_flag:+"-g"}
         --repo-dir "${_repo_dir}"
         --link-dest "${_link_dest}"
         --excludes "${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
         --excludes "${ZDOT_REPO}/zdot_exclude"
         "${_to_unpack[@]}"
     )
+    # Subshell — namespace discarded on exit.
+    # setup_core.zsh is sourced early by the caller (update.zsh / setup.zsh);
+    # functions are inherited into this subshell.
     (
-        source "${_zdot_dotfiler_scripts_dir}/setup.zsh"
-        setup_main "${_setup_args[@]}"
-        setup_unload
+        if ! (( $+functions[setup_core_main] )); then
+            warn "setup_core_main not defined — was setup_core.zsh sourced by the caller?"
+            return 1
+        fi
+        setup_core_main "${_setup_args[@]}"
     )
     return $?
 }
@@ -392,6 +398,46 @@ _zdot_update_hook_post() {
 }
 
 
+# setup: full unpack for `dotfiler setup --all` / `dotfiler setup --component zdot`.
+# Unlike unpack (which receives a file list from the update plan), this
+# unpacks everything — used for bootstrap and force re-link.
+# Receives:
+#   $1        — "unpack" or "force-unpack"
+#   $2 .. $N  — passthrough flags (--dry-run, --quiet, --debug, --yes, --no)
+_zdot_update_hook_setup() {
+    local _mode=${1:-unpack}
+    shift
+    local -a _extra_flags=("$@")
+    local _link_tree
+    zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
+    [[ "$_link_tree" == false ]] && return 0
+
+    local _link_dest="${XDG_CONFIG_HOME:-$HOME/.config}/zdot"
+    local _unpack_flag="-u"
+    [[ "$_mode" == "force-unpack" ]] && _unpack_flag="-U"
+
+    local -a _setup_args=(
+        "$_unpack_flag"
+        "${_extra_flags[@]}"
+        --repo-dir "$ZDOT_REPO"
+        --link-dest "$_link_dest"
+        --excludes "${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
+        --excludes "${ZDOT_REPO}/zdot_exclude"
+    )
+    # Subshell — namespace discarded on exit.
+    # setup_core.zsh is sourced early by the caller (update.zsh / setup.zsh);
+    # functions are inherited into this subshell.
+    (
+        if ! (( $+functions[setup_core_main] )); then
+            warn "setup_core_main not defined — was setup_core.zsh sourced by the caller?"
+            return 1
+        fi
+        setup_core_main "${_setup_args[@]}"
+    )
+    return $?
+}
+
+
 # _zdot_update_hook_register
 # Called when dotfiler sources this hook.
 # Detects topology at registration time (cheap, no network) and passes
@@ -412,7 +458,8 @@ _zdot_update_hook_register() {
         _zdot_update_hook_post \
         _zdot_update_impl_cleanup_hook \
         "$ZDOT_REPO" \
-        "$_topology"
+        "$_topology" \
+        _zdot_update_hook_setup
 }
 
 
@@ -566,6 +613,7 @@ _zdot_update_impl_cleanup_hook() {
         _zdot_update_hook_pull \
         _zdot_update_hook_unpack \
         _zdot_update_hook_post \
+        _zdot_update_hook_setup \
         _zdot_update_hook_register \
         _zdot_update_handle_update \
         _zdot_update_impl_cleanup_shell \
