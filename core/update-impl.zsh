@@ -202,9 +202,11 @@ _zdot_update_hook_pull() {
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             verbose "zdot: pull: git submodule update --remote -- ${_rel}"
             log_debug "zdot: pull: parent=${_parent}"
-            git -C "$_parent" submodule update --remote -- "$_rel" || {
-                warn "zdot: submodule update failed"; return 1
-            }
+            local _sub_out _sub_rc
+            _sub_out=$(git -C "$_parent" submodule update --remote -- "$_rel" 2>&1)
+            _sub_rc=$?
+            log_debug "zdot: pull: submodule output: ${_sub_out}"
+            (( _sub_rc == 0 )) || { warn "zdot: submodule update failed"; return 1; }
             ;;
         subtree)
             local _parent
@@ -213,10 +215,12 @@ _zdot_update_hook_pull() {
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
             log_debug "zdot: pull: parent=${_parent}"
-            git -C "$_parent" subtree pull \
-                --prefix="$_rel" "$_remote" "$_branch" --squash || {
-                warn "zdot: subtree pull failed"; return 1
-            }
+            local _subtree_out _subtree_rc
+            _subtree_out=$(git -C "$_parent" subtree pull \
+                --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
+            _subtree_rc=$?
+            log_debug "zdot: pull: subtree output: ${_subtree_out}"
+            (( _subtree_rc == 0 )) || { warn "zdot: subtree pull failed"; return 1; }
             ;;
         subdir)
             verbose "zdot: subdir topology — parent repo manages updates"
@@ -267,10 +271,10 @@ _zdot_update_hook_unpack() {
         "$_unpack_flag"
         ${dry_run:+"-D"}
         ${quiet:+"-q"}
-        "--repo-dir ${_repo_dir}"
-        "--link-dest ${_link_dest}"
-        "--excludes ${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
-        "--excludes ${ZDOT_REPO}/zdot_exclude"
+        --repo-dir "${_repo_dir}"
+        --link-dest "${_link_dest}"
+        --excludes "${_zdot_dotfiler_scripts_dir}/dotfiler_exclude"
+        --excludes "${ZDOT_REPO}/zdot_exclude"
         "${_to_unpack[@]}"
     )
     (
