@@ -13,6 +13,7 @@
 # Autoloaded Functions (in functions/):
 #   - op_get_config_dir: Returns op config directory path via stdout
 #   - op_get_config_args: Returns op config arguments via stdout (one per line)
+#   - op_get_vault_config: Reads vault names from zstyle with defaults
 #   - op_auth: Handles authentication setup (interactive only)
 #   - op_refresh: Refreshes service account, calls op_auth if needed
 #   - refresh_shell_secrets: Refreshes shell environment secrets
@@ -24,6 +25,27 @@
 # Behavior:
 #   - Noninteractive: Only loads existing cached secrets, no prompts
 #   - Interactive: May prompt for setup/authentication if not configured
+#
+# Configuration Group:
+#   - Group: secrets-configure
+#     Hooks in this group run before _op_init. Register user hooks with:
+#       zdot_register_hook my_op_configure interactive noninteractive \
+#           --group secrets-configure
+#     Then set zstyles to override vault names used by op_refresh:
+#       zstyle ':zdot:secrets:op' service-acct-vault 'MyServiceAcctVault'
+#       zstyle ':zdot:secrets:op' api-vault          'MyAPIVault'
+#       zstyle ':zdot:secrets:op' ssh-vault          'MySSHVault'
+#       zstyle ':zdot:secrets:op' service-acct-grants \
+#           'MyAPIVault:read_items,write_items' \
+#           'MySSHVault:read_items,write_items'
+#
+# SSH Agent Configuration:
+#   zstyle ':zdot:secrets' ssh-platforms  - $OSTYPE glob patterns; agent setup
+#                                           only runs when one matches.
+#                                           Default: ('darwin*')
+#   zstyle ':zdot:secrets' ssh-func       - optional function name; called with
+#                                           no args, setup only proceeds if it
+#                                           returns 0. Default: unset.
 
 typeset -g _ZDOT_OP_ACTIVE=0
 
@@ -40,16 +62,47 @@ _op_get_secrets_dirs() {
 }
 
 # Set up SSH_AUTH_SOCK to use 1Password SSH agent
+#
+# Platform guard:
+#   zstyle ':zdot:secrets' ssh-platforms  - list of platform names or $OSTYPE
+#                                           globs; setup only runs when one
+#                                           matches. Accepts friendly names:
+#                                           'mac', 'linux', 'debian', or raw
+#                                           globs like 'darwin*'. Default: (mac)
+#   zstyle ':zdot:secrets' ssh-func       - name of a function to call; when set
+#                                           it replaces the built-in SSH_CONNECTION
+#                                           guard entirely. Not set by default.
 _setup_ssh_auth_sock() {
     command -v op &> /dev/null || return 0
 
-    # Only set up on macOS and when not in SSH connection
-    if [[ -z "${SSH_CONNECTION}" && is-macos ]]; then
-        if [[ ! -d ~/.1password || ! -L ~/.1password/agent.sock ]]; then
-            mkdir -p ~/.1password && ln -s ~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock ~/.1password/agent.sock
-        fi
-        export SSH_AUTH_SOCK=~/.1password/agent.sock
+    # Platform check via is-platform (supports 'mac', 'linux', 'debian', globs)
+    local -a ssh_platforms
+    zstyle -a ':zdot:secrets' ssh-platforms ssh_platforms \
+        || ssh_platforms=(mac)
+    is-platform "${ssh_platforms[@]}" || return 0
+
+    # Default condition: skip when in an SSH connection.
+    # Overridable via ssh-func — if set it replaces this check entirely.
+    local ssh_func
+    zstyle -s ':zdot:secrets' ssh-func ssh_func
+    if [[ -n "$ssh_func" ]]; then
+        typeset -f "$ssh_func" > /dev/null || {
+            zdot_warn "secrets: ssh-func '${ssh_func}' is not defined, skipping SSH agent setup"
+            return 0
+        }
+        "$ssh_func" || return 0
+    else
+        # Built-in default: do not set up agent when connected over SSH
+        [[ -n "${SSH_CONNECTION}" ]] && return 0
     fi
+
+    # Perform the setup
+    if [[ ! -d ~/.1password || ! -L ~/.1password/agent.sock ]]; then
+        mkdir -p ~/.1password \
+            && ln -s ~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock \
+                      ~/.1password/agent.sock
+    fi
+    export SSH_AUTH_SOCK=~/.1password/agent.sock
 }
 
 # Module initialization - set up 1Password secrets
@@ -108,7 +161,13 @@ _op_init() {
     _setup_ssh_auth_sock
 }
 
-# Register hook - requires xdg-configured, provides secrets-loaded
-# Runs in both interactive and noninteractive modes
-# Interactive prompts only happen in interactive shells due to function guards
-zdot_register_hook _op_init interactive noninteractive --requires xdg-configured --requires-tool op --provides secrets-loaded
+# Register hook - requires xdg-configured and the secrets-configure group,
+# provides secrets-loaded.  Any user hook registered with --group secrets-configure
+# is guaranteed to run before this.
+# Runs in both interactive and noninteractive modes;
+# interactive prompts only happen in interactive shells due to function guards.
+zdot_register_hook _op_init interactive noninteractive \
+    --requires xdg-configured \
+    --requires-tool op \
+    --requires-group secrets-configure \
+    --provides secrets-loaded

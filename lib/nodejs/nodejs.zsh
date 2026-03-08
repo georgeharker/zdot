@@ -13,7 +13,14 @@ _node_configure() {
     fi
 
     zstyle ':omz:plugins:nvm' autoload no
-    zstyle ':omz:plugins:nvm' lazy-cmd opencode mcp-hub copilot prettierd claude-code
+
+    # Read lazy-cmd list from zstyle; fall back to a useful default set.
+    # Override in a node-configure group hook:
+    #   zstyle ':zdot:nodejs' lazy-cmd node1 node2 ...
+    local -a lazy_cmds
+    zstyle -a ':zdot:nodejs' lazy-cmd lazy_cmds \
+        || lazy_cmds=(opencode mcp-hub copilot prettierd claude-code)
+    zstyle ':omz:plugins:nvm' lazy-cmd "${lazy_cmds[@]}"
 
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
     if [[ -f "$NVM_DIR/nvm.sh" ]]; then

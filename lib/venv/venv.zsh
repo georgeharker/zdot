@@ -6,15 +6,28 @@
 # ============================================================================
 
 _venv_init() {
-    # Set default Python version based on OS
+    # Read Python version from zstyle, with OS-appropriate defaults.
+    #
+    # On macOS the default resolves to the Homebrew-managed python3.14 binary.
+    # This is intentional — see README.md for the rationale around dyld paths
+    # and Homebrew-linked native libraries.
+    #
+    # On Linux the default uses uv's managed CPython distribution.
+    #
+    # Override via:
+    #   zstyle ':zdot:venv' python-version-macos '/opt/homebrew/bin/python3.13'
+    #   zstyle ':zdot:venv' python-version-linux 'cpython@3.13.0'
     if is-macos; then
-        DEFAULT_PYTHON_VERSION=`which python3.14`
+        local default_python="$(command -v python3.14 2>/dev/null || echo python3)"
+        zstyle -s ':zdot:venv' python-version-macos DEFAULT_PYTHON_VERSION \
+            || DEFAULT_PYTHON_VERSION="$default_python"
         export UV_NO_MANAGED_PYTHON=1
     else
-        DEFAULT_PYTHON_VERSION='cpython@3.14.0'
+        zstyle -s ':zdot:venv' python-version-linux DEFAULT_PYTHON_VERSION \
+            || DEFAULT_PYTHON_VERSION='cpython@3.14.0'
         export UV_MANAGED_PYTHON=1
     fi
-    
+
     # Python venv aliases
     alias npvenv='nvenv pypy3 .pypyvenv'
     alias rpvenv='rvenv pypy3 .pypyvenv'
