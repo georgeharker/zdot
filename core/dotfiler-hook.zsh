@@ -16,6 +16,9 @@
 # ZDOT_DIR (the linktree path) must NOT be clobbered here — core.zsh sets it correctly.
 ZDOT_REPO="${${${(%):-%x}:A}:h:h}"
 
+# For bootstrapping purposes
+ZDOT_DIR="${ZDOT_DIR:-${ZDOT_REPO}}"
+
 # ---------------------------------------------------------------------------
 # Logging shims
 # update-impl.zsh uses zdot_* logging functions natively (zdot's API).
