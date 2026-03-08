@@ -164,7 +164,7 @@ _zdot_update_hook_plan() {
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
     _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
-    zdot_verbose "zdot hook plan: ${#_update_core_files_to_unpack[@]} to unpack, \
+    zdot_info "zdot: ${#_update_core_files_to_unpack[@]} to update, \
 ${#_update_core_files_to_remove[@]} to remove"
 
     _dotfiler_plan_zdot_range="${_old}..${_new}"
@@ -185,6 +185,7 @@ _zdot_update_hook_pull() {
     # Empty range means plan found nothing to do — skip the git operation.
     if [[ -z "$_range" ]]; then
         zdot_log_debug "zdot: no changes planned (topology=${_topology:-unset}), skipping pull"
+        zdot_info "zdot: up to date"
         return 0
     fi
 
@@ -195,6 +196,7 @@ _zdot_update_hook_pull() {
             git -C "$_repo_dir" pull -q --autostash "$_remote" "$_branch" || {
                 zdot_warn "zdot: pull failed"; return 1
             }
+            zdot_info "zdot: updated"
             ;;
         submodule)
             local _parent
@@ -216,6 +218,7 @@ _zdot_update_hook_pull() {
                  return 1
              fi
              (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
+             zdot_info "zdot: updated"
              ;;
          subtree)
              local _parent
@@ -236,6 +239,7 @@ _zdot_update_hook_pull() {
              if (( _subtree_rc != 0 )); then
                  zdot_warn "zdot: subtree pull failed"; return 1
              fi
+             zdot_info "zdot: updated"
             ;;
         subdir)
             zdot_verbose "zdot: subdir topology — parent repo manages updates"
