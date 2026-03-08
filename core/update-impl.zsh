@@ -260,6 +260,12 @@ _zdot_update_hook_unpack() {
     zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
     [[ "$_link_tree" == false ]] && return 0
 
+    # Skip if plan found nothing to do and force not set
+    if [[ -z "${_dotfiler_plan_zdot_range:-}" && ${#force[@]} -eq 0 ]]; then
+        zdot_log_debug "zdot: unpack skipping — nothing planned and not forced"
+        return 0
+    fi
+
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _link_dest="${_dotfiler_plan_zdot_link_dest}"
     local -a _to_unpack=("${_dotfiler_plan_zdot_to_unpack[@]}")
