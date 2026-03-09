@@ -101,6 +101,12 @@ function zdot_cleanup_logging(){
     unset -f zdot_warn 2>/dev/null
     unset -f zdot_verbose 2>/dev/null
     unset -f zdot_log_debug 2>/dev/null
+    unset -f zdot_debug 2>/dev/null
+    unset -f _zdot_internal_error 2>/dev/null
+    unset -f _zdot_internal_warn 2>/dev/null
+    unset -f _zdot_internal_info 2>/dev/null
+    unset -f _zdot_internal_debug 2>/dev/null
+    unset -f _zdot_internal_should_suppress 2>/dev/null
     unset -f zdot_show_deferred_log 2>/dev/null
     unset -f _zdot_flush_handler 2>/dev/null
     unset -f _zdot_deferred_progress_print 2>/dev/null
@@ -196,4 +202,65 @@ function zdot_error(){
 
 function zdot_warn(){
     _zdot_emit_err "%F{yellow}$*%f"
+}
+
+# ---------------------------------------------------------------------------
+# Internal logging — respects noninteractive suppression.
+#
+# _zdot_internal_{error,warn,info} are used by zdot core (hook runner, init)
+# for operational messages that should be suppressed in noninteractive shells
+# unless ZDOT_DEBUG is set or the zstyle ':zdot:logging' verbose-noninteractive
+# is set to 'yes'.
+#
+# zdot_debug / _zdot_internal_debug trace key zdot operation phases.
+# zdot_debug always prints to stderr when ZDOT_DEBUG is set.
+# _zdot_internal_debug additionally respects noninteractive suppression.
+#
+# Suppressed messages accumulate in _ZDOT_DEFERRED_MESSAGES and are
+# retrievable via zdot_show_deferred_log.
+# ---------------------------------------------------------------------------
+
+function _zdot_internal_should_suppress() {
+    zdot_interactive && return 1
+    [[ -n "${ZDOT_DEBUG:-}" ]] && return 1
+    zstyle -t ':zdot:logging' verbose-noninteractive && return 1
+    return 0
+}
+
+function _zdot_internal_error() {
+    if _zdot_internal_should_suppress; then
+        _ZDOT_DEFERRED_MESSAGES+=("%F{red}[error]%f $*")
+    else
+        _zdot_emit_err "%F{red}$*%f"
+    fi
+}
+
+function _zdot_internal_warn() {
+    if _zdot_internal_should_suppress; then
+        _ZDOT_DEFERRED_MESSAGES+=("%F{yellow}[warn]%f $*")
+    else
+        _zdot_emit_err "%F{yellow}$*%f"
+    fi
+}
+
+function _zdot_internal_info() {
+    if _zdot_internal_should_suppress; then
+        _ZDOT_DEFERRED_MESSAGES+=("$*")
+    else
+        _zdot_emit "$*"
+    fi
+}
+
+function zdot_debug() {
+    [[ -n "${ZDOT_DEBUG:-}" ]] || return 0
+    _zdot_emit_err "%F{magenta}[zdot:debug]%f $*"
+}
+
+function _zdot_internal_debug() {
+    [[ -n "${ZDOT_DEBUG:-}" ]] || return 0
+    if _zdot_internal_should_suppress; then
+        _ZDOT_DEFERRED_MESSAGES+=("%F{magenta}[zdot:debug]%f $*")
+    else
+        _zdot_emit_err "%F{magenta}[zdot:debug]%f $*"
+    fi
 }

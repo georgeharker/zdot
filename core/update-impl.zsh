@@ -239,14 +239,14 @@ _zdot_update_hook_pull() {
              if (( _subtree_rc != 0 )); then
                  zdot_warn "zdot: subtree pull failed"; return 1
              fi
-             zdot_info "zdot: updated"
+             _zdot_info "zdot: updated"
             ;;
         subdir)
-            zdot_verbose "zdot: subdir topology — parent repo manages updates"
+            _zdot_internal_verbose "zdot: subdir topology — parent repo manages updates"
             return 0
             ;;
         *)
-            zdot_warn "zdot: unhandled topology '${_topology}' in pull"
+            _zdot_internal_warn "zdot: unhandled topology '${_topology}' in pull"
             return 1
             ;;
     esac

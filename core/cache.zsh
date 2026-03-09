@@ -427,7 +427,7 @@ load_cache() {
     cached_version=$(head -n 1 "$plan_file" | grep -oE 'v[0-9]+' | sed 's/v//')
     if [[ "$cached_version" != "$_ZDOT_CACHE_VERSION" ]]; then
         zdot_verbose "zdot: cache: version mismatch (cached: $cached_version, current: $_ZDOT_CACHE_VERSION)"
-        zdot_error "load_cache: cache version mismatch (cached: $cached_version, current: $_ZDOT_CACHE_VERSION)"
+        _zdot_internal_warn "load_cache: cache version mismatch (cached: $cached_version, current: $_ZDOT_CACHE_VERSION) — rebuilding"
         return 1
     fi
 
@@ -478,12 +478,12 @@ load_cache() {
 
     # Re-emit defer order warnings (unsatisfiable orderings must be shown every invocation)
     for _w in "${_ZDOT_DEFER_ORDER_WARNINGS[@]}"; do
-        zdot_warn "$_w"
+        _zdot_internal_warn "$_w"
     done
 
     # Re-emit forced-deferred warnings (hooks auto-deferred due to deferred dependency)
     for _w in "${_ZDOT_FORCED_DEFERRED_WARNINGS[@]}"; do
-        zdot_warn "$_w"
+        _zdot_internal_warn "$_w"
     done
 
     # Validate that the sourced plan actually populated the execution plan.
@@ -491,7 +491,7 @@ load_cache() {
     # time; treat it as a cache miss so the plan gets rebuilt.
     if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
         zdot_verbose "zdot: cache: plan empty, forcing rebuild"
-        zdot_error "load_cache: cached plan is empty, forcing rebuild"
+        _zdot_internal_warn "load_cache: cached plan is empty, forcing rebuild"
         return 1
     fi
 

@@ -451,7 +451,7 @@ zdot_load_plugin() {
     local plugin_path=$REPLY
 
     if [[ -z "$plugin_path" ]]; then
-        zdot_warn "zdot_load_plugin: could not resolve path for $spec"
+        _zdot_internal_error "zdot_load_plugin: could not resolve path for $spec"
         return 1
     fi
 
@@ -463,7 +463,7 @@ zdot_load_plugin() {
     plugin_file=${_plugin_files[1]}
 
     if [[ -z "$plugin_file" ]]; then
-        zdot_warn "zdot_load_plugin: no plugin file for $spec"
+        _zdot_internal_error "zdot_load_plugin: no plugin file for $spec"
         return 1
     fi
     

@@ -196,7 +196,7 @@ zdot_register_hook() {
     # Store name mapping (fall back to func_name if --name not given)
     local _effective_name="${hook_name:-$func_name}"
     if [[ -n "${_ZDOT_HOOK_BY_NAME[$_effective_name]}" ]]; then
-        zdot_warn "zdot_register_hook: duplicate hook name '$_effective_name'; skipping registration"
+        _zdot_internal_warn "zdot_register_hook: duplicate hook name '$_effective_name'; skipping registration"
         REPLY="${_ZDOT_HOOK_BY_NAME[$_effective_name]}"
         return 1
     fi
@@ -244,7 +244,7 @@ zdot_register_hook() {
                     local conflicting_hook=${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}
                     if [[ $is_tool_phase -eq 1 ]]; then
                         # Tool phases: first registered wins; warn and skip
-                        zdot_warn "zdot_register_hook: phase '$p' already provided by '${_ZDOT_HOOKS[$conflicting_hook]}' in context '$new_ctx'; skipping '$func_name'"
+                        _zdot_internal_warn "zdot_register_hook: phase '$p' already provided by '${_ZDOT_HOOKS[$conflicting_hook]}' in context '$new_ctx'; skipping '$func_name'"
                         skip_phase=1
                         break
                     else
@@ -381,7 +381,7 @@ zdot_build_execution_plan() {
                     degree=-1  # Mark as skipped
                     break
                 else
-                    zdot_error "zdot_build_execution_plan: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context"
+                    _zdot_internal_error "zdot_build_execution_plan: Hook '${_ZDOT_HOOKS[$hook_id]}' requires phase '$phase' but no hook provides it in current context"
                     return 1
                 fi
             fi
@@ -545,7 +545,7 @@ zdot_build_execution_plan() {
 
     # Emit accumulated warnings
     for _w in "${_ZDOT_DEFER_ORDER_WARNINGS[@]}"; do
-        zdot_warn "$_w"
+        _zdot_internal_warn "$_w"
     done
 
     # Seed zero_in_degree from final in_degree values.
@@ -756,7 +756,7 @@ zdot_build_execution_plan() {
                     fi
                     if [[ $_accepted -eq 0 ]]; then
                         local msg="zdot: WARNING: Hook '$func_name' requires deferred phase '$_force_phase'; it has been force-deferred"
-                        zdot_warn "$msg"
+                        _zdot_internal_warn "$msg"
                         if [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]} -eq 0 ]]; then
                             _ZDOT_FORCED_DEFERRED_WARNINGS+=("$msg")
                         fi
@@ -944,7 +944,7 @@ zdot_verify_tools() {
     local tool
     for tool in "$@"; do
         if ! command -v "$tool" &>/dev/null; then
-            zdot_warn "zdot_verify_tools: tool '$tool' not found on PATH"
+            _zdot_internal_warn "zdot_verify_tools: tool '$tool' not found on PATH"
         fi
     done
 }
@@ -965,19 +965,20 @@ _zdot_execute_hook() {
 
     # Execute the hook function
     if typeset -f "$func" > /dev/null; then
-        zdot_verbose "zdot: hooks: run: $func"
+        _zdot_internal_debug "zdot: hooks: run: ${func} (hook_id=${hook_id} provides=(${provides[*]}))"
         _ZDOT_CURRENT_HOOK_FUNC=$func
-        if $func; then
-            local _rc=$?
-            _ZDOT_CURRENT_HOOK_FUNC=
+        $func
+        local _rc=$?
+        _ZDOT_CURRENT_HOOK_FUNC=
+        _zdot_internal_debug "zdot: hooks: done: ${func} rc=${_rc}"
 
-            _ZDOT_HOOKS_EXECUTED[$hook_id]=1
+        _ZDOT_HOOKS_EXECUTED[$hook_id]=1
 
+        if (( _rc == 0 )); then
             # Mark each provided phase as provided
             for phase in $provides; do
                 _ZDOT_PHASES_PROVIDED[$phase]=1
-                zdot_verbose "zdot: hooks: provided: $phase"
-
+                _zdot_internal_debug "zdot: hooks: provided: ${phase} (by ${func})"
                 # Call stop callback if provided
                 if [[ -n $stop_callback ]] && $stop_callback "$phase"; then
                     return 2
@@ -985,10 +986,7 @@ _zdot_execute_hook() {
             done
             return 0
         else
-            local _rc=$?
-            _ZDOT_CURRENT_HOOK_FUNC=
-            _ZDOT_HOOKS_EXECUTED[$hook_id]=1
-            zdot_error "${function_name}: Hook '$func' failed (exit code: $_rc)"
+            _zdot_internal_error "${function_name}: Hook '$func' failed (exit code: $_rc)"
             return 1
         fi
     else
@@ -1117,7 +1115,7 @@ _zdot_run_deferred_phase_check() {
             exec {_zdot_flush_fd}</dev/null
             zle -F $_zdot_flush_fd _zdot_flush_handler
         fi
-        zdot_error "_zdot_run_deferred_phase_check: deferred hooks are stalled" \
+        _zdot_internal_error "_zdot_run_deferred_phase_check: deferred hooks are stalled" \
             "(no progress made; the following hooks have unmet requirements" \
             "that will never be provided):"
         local hook_label hook_name req
@@ -1132,7 +1130,7 @@ _zdot_run_deferred_phase_check() {
                     missing_phases+=("$req")
                 fi
             done
-            zdot_error "  hook '${hook_label}': waiting for phase(s): ${missing_phases[*]}"
+            _zdot_internal_error "  hook '${hook_label}': waiting for phase(s): ${missing_phases[*]}"
         done
     fi
 
@@ -1238,18 +1236,13 @@ zdot_execute_all() {
     done
     
     if [[ $failed -gt 0 ]]; then
-        zdot_error "zdot_execute_all: Completed with $failed failed hook(s)"
+        _zdot_internal_error "zdot_execute_all: Completed with $failed failed hook(s)"
         return 1
     fi
 
     # Detect eager hooks that were in the plan but never ran.
-    # This can happen when a hook's in-degree never reaches zero due to a
-    # bug in the dependency graph (e.g. a cycle that Kahn's algorithm could
-    # not resolve, or a plan that was built with missing providers that
-    # slipped past the earlier checks).
     local -a unexecuted_eager=()
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
-        # Deferred hooks are handled separately — skip them here
         if [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -gt 0 ]]; then
             continue
         fi
@@ -1258,9 +1251,9 @@ zdot_execute_all() {
         fi
     done
     if [[ ${#unexecuted_eager[@]} -gt 0 ]]; then
-        zdot_error "zdot_execute_all: The following eager hooks were in the plan but never ran (possible dependency cycle or missing provider):"
+        _zdot_internal_error "zdot_execute_all: The following eager hooks were in the plan but never ran (possible dependency cycle or missing provider):"
         for _ue in "${unexecuted_eager[@]}"; do
-            zdot_error "  - $_ue"
+            _zdot_internal_error "  - $_ue"
         done
         return 1
     fi
