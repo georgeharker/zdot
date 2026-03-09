@@ -38,6 +38,7 @@ function zdot() {
         zdot_info "    -a, --all                Include unexecuted hooks"
         zdot_info "    -o, --ordered            Show hooks in execution-plan order"
         zdot_info "  zdot hook plan            Print the full execution plan"
+        zdot_info "  zdot hook status          Show per-hook run status from last startup"
     }
 
     function _zdot_help_plugin() {
@@ -149,7 +150,7 @@ function zdot() {
         zdot_info "Usage: zdot <noun> <verb> [options]"
         zdot_info ""
         zdot_info "  cache      status | invalidate | compile"
-        zdot_info "  hook       list [-v] [-a] [-o] | plan"
+        zdot_info "  hook       list [-v] [-a] [-o] | plan | status"
         zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
         zdot_info "  module     list | user-list | user-clone <name>"
@@ -187,12 +188,13 @@ function zdot() {
         # ── hook ──────────────────────────────────────────────────────────
         hook)
             case "$verb" in
-                list) zdot_hooks_list "${@:3}" ;;
-                plan) zdot_show_plan ;;
+                list)   zdot_hooks_list "${@:3}" ;;
+                plan)   zdot_show_plan ;;
+                status) zdot_hooks_status ;;
                 help|--help|-h) _zdot_help_hook ;;
                 *)
                     zdot_error "zdot hook: unknown verb '${verb}'"
-                    zdot_info "  verbs: list | plan"
+                    zdot_info "  verbs: list | plan | status"
                     return 1
                     ;;
             esac
@@ -357,7 +359,7 @@ function zdot() {
             zdot_info "  plugins declared: ${#_ZDOT_PLUGINS_ORDER}"
             zdot_info "  plugins loaded:   ${#_ZDOT_PLUGINS_LOADED}"
             zdot_info "  hooks registered: ${#_ZDOT_HOOKS}"
-            zdot_info "  hooks executed:   ${#_ZDOT_HOOKS_EXECUTED}"
+             zdot_info "  hooks executed:   ${#_ZDOT_HOOKS_EXEC_RESULT}"
             zdot_info "  modules loaded:   ${#_ZDOT_MODULES_LOADED}"
             ;;
 
@@ -375,9 +377,9 @@ function zdot() {
             done
 
             zdot_info ""
-            zdot_info "--- _ZDOT_HOOKS_EXECUTED (${#_ZDOT_HOOKS_EXECUTED} entries) ---"
-            for id in "${(k)_ZDOT_HOOKS_EXECUTED[@]}"; do
-                zdot_info "  $id"
+            zdot_info "--- _ZDOT_HOOKS_EXEC_RESULT (${#_ZDOT_HOOKS_EXEC_RESULT} entries) ---"
+            for id in "${(k)_ZDOT_HOOKS_EXEC_RESULT[@]}"; do
+                zdot_info "  $id -> ${_ZDOT_HOOKS_EXEC_RESULT[$id]}"
             done
 
             zdot_info ""

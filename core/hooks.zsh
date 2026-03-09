@@ -13,9 +13,9 @@ typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
-typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
-typeset -gA _ZDOT_HOOKS_EXECUTED     # hook_id -> 1 when executed at runtime
-typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
+ typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
+ typeset -gA _ZDOT_HOOKS_EXEC_RESULT       # hook_id -> exit code for every attempted hook (0=ok, N=failed, 'missing'=fn not found)
+ typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
@@ -972,7 +972,7 @@ _zdot_execute_hook() {
         _ZDOT_CURRENT_HOOK_FUNC=
         _zdot_internal_debug "zdot: hooks: done: ${func} rc=${_rc}"
 
-        _ZDOT_HOOKS_EXECUTED[$hook_id]=1
+        _ZDOT_HOOKS_EXEC_RESULT[$hook_id]=$_rc
 
         if (( _rc == 0 )); then
             # Mark each provided phase as provided
@@ -990,7 +990,7 @@ _zdot_execute_hook() {
             return 1
         fi
     else
-        _ZDOT_HOOKS_EXECUTED[$hook_id]=1
+        _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='missing'
         zdot_error "${function_name}: Hook function '$func' not found"
         return 1
     fi
@@ -1052,7 +1052,7 @@ _zdot_hook_requirements_met() {
 # eager (non-deferred) plan has already completed by this point.
 #
 # A hook is skipped if:
-#   • it is already in `_ZDOT_HOOKS_EXECUTED` (already ran), or
+#   • it is already in `_ZDOT_HOOKS_EXEC_RESULT` (already ran), or
 #   • it is already in `_ZDOT_HOOKS_QUEUED` (already dispatched but
 #     not yet finished — avoids double-scheduling).
 #
@@ -1076,7 +1076,7 @@ _zdot_run_deferred_phase_check() {
         fi
 
         # Already ran — skip
-        if [[ ${+_ZDOT_HOOKS_EXECUTED[$hook_id]} -eq 1 ]]; then
+        if [[ ${+_ZDOT_HOOKS_EXEC_RESULT[$hook_id]} -eq 1 ]]; then
             continue
         fi
 
@@ -1141,7 +1141,7 @@ _zdot_run_deferred_phase_check() {
     local -a ready_but_stuck=()
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -eq 0 ]] && continue
-        [[ ${+_ZDOT_HOOKS_EXECUTED[$hook_id]} -eq 1 ]] && continue
+        [[ ${+_ZDOT_HOOKS_EXEC_RESULT[$hook_id]} -eq 1 ]] && continue
         [[ ${+_ZDOT_HOOKS_QUEUED[$hook_id]} -eq 1 ]] && continue
         _zdot_hook_requirements_met "$hook_id" || continue
         # Requirements met, not queued, not executed — it should have been dispatched
@@ -1174,7 +1174,7 @@ _zdot_run_deferred_phase_check() {
         if [[ -n "${_ZDOT_GROUP_MEMBERS[finally]}" ]]; then
             local _finally_hook_id
             for _finally_hook_id in ${=_ZDOT_GROUP_MEMBERS[finally]}; do
-                if [[ -z ${_ZDOT_HOOKS_EXECUTED[$_finally_hook_id]} ]]; then
+                if [[ -z ${_ZDOT_HOOKS_EXEC_RESULT[$_finally_hook_id]} ]]; then
                     _zdot_execute_hook "$_finally_hook_id" "_zdot_run_deferred_phase_check"
                 fi
             done
@@ -1199,7 +1199,7 @@ _zdot_run_deferred_phase_check() {
 # deferred dispatch paths cleanly separated.
 #
 # Each hook is delegated to `_zdot_execute_hook`, which handles function-
-# existence checks, phase marking, and `_ZDOT_HOOKS_EXECUTED` bookkeeping.
+# existence checks, phase marking, and `_ZDOT_HOOKS_EXEC_RESULT` bookkeeping.
 # Any hook that has already been executed is skipped so this function is
 # safe to call after a partial run.
 #
@@ -1216,7 +1216,7 @@ zdot_execute_all() {
     zdot_verbose "zdot: hooks: executing plan (${#_ZDOT_EXECUTION_PLAN} hooks)"
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         # Skip if this hook was already executed
-        if [[ -n ${_ZDOT_HOOKS_EXECUTED[$hook_id]} ]]; then
+        if [[ -n ${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]} ]]; then
             continue
         fi
 
@@ -1246,7 +1246,7 @@ zdot_execute_all() {
         if [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -gt 0 ]]; then
             continue
         fi
-        if [[ -z ${_ZDOT_HOOKS_EXECUTED[$hook_id]} ]]; then
+        if [[ -z ${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]} ]]; then
             unexecuted_eager+=("${_ZDOT_HOOKS[$hook_id]}")
         fi
     done
@@ -1385,9 +1385,9 @@ _zdot_defer_order_display() {
     fi
 }
 
-# Set _name_mark and _deferred_mark for a given hook_id/func pair.
+# Set _name_mark, _deferred_mark, _noquiet_mark, _status_mark for a given hook_id/func pair.
 # Usage: _zdot_hook_display_marks <hook_id> <func>
-# Sets: _name_mark, _deferred_mark, _noquiet_mark (in caller's scope, no local)
+# Sets: _name_mark, _deferred_mark, _noquiet_mark, _status_mark (in caller's scope, no local)
 _zdot_hook_display_marks() {
     local _hname="${_ZDOT_HOOK_NAMES[$1]:-$2}"
     _name_mark=""
@@ -1399,6 +1399,20 @@ _zdot_hook_display_marks() {
     if [[ -n "$_defer_arg" ]]; then
         local _flag_label="${_ZDOT_DEFER_FLAG_NAMES[$_defer_arg]:-$_defer_arg}"
         _noquiet_mark=" %F{yellow}[${_flag_label}]%f"
+    fi
+    _status_mark=""
+    if [[ -n "${_ZDOT_HOOKS_EXEC_RESULT[$1]:-}" ]]; then
+        local _frc="${_ZDOT_HOOKS_EXEC_RESULT[$1]}"
+        if [[ "$_frc" == 'missing' ]]; then
+            _status_mark=" %F{red}[not found]%f"
+        elif [[ "$_frc" == '0' ]]; then
+            _status_mark=" %F{green}[ok]%f"
+        else
+            _status_mark=" %F{red}[failed: rc=${_frc}]%f"
+        fi
+    elif (( ${_ZDOT_EXECUTION_PLAN[(Ie)$1]} )); then
+        # In plan but never attempted — blocked by unmet dependency
+        _status_mark=" %F{yellow}[not run]%f"
     fi
 }
 

@@ -40,7 +40,9 @@ function zdot_hooks_list() {
                 local func="${_ZDOT_HOOKS[$hook_id]}"
                 local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
                 local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
-                zdot_info "  [$_pos] $func"
+                local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+                _zdot_hook_display_marks "$hook_id" "$func"
+                zdot_info "  [$_pos] $func$_status_mark"
                 zdot_info "       name:     $name"
                 zdot_info "       provides: $provides"
                 zdot_info "       deferred: no"
@@ -68,7 +70,9 @@ function zdot_hooks_list() {
                 local func="${_ZDOT_HOOKS[$hook_id]}"
                 local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
                 local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
-                zdot_info "  [$_pos] $func"
+                local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+                _zdot_hook_display_marks "$hook_id" "$func"
+                zdot_info "  [$_pos] $func$_status_mark"
                 zdot_info "       name:     $name"
                 zdot_info "       provides: $provides"
                 zdot_info "       deferred: yes"
@@ -261,9 +265,9 @@ function zdot_hooks_list() {
                     # Normal mode: just list the hook
                     local optional_mark=""
                     [[ "$optional" == 1 ]] && optional_mark=" [optional]"
-                    local _name_mark="" _deferred_mark="" _noquiet_mark=""
+                    local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
                     _zdot_hook_display_marks "$hook_id" "$func"
-                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark"
+                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark$_status_mark"
                 fi
             done
             zdot_info ""
@@ -309,9 +313,9 @@ function zdot_hooks_list() {
             else
                 local optional_mark=""
                 [[ "$optional" == 1 ]] && optional_mark=" [optional]"
-                local _name_mark="" _deferred_mark="" _noquiet_mark=""
+                local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark"
+                zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark$_status_mark"
             fi
         done
         zdot_info ""

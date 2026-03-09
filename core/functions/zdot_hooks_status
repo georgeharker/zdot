@@ -1,0 +1,73 @@
+#!/usr/bin/env zsh
+# Show per-hook execution status from the last zdot startup.
+# Usage: zdot_hooks_status
+#
+# Requires zdot_execute_all to have run (i.e. after shell startup).
+# Shows each hook in plan order annotated with:
+#   [ok]           ran successfully
+#   [failed: rc=N] ran but returned non-zero
+#   [not found]    function was missing at execution time
+#   [not run]      in plan but never attempted (blocked by unmet dependency)
+#   (deferred)     in deferred plan — may have run post-prompt
+
+function zdot_hooks_status() {
+    if (( ${#_ZDOT_EXECUTION_PLAN[@]} == 0 \
+        && ${#_ZDOT_EXECUTION_PLAN_DEFERRED[@]} == 0 )); then
+        zdot_warn "No execution plan found — has zdot_init been called?"
+        return 1
+    fi
+
+    local _ok=0 _failed=0 _notrun=0
+
+    zdot_report "Hook execution status:"
+    zdot_info ""
+
+    # Eager plan
+    if (( ${#_ZDOT_EXECUTION_PLAN[@]} > 0 )); then
+        zdot_info "  Eager:"
+        local _pos=1
+        for hook_id in "${_ZDOT_EXECUTION_PLAN[@]}"; do
+            local func="${_ZDOT_HOOKS[$hook_id]}"
+            local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+            _zdot_hook_display_marks "$hook_id" "$func"
+            zdot_info "    [$_pos] $func$_status_mark"
+            local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
+            if [[ -z "$_rc" ]]; then
+                (( _notrun++ ))
+            elif [[ "$_rc" != '0' ]]; then
+                (( _failed++ ))
+            else
+                (( _ok++ ))
+            fi
+            (( _pos++ ))
+        done
+        zdot_info ""
+    fi
+
+    # Deferred plan
+    if (( ${#_ZDOT_EXECUTION_PLAN_DEFERRED[@]} > 0 )); then
+        zdot_info "  Deferred:"
+        local _pos=1
+        for hook_id in "${_ZDOT_EXECUTION_PLAN_DEFERRED[@]}"; do
+            local func="${_ZDOT_HOOKS[$hook_id]}"
+            local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+            _zdot_hook_display_marks "$hook_id" "$func"
+            zdot_info "    [$_pos] $func$_status_mark"
+            local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
+            if [[ -n "$_rc" && "$_rc" != '0' ]]; then
+                (( _failed++ ))
+            elif [[ -n "$_rc" ]]; then
+                (( _ok++ ))
+            fi
+            # Deferred hooks that haven't run yet are expected — don't count as not-run
+            (( _pos++ ))
+        done
+        zdot_info ""
+    fi
+
+    # Summary
+    zdot_info "  Summary: ${_ok} ok, ${_failed} failed, ${_notrun} not run (eager)"
+    zdot_info ""
+
+    return $(( _failed > 0 || _notrun > 0 ))
+}
