@@ -18,6 +18,7 @@ _mcp_get_secrets_mcp_dirs() {
 # Module initialization - set up MCP secrets
 _mcp_init() {
     command -v op &> /dev/null || return 0
+    [[ $_ZDOT_OP_ACTIVE -ne 1 ]] && { zdot_warn "op unavailable, skipping mcp setup"; return 0 }
 
     # Get secrets directories
     local secrets_src_dir secrets_cache secrets_mcp_dir
