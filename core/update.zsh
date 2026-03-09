@@ -134,9 +134,7 @@ _zdot_update_install_dotfiler_hook() {
     fi
 }
 
-{
-    _zdot_update_install_dotfiler_hook
-}
+_zdot_update_install_dotfiler_hook
 
 # ---------------------------------------------------------------------------
 # Cleanup: unset all private helpers after the hook is wired.
@@ -154,10 +152,36 @@ _zdot_update_cleanup() {
 # ---------------------------------------------------------------------------
 # Wire into zdot hook system and clean up private helpers
 # ---------------------------------------------------------------------------
+# Skip registering the shell-hook when dotfiler is managing zdot updates —
+# dotfiler/update.zsh will drive the full update lifecycle (plan/pull/unpack/
+# post) via the hook registered in dotfiler-hook.zsh. Registering here too
+# would cause double update attempts.
+#
+# When not in dotfiler-integration mode, we register a thin wrapper that runs
+# the update inside a subshell. The subshell sources setup_core.zsh first so
+# that _zdot_update_hook_unpack has setup_core_main available, while keeping
+# the interactive shell's namespace completely clean.
+# _zdot_update_handle_update itself (in update-impl.zsh) is shared with the
+# dotfiler hook path and must stay free of any shell-path setup logic.
 
-zdot_register_hook _zdot_update_handle_update \
-    --name zdot-update \
-    --context interactive \
-    --group finally
+_zdot_update_shell_hook() {
+    (
+        local _setup_core="${_zdot_dotfiler_scripts_dir}/setup_core.zsh"
+        if [[ -f "$_setup_core" ]]; then
+            source "$_setup_core"
+        else
+            zdot_warn "zdot: setup_core.zsh not found at ${_setup_core}, skipping update"
+            return 1
+        fi
+        _zdot_update_handle_update
+    )
+}
+
+if ! _zdot_update_is_dotfiler_integration; then
+    zdot_register_hook _zdot_update_shell_hook \
+        --name zdot-update \
+        --context interactive \
+        --group finally
+fi
 
 _zdot_update_cleanup

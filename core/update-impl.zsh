@@ -9,6 +9,7 @@
 #
 # Public entry points:
 #   _zdot_update_find_dotfiler_scripts   → REPLY = scripts dir; rc 0/1
+#   _zdot_update_is_dotfiler_integration → returns 0 if dotfiler manages zdot updates
 #   _zdot_update_hook_check              → 0=available, 1=up-to-date, 2=zdot_error
 #   _zdot_update_hook_plan               → populate _dotfiler_plan_zdot_* in-process
 #                                          returns 0=populated, 0=nothing-to-do
@@ -57,6 +58,43 @@ _zdot_update_find_dotfiler_scripts() {
     fi
 
     REPLY=""; return 1
+}
+
+# ---------------------------------------------------------------------------
+# Dotfiler integration detection
+# ---------------------------------------------------------------------------
+# Returns 0 (true) if dotfiler is responsible for updating zdot, i.e.:
+#   - ':zdot:update' dotfiler-integration is explicitly 'true'/'yes', OR
+#   - (default) zdot lives inside a parent repo that contains dotfiler scripts.
+# Returns 1 (false) if dotfiler-integration is explicitly 'false'/'no', or
+#   zdot is genuinely standalone (no parent dotfiler repo found).
+#
+# This drives two gates:
+#   1. zdot/core/update.zsh: skip zdot_register_hook (shell-hook) when true —
+#      dotfiler is responsible for the update lifecycle.
+#
+# In both paths, setup_core_main is available without extra sourcing at startup:
+#   - dotfiler path: dotfiler/update.zsh sources setup_core.zsh before hooks run.
+#   - shell-hook path: _zdot_update_shell_hook (zdot/core/update.zsh) sources
+#     setup_core.zsh inside a subshell before calling _zdot_update_handle_update.
+
+_zdot_update_is_dotfiler_integration() {
+    # Explicit override wins unconditionally.
+    local _explicit
+    zstyle -s ':zdot:update' dotfiler-integration _explicit 2>/dev/null
+    case "${_explicit:-}" in
+        true|yes|on|1)   return 0 ;;
+        false|no|off|0)  return 1 ;;
+    esac
+
+    # Default: detect from the parent repo. We need _update_core_get_parent_root
+    # (from update_core.zsh). If it isn't loaded yet, treat as standalone.
+    (( ${+functions[_update_core_get_parent_root]} )) || return 1
+
+    local _parent_root
+    _update_core_get_parent_root "$ZDOT_REPO"; _parent_root=${reply[1]}
+    [[ -n "$_parent_root" \
+        && -f "${_parent_root}/.nounpack/dotfiler/update_core.zsh" ]]
 }
 
 # Reads ':zdot:update' subtree-remote / subtree-url zstyles with sensible
@@ -236,17 +274,17 @@ _zdot_update_hook_pull() {
              _subtree_rc=$?
              zdot_log_debug "zdot: pull: subtree output: ${_subtree_out}"
              (( _stashed )) && _update_core_pop_stash "$_parent" "zdot subtree"
-             if (( _subtree_rc != 0 )); then
-                 zdot_warn "zdot: subtree pull failed"; return 1
-             fi
-             _zdot_info "zdot: updated"
+              if (( _subtree_rc != 0 )); then
+                  zdot_warn "zdot: subtree pull failed"; return 1
+              fi
+              zdot_info "zdot: updated"
             ;;
         subdir)
-            _zdot_internal_verbose "zdot: subdir topology — parent repo manages updates"
+            zdot_verbose "zdot: subdir topology — parent repo manages updates"
             return 0
             ;;
         *)
-            _zdot_internal_warn "zdot: unhandled topology '${_topology}' in pull"
+            zdot_warn "zdot: unhandled topology '${_topology}' in pull"
             return 1
             ;;
     esac
@@ -306,11 +344,13 @@ _zdot_update_hook_unpack() {
         "${_to_unpack[@]}"
     )
     # Subshell — namespace discarded on exit.
-    # setup_core.zsh is sourced early by the caller (update.zsh / setup.zsh);
-    # functions are inherited into this subshell.
+    # setup_core_main is inherited from the calling context:
+    #   - dotfiler path: dotfiler/update.zsh sources setup_core.zsh before hooks.
+    #   - shell-hook path: _zdot_update_shell_hook sources setup_core.zsh into
+    #     the subshell before calling _zdot_update_handle_update.
     (
         if ! (( $+functions[setup_core_main] )); then
-            warn "setup_core_main not defined — was setup_core.zsh sourced by the caller?"
+            warn "setup_core_main not defined — setup_core.zsh was not sourced by caller"
             return 1
         fi
         setup_core_main "${_setup_args[@]}"
@@ -436,11 +476,11 @@ _zdot_update_hook_setup() {
         --excludes "${ZDOT_REPO}/zdot_exclude"
     )
     # Subshell — namespace discarded on exit.
-    # setup_core.zsh is sourced early by the caller (update.zsh / setup.zsh);
-    # functions are inherited into this subshell.
+    # Same assumption as _zdot_update_hook_unpack: setup_core_main is
+    # inherited from the calling context.
     (
         if ! (( $+functions[setup_core_main] )); then
-            warn "setup_core_main not defined — was setup_core.zsh sourced by the caller?"
+            warn "setup_core_main not defined — setup_core.zsh was not sourced by caller"
             return 1
         fi
         setup_core_main "${_setup_args[@]}"
@@ -619,6 +659,7 @@ _zdot_update_impl_cleanup_hook() {
     fi
     unset -f \
         _zdot_update_find_dotfiler_scripts \
+        _zdot_update_is_dotfiler_integration \
         _zdot_update_hook_check \
         _zdot_update_hook_plan \
         _zdot_update_hook_pull \
@@ -637,11 +678,13 @@ _zdot_update_impl_cleanup_shell() {
     # Unset helpers not needed after shell startup — keep runtime fns alive.
     unset -f \
         _zdot_update_find_dotfiler_scripts \
+        _zdot_update_is_dotfiler_integration \
         _zdot_update_hook_register \
         _zdot_update_impl_cleanup_hook \
         _zdot_update_impl_cleanup_shell \
         2>/dev/null
     # _zdot_update_hook_{check,plan,pull,unpack,post} — kept (called by _zdot_update_handle_update)
-    # _zdot_update_handle_update — kept (IS the hook body)
+    # _zdot_update_handle_update — kept (called by _zdot_update_shell_hook)
+    # _zdot_update_shell_hook — kept (IS the registered hook body, defined in update.zsh)
     return 0
 }
