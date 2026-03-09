@@ -260,9 +260,12 @@ _zdot_update_hook_unpack() {
     zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
     [[ "$_link_tree" == false ]] && return 0
 
-    # Skip if plan found nothing to do and force not set
-    if [[ -z "${_dotfiler_plan_zdot_range:-}" && ${#force[@]} -eq 0 ]]; then
-        zdot_log_debug "zdot: unpack skipping — nothing planned and not forced"
+    # Skip if plan found nothing to unpack — setup only processes explicitly
+    # listed files, so empty lists is a genuine no-op regardless of range.
+    if [[ ${#_dotfiler_plan_zdot_to_unpack[@]} -eq 0 \
+        && ${#_dotfiler_plan_zdot_to_remove[@]} -eq 0 \
+        && ${#force[@]} -eq 0 ]]; then
+        zdot_log_debug "zdot: unpack skipping — no files planned and not forced"
         return 0
     fi
 
