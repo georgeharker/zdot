@@ -140,6 +140,10 @@ _zdot_update_hook_plan() {
     local _phase=components
     [[ "${1:-}" == --phase=* ]] && { _phase="${1#--phase=}"; shift; }
 
+    # Declare plan arrays unconditionally at the top so every early return and
+    # every caller path sees them as valid empty arrays rather than unset vars.
+    typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
+
     local _subtree_spec _subtree_url
     _zdot_update_init
 
