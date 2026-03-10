@@ -217,8 +217,8 @@ _zdot_update_hook_plan() {
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
     _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
-    zdot_info "zdot: ${#_update_core_files_to_unpack[@]} to update, \
-${#_update_core_files_to_remove[@]} to remove"
+    zdot_info "zdot: ${#_update_core_files_to_unpack[@]} files to update, \
+${#_update_core_files_to_remove[@]} files to remove"
 
     _dotfiler_plan_zdot_range="${_old}..${_new}"
     _dotfiler_plan_zdot_to_unpack+=("${_update_core_files_to_unpack[@]}")
@@ -255,6 +255,7 @@ _zdot_update_hook_pull() {
         return 0
     fi
 
+    zdot_info "zdot: pulling..."
     case "$_topology" in
         standalone)
             _update_core_prompt_dirty "$_repo_dir" "zdot standalone" || return 1
