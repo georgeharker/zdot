@@ -132,7 +132,14 @@ _zdot_update_hook_check() {
 # Returns 0 always. "Nothing to do" = _dotfiler_plan_zdot_range is empty/unset.
 # Caller must pre-declare: typeset -gaU _dotfiler_plan_zdot_to_unpack
 #                                        _dotfiler_plan_zdot_to_remove
+# Args: [--phase=dotfiles|components]
+#   --phase=dotfiles  : caller has set _dotfiler_hint_range_zdot from dotfiles refs;
+#                       target SHA is pinned to that hint.
+#   --phase=components: self-directed; fetches own remote tip.
 _zdot_update_hook_plan() {
+    local _phase=components
+    [[ "${1:-}" == --phase=* ]] && { _phase="${1#--phase=}"; shift; }
+
     local _subtree_spec _subtree_url
     _zdot_update_init
 
@@ -146,31 +153,35 @@ _zdot_update_hook_plan() {
     _old=$(git -C "$ZDOT_REPO" rev-parse HEAD 2>/dev/null) || return 0
 
     if [[ -n "${_dotfiler_hint_range_zdot:-}" ]]; then
-        # Hint range: "old_comp_sha..new_comp_sha" resolved by dotfiler
+        # Phase dotfiles: hint range set by dotfiler from dotfiles refs.
+        # Target SHA is pinned to exactly what dotfiles records.
         _old="${_dotfiler_hint_range_zdot%%..*}"
         _new="${_dotfiler_hint_range_zdot#*..}"
-        zdot_verbose "zdot hook plan: using hint range ${_dotfiler_hint_range_zdot}"
-        # Still need remote/branch for pull phase
+        zdot_verbose "zdot hook plan: phase=dotfiles, range ${_dotfiler_hint_range_zdot}"
+        # _old/_new come from the hint — we only need remote/branch for pull phase.
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+        # Fetch to materialise _new objects locally for build_file_lists.
+        git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>/dev/null
     else
-        case "$_topology" in
-            subtree)
-                local _remote_url
-                _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
-                    "$_subtree_url" || return 0
-                _remote="${reply[1]}" _branch="${reply[2]}" _remote_url="${reply[3]}"
-                _update_core_resolve_remote_sha "$_remote_url" "$_branch"
-                _new="$REPLY"
-                ;;
-            submodule|standalone|*)
-                _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
-                _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
-                git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>/dev/null
-                _new=$(git -C "$ZDOT_REPO" \
-                    rev-parse "${_remote}/${_branch}" 2>/dev/null) || return 0
-                ;;
-        esac
+        # Phase components: self-directed. No hint; fetch own remote, advance to tip.
+        # _update_core_component_tip_range handles topology differences:
+        #   subtree    — current position is SHA marker, not HEAD
+        #   standalone | submodule — current position is HEAD
+        local _remote_url
+        if [[ "$_topology" == subtree ]]; then
+            _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
+                "$_subtree_url" || return 0
+            _remote="${reply[1]}" _branch="${reply[2]}" _remote_url="${reply[3]}"
+        else
+            _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
+            _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+        fi
+        _update_core_component_tip_range \
+            "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" || return 0
+        [[ -n "$REPLY" ]] || return 0
+        _old="${REPLY%%..*}"
+        _new="${REPLY#*..}"
     fi
 
     # Always populate topology/remote/branch so pull knows what it's
@@ -213,12 +224,25 @@ ${#_update_core_files_to_remove[@]} to remove"
 
 # pull: git operations only — no setup.zsh, no new zsh processes.
 # Reads topology and remote/branch from _dotfiler_plan_zdot_* vars set by plan.
+# Args: [--phase=dotfiles|components]
+#   --phase=dotfiles  : pull to exactly the SHA recorded in dotfiles (range's new
+#                       end). Ensures Phase 1 reproducibility.
+#   --phase=components: pull to remote/branch tip (Phase 2 / standalone shell-hook).
 _zdot_update_hook_pull() {
+    local _phase=components
+    [[ "${1:-}" == --phase=* ]] && { _phase="${1#--phase=}"; shift; }
+
     local _topology="${_dotfiler_plan_zdot_topology:-}"
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _remote="${_dotfiler_plan_zdot_remote:-}"
     local _branch="${_dotfiler_plan_zdot_branch:-}"
     local _range="${_dotfiler_plan_zdot_range:-}"
+
+    # Resolve pull target: dotfiles phase pins to exact SHA, components phase uses tip.
+    local _target_ref="${_remote}/${_branch}"
+    if [[ "$_phase" == dotfiles ]] && [[ -n "$_range" ]]; then
+        _target_ref="${_range#*..}"
+    fi
 
     # Empty range means plan found nothing to do — skip the git operation.
     if [[ -z "$_range" ]]; then
@@ -230,54 +254,71 @@ _zdot_update_hook_pull() {
     case "$_topology" in
         standalone)
             _update_core_prompt_dirty "$_repo_dir" "zdot standalone" || return 1
-            zdot_verbose "zdot: pull: git pull --autostash ${_remote} ${_branch}"
-            git -C "$_repo_dir" pull -q --autostash "$_remote" "$_branch" || {
-                zdot_warn "zdot: pull failed"; return 1
-            }
+            if [[ "$_phase" == dotfiles ]]; then
+                # Phase dotfiles: pin to exact SHA from dotfiles reference.
+                # Fetch was already done in plan_fn to materialise objects.
+                zdot_verbose "zdot: pull: git reset --hard ${_target_ref[1,12]} (phase=dotfiles)"
+                git -C "$_repo_dir" reset -q --hard "$_target_ref" || {
+                    zdot_warn "zdot: pull failed"; return 1
+                }
+            else
+                # Phase components / standalone shell-hook: advance to remote tip.
+                zdot_verbose "zdot: pull: git pull --autostash ${_remote} ${_branch}"
+                git -C "$_repo_dir" pull -q --autostash "$_remote" "$_branch" || {
+                    zdot_warn "zdot: pull failed"; return 1
+                }
+            fi
             zdot_info "zdot: updated"
             ;;
         submodule)
             local _parent
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
-             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-             zdot_log_debug "zdot: pull: parent=${_parent}"
-             local _stashed=0
-             _update_core_maybe_stash "$_parent" "zdot submodule" || return 1
-             _stashed=$REPLY
-             zdot_verbose "zdot: pull: git submodule update --remote -- ${_rel}"
-             local _sub_out _sub_rc
-             _sub_out=$(git -C "$_parent" submodule update --remote -- "$_rel" 2>&1)
-             _sub_rc=$?
-             zdot_log_debug "zdot: pull: submodule output: ${_sub_out}"
-             if (( _sub_rc != 0 )); then
-                 (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
-                 zdot_warn "zdot: submodule update failed"
-                 return 1
-             fi
-             (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
-             zdot_info "zdot: updated"
-             ;;
-         subtree)
-             local _parent
-             _update_core_get_parent_root "$_repo_dir"
-             _parent="${reply[1]}"
-             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-             zdot_verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
-             zdot_log_debug "zdot: pull: parent=${_parent}"
-             local _stashed=0
-             _update_core_maybe_stash "$_parent" "zdot subtree" || return 1
-             _stashed=$REPLY
-             local _subtree_out _subtree_rc
-             _subtree_out=$(git -C "$_parent" subtree pull \
-                 --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
-             _subtree_rc=$?
-             zdot_log_debug "zdot: pull: subtree output: ${_subtree_out}"
-             (( _stashed )) && _update_core_pop_stash "$_parent" "zdot subtree"
-              if (( _subtree_rc != 0 )); then
-                  zdot_warn "zdot: subtree pull failed"; return 1
-              fi
-              zdot_info "zdot: updated"
+            local _rel="${${_repo_dir:A}#${_parent:A}/}"
+            zdot_log_debug "zdot: pull: parent=${_parent} target=${_target_ref}"
+            local _stashed=0
+            _update_core_maybe_stash "$_parent" "zdot submodule" || return 1
+            _stashed=$REPLY
+            local _sub_out _sub_rc
+            if [[ "$_phase" == dotfiles ]]; then
+                # Phase dotfiles: pin to SHA dotfiles records — no --remote.
+                zdot_verbose "zdot: pull: git submodule update -- ${_rel} (pinned to ${_target_ref[1,12]})"
+                _sub_out=$(git -C "$_parent" submodule update -- "$_rel" 2>&1)
+            else
+                # Phase components: advance submodule to remote tip.
+                zdot_verbose "zdot: pull: git submodule update --remote -- ${_rel}"
+                _sub_out=$(git -C "$_parent" submodule update --remote -- "$_rel" 2>&1)
+            fi
+            _sub_rc=$?
+            zdot_log_debug "zdot: pull: submodule output: ${_sub_out}"
+            if (( _sub_rc != 0 )); then
+                (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
+                zdot_warn "zdot: submodule update failed"
+                return 1
+            fi
+            (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
+            zdot_info "zdot: updated"
+            ;;
+        subtree)
+            local _parent
+            _update_core_get_parent_root "$_repo_dir"
+            _parent="${reply[1]}"
+            local _rel="${${_repo_dir:A}#${_parent:A}/}"
+            zdot_verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
+            zdot_log_debug "zdot: pull: parent=${_parent} target=${_target_ref}"
+            local _stashed=0
+            _update_core_maybe_stash "$_parent" "zdot subtree" || return 1
+            _stashed=$REPLY
+            local _subtree_out _subtree_rc
+            _subtree_out=$(git -C "$_parent" subtree pull \
+                --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
+            _subtree_rc=$?
+            zdot_log_debug "zdot: pull: subtree output: ${_subtree_out}"
+            (( _stashed )) && _update_core_pop_stash "$_parent" "zdot subtree"
+            if (( _subtree_rc != 0 )); then
+                zdot_warn "zdot: subtree pull failed"; return 1
+            fi
+            zdot_info "zdot: updated"
             ;;
         subdir)
             zdot_verbose "zdot: subdir topology — parent repo manages updates"
@@ -358,8 +399,16 @@ _zdot_update_hook_unpack() {
     return $?
 }
 
-# post: commit parent pointer, write SHA marker if subtree.
+# post: commit parent pointer, write SHA marker if subtree/standalone.
+# Args: [--phase=dotfiles|components]
+#   --phase=dotfiles  : Phase 1 — write stamps only. Dotfiles already
+#                       authoritative; do NOT create a new dotfiles commit.
+#   --phase=components: Phase 2 — write stamps + update dotfiles marker/pointer
+#                       + commit dotfiles to record the new component SHA.
 _zdot_update_hook_post() {
+    local _phase=components
+    [[ "${1:-}" == --phase=* ]] && { _phase="${1#--phase=}"; shift; }
+
     local _topology="${_dotfiler_plan_zdot_topology:-}"
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
     local _range="${_dotfiler_plan_zdot_range:-}"
@@ -372,74 +421,76 @@ _zdot_update_hook_post() {
         return 0
     fi
 
+    local _new="${_range#*..}"
+
     case "$_topology" in
         submodule)
             local _parent
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-            local _new="${_dotfiler_plan_zdot_range#*..}"
-            zdot_log_debug "zdot: post: submodule parent=${_parent} rel=${_rel} new=${_new[1,12]}"
-            _update_core_commit_parent "$_parent" "$_rel" \
-                "submodule pointer updated" \
-                "zdot: update submodule to ${_new[1,12]}" \
-                "$_itc_mode"
+            zdot_log_debug "zdot: post: submodule parent=${_parent} rel=${_rel} new=${_new[1,12]} phase=${_phase}"
+            # Phase dotfiles: dotfiles already records this pointer — no commit needed.
+            # Phase components: commit the updated submodule pointer to dotfiles.
+            if [[ "$_phase" == components ]]; then
+                _update_core_commit_parent "$_parent" "$_rel" \
+                    "submodule pointer updated" \
+                    "zdot: update submodule to ${_new[1,12]}" \
+                    "$_itc_mode"
+            fi
             ;;
         subtree)
             local _parent
             _update_core_get_parent_root "$_repo_dir"
             _parent="${reply[1]}"
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
-            local _remote="${_dotfiler_plan_zdot_remote}"
-            local _branch="${_dotfiler_plan_zdot_branch}"
-            local _remote_url _pulled_sha
-            _remote_url=$(git -C "$_repo_dir" \
-                config "remote.${_remote}.url" 2>/dev/null)
-            _pulled_sha=$(_update_core_resolve_remote_sha \
-                "$_remote_url" "$_branch" 2>/dev/null)
-            if [[ -n "$_pulled_sha" ]]; then
-                zdot_log_debug "zdot: post: writing SHA marker ${_pulled_sha[1,12]}"
-                _update_core_write_sha_marker "$_repo_dir" "$_pulled_sha"
+            zdot_log_debug "zdot: post: subtree parent=${_parent} rel=${_rel} phase=${_phase}"
+            # Phase dotfiles: dotfiles already records this marker — don't write or
+            # commit; avoids dirtying the parent tree before Phase components.
+            if [[ "$_phase" == components ]]; then
+                # _new is the zdot SHA resolved during plan — use it directly.
+                # Do not use git rev-parse HEAD on _repo_dir: for subtree that
+                # is the parent repo's HEAD, not the zdot component SHA.
+                if [[ -n "$_new" ]]; then
+                    zdot_log_debug "zdot: post: writing SHA marker ${_new[1,12]}"
+                    _update_core_write_sha_marker "$_repo_dir" "$_new"
+                    _update_core_sha_marker_path "$_repo_dir"
+                    local _marker_path="$REPLY"
+                    if [[ "$_itc_mode" != none && -f "$_marker_path" ]]; then
+                        git -C "$_parent" add "$_marker_path" 2>/dev/null
+                    fi
+                    _update_core_commit_parent "$_parent" "$_rel" \
+                        "subtree updated" "zdot: update subtree ${_rel}" "$_itc_mode"
+                fi
             fi
-            _update_core_sha_marker_path "$_repo_dir"
-            local _marker_path="$REPLY"
-            if [[ "$_itc_mode" != none && -f "$_marker_path" ]]; then
-                git -C "$_parent" add "$_marker_path" 2>/dev/null
-            fi
-            zdot_log_debug "zdot: post: subtree parent=${_parent} rel=${_rel}"
-            _update_core_commit_parent "$_parent" "$_rel" \
-                "subtree updated" "zdot: update subtree ${_rel}" "$_itc_mode"
             ;;
         standalone)
-            # Write ext SHA marker adjacent to zdot dir — tracked in the
-            # dotfiles repo so any dotfiles range can resolve the zdot range.
-            local _parent
-            _update_core_get_parent_root "$_repo_dir"
-            _parent="${reply[1]}"
-            local _remote_url _pulled_sha
-            _remote_url=$(git -C "$_repo_dir" \
-                config "remote.${_dotfiler_plan_zdot_remote}.url" 2>/dev/null)
-            _pulled_sha=$(_update_core_resolve_remote_sha \
-                "$_remote_url" "$_dotfiler_plan_zdot_branch" 2>/dev/null)
-            if [[ -n "$_pulled_sha" ]]; then
-                zdot_log_debug "zdot: post: writing ext SHA marker ${_pulled_sha[1,12]}"
-                _update_core_write_ext_marker "$_repo_dir" "$_pulled_sha"
-                _update_core_ext_marker_path "$_repo_dir"
-                local _marker_path="$REPLY"
-                if [[ "$_itc_mode" != none \
-                    && -f "$_marker_path" \
-                    && -n "$_parent" ]]; then
-                    git -C "$_parent" add "$_marker_path" 2>/dev/null
-                    _update_core_commit_parent "$_parent" \
-                        "${${_marker_path:A}#${_parent:A}/}" \
-                        "ext sha marker updated" \
-                        "zdot: record standalone SHA ${_pulled_sha[1,12]}" \
-                        "$_itc_mode"
+            # Phase dotfiles: dotfiles already records the marker — don't write or
+            # commit; avoids dirtying the parent tree before Phase components.
+            if [[ "$_phase" == components ]]; then
+                local _parent
+                _update_core_get_parent_root "$_repo_dir"
+                _parent="${reply[1]}"
+                # _new is the zdot SHA resolved during plan — use it directly.
+                if [[ -n "$_new" ]]; then
+                    zdot_log_debug "zdot: post: writing ext SHA marker ${_new[1,12]}"
+                    _update_core_write_ext_marker "$_repo_dir" "$_new"
+                    _update_core_ext_marker_path "$_repo_dir"
+                    local _marker_path="$REPLY"
+                    if [[ "$_itc_mode" != none \
+                        && -f "$_marker_path" \
+                        && -n "$_parent" ]]; then
+                        git -C "$_parent" add "$_marker_path" 2>/dev/null
+                        _update_core_commit_parent "$_parent" \
+                            "${${_marker_path:A}#${_parent:A}/}" \
+                            "ext sha marker updated" \
+                            "zdot: record standalone SHA ${_new[1,12]}" \
+                            "$_itc_mode"
+                    fi
                 fi
             fi
             ;;
         subdir)
-            # subdir: component is part of dotfiles tree — parent manages versioning
             zdot_verbose "zdot: post: subdir topology — parent repo tracks versioning"
             ;;
         *)
