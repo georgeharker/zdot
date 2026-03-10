@@ -172,6 +172,7 @@ _zdot_update_hook_plan() {
         # _update_core_component_tip_range handles topology differences:
         #   subtree    — current position is SHA marker, not HEAD
         #   standalone | submodule — current position is HEAD
+        zdot_info "Checking zdot..."
         local _remote_url=""
         if [[ "$_topology" == subtree ]]; then
             _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
@@ -183,7 +184,10 @@ _zdot_update_hook_plan() {
         fi
         _update_core_component_tip_range \
             "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" || return 0
-        [[ -n "$REPLY" ]] || return 0
+        if [[ -z "$REPLY" ]]; then
+            zdot_info "zdot: up to date"
+            return 0
+        fi
         _old="${REPLY%%..*}"
         _new="${REPLY#*..}"
     fi
@@ -217,8 +221,11 @@ _zdot_update_hook_plan() {
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
     _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
 
-    zdot_info "zdot: ${#_update_core_files_to_unpack[@]} files to update, \
-${#_update_core_files_to_remove[@]} files to remove"
+    local _nu=${#_update_core_files_to_unpack[@]}
+    local _nr=${#_update_core_files_to_remove[@]}
+    if (( _nu > 0 || _nr > 0 )); then
+        zdot_info "zdot: ${_nu} files to update, ${_nr} files to remove"
+    fi
 
     _dotfiler_plan_zdot_range="${_old}..${_new}"
     _dotfiler_plan_zdot_to_unpack+=("${_update_core_files_to_unpack[@]}")
