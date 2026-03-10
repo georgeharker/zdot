@@ -168,7 +168,7 @@ _zdot_update_hook_plan() {
         # _update_core_component_tip_range handles topology differences:
         #   subtree    — current position is SHA marker, not HEAD
         #   standalone | submodule — current position is HEAD
-        local _remote_url
+        local _remote_url=""
         if [[ "$_topology" == subtree ]]; then
             _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
                 "$_subtree_url" || return 0
