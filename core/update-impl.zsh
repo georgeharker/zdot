@@ -167,7 +167,7 @@ _zdot_update_hook_plan() {
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
         # Fetch to materialise _new objects locally for build_file_lists.
         git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>/dev/null
-    else
+    elif [[ "$_phase" == components ]]; then
         # Phase components: self-directed. No hint; fetch own remote, advance to tip.
         # _update_core_component_tip_range handles topology differences:
         #   subtree    — current position is SHA marker, not HEAD
@@ -190,6 +190,10 @@ _zdot_update_hook_plan() {
         fi
         _old="${REPLY%%..*}"
         _new="${REPLY#*..}"
+    else
+        # Phase dotfiles but no hint — dotfiles has no zdot change recorded.
+        # Nothing for zdot to do in this phase.
+        return 0
     fi
 
     # Always populate topology/remote/branch so pull knows what it's
