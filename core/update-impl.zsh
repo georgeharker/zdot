@@ -158,10 +158,11 @@ _zdot_update_hook_plan() {
 
     if [[ -n "${_dotfiler_hint_range_zdot:-}" ]]; then
         # Phase dotfiles: hint range set by dotfiler from dotfiles refs.
-        # Target SHA is pinned to exactly what dotfiles records.
+        # _old and _new are the zdot SHAs extracted from the dotfiles submodule
+        # pointer — old is what dotfiles previously recorded, new is the target.
         _old="${_dotfiler_hint_range_zdot%%..*}"
         _new="${_dotfiler_hint_range_zdot#*..}"
-        zdot_verbose "zdot hook plan: phase=dotfiles, range ${_dotfiler_hint_range_zdot}"
+        zdot_verbose "zdot hook plan: phase=dotfiles, hint=${_dotfiler_hint_range_zdot}"
         # _old/_new come from the hint — we only need remote/branch for pull phase.
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
