@@ -3,6 +3,7 @@
 # Manages Bun installation and completions
 
 _bun_init() {
+    export BUN_DNS_USE_IPV4=1
     # Bun is installed via homebrew, just mark as ready
     return 0
 }
