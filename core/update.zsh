@@ -22,6 +22,13 @@
 #   disabled     — mode=disabled; zdot no-ops
 
 # ---------------------------------------------------------------------------
+# Source shared implementation first — provides shell-side mirror functions
+# (_zdot_update_get_parent_root, _zdot_update_find_dotfiler_scripts, etc.)
+# that the rest of this file depends on at source time.
+# ---------------------------------------------------------------------------
+source "${ZDOT_DIR}/core/update-impl.zsh"
+
+# ---------------------------------------------------------------------------
 # Register dotfiler as a bundle dependency (opt-in users only).
 # Must happen at source time so zdot_clean_plugins never treats the cloned
 # dotfiler repo as an orphan.
@@ -34,11 +41,8 @@
         # the parent repo — avoids a redundant clone when zdot is a submodule
         # or subtree inside a dotfiler-managed dotfiles repo.
         local _zdot_update_init_parent
-        _zdot_update_init_parent=$(
-            git -C "$ZDOT_REPO" rev-parse --show-superproject-working-tree 2>/dev/null)
-        [[ -z "$_zdot_update_init_parent" ]] && \
-            _zdot_update_init_parent=$(
-                git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
+        _zdot_update_get_parent_root "$ZDOT_REPO"
+        _zdot_update_init_parent=${reply[1]}
         if [[ ! -f "${_zdot_update_init_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
             zdot_use_bundle "georgeharker/dotfiler"
         fi
@@ -49,10 +53,10 @@
 # and zdot_* functions are always defined in the zdot shell context.
 
 # ---------------------------------------------------------------------------
-# Source update_core.zsh shared primitives
 # Bootstrap lookup — finds dotfiler scripts dir using raw git commands
 # (update_core.zsh is not yet loaded).  Uses the same 3-step priority as
 # _zdot_update_find_dotfiler_scripts but only checks for update_core.zsh.
+# Uses _zdot_update_get_parent_root (from update-impl.zsh) for step 2.
 # ---------------------------------------------------------------------------
 _zdot_update_bootstrap_find_dotfiler() {
     local _candidate
@@ -63,12 +67,9 @@ _zdot_update_bootstrap_find_dotfiler() {
         REPLY="$_candidate"; return 0
     fi
 
-    # 2. Parent repo (raw git — update_core.zsh not loaded yet)
+    # 2. Parent repo (via shell-side mirror — no update_core.zsh needed)
     local _parent
-    _parent=$(git -C "$ZDOT_REPO" \
-        rev-parse --show-superproject-working-tree 2>/dev/null)
-    [[ -z "$_parent" ]] && \
-        _parent=$(git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
+    _zdot_update_get_parent_root "$ZDOT_REPO"; _parent=${reply[1]}
     if [[ -n "$_parent" && -f "${_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
         REPLY="${_parent}/.nounpack/dotfiler"; return 0
     fi
@@ -93,11 +94,6 @@ _zdot_update_bootstrap_find_dotfiler() {
 }
 
 # ---------------------------------------------------------------------------
-# Source shared implementation
-# ---------------------------------------------------------------------------
-source "${ZDOT_DIR}/core/update-impl.zsh"
-
-# ---------------------------------------------------------------------------
 # Hook self-installation
 # ---------------------------------------------------------------------------
 # When zdot is running inside a dotfiler-managed repo, write a stub hook
@@ -105,23 +101,7 @@ source "${ZDOT_DIR}/core/update-impl.zsh"
 # repo path, symlinks resolved) so git operations work correctly regardless of
 # whether the linktree has a symlinked .git file.
 # Runs at source time; cheap ([[ -f ]] checks only).
-
-# Lightweight duplicate of _update_core_get_parent_root — avoids sourcing all
-# of update_core.zsh at load time just for this one call.  The full
-# update_core.zsh is sourced inside _zdot_update_shell_hook's ( ) subshell
-# which auto-cleans on exit.  Keep in sync with dotfiler/update_core.zsh.
-_zdot_update_get_parent_root() {
-    local _repo_dir=$1 _root
-    reply=()
-    _root=$(git -C "$_repo_dir" rev-parse --show-superproject-working-tree 2>/dev/null)
-    if [[ -n "$_root" ]]; then
-        reply=( ${_root:A} superproject ); return 0
-    fi
-    _root=$(git -C "$_repo_dir" rev-parse --show-toplevel 2>/dev/null) || {
-        reply=( "" none ); return 0
-    }
-    reply=( ${_root:A} toplevel ); return 0
-}
+# _zdot_update_get_parent_root is provided by update-impl.zsh (already sourced).
 
 _zdot_update_install_dotfiler_hook() {
     _zdot_update_get_parent_root "$ZDOT_REPO"
@@ -155,11 +135,9 @@ _zdot_update_install_dotfiler_hook
 # ---------------------------------------------------------------------------
 
 _zdot_update_cleanup() {
-    { (( ${+functions[_zdot_update_impl_cleanup_shell]} )) \
-        && _zdot_update_impl_cleanup_shell; } 2>/dev/null || true
+    _zdot_update_impl_cleanup_shell
     # verbose/log_debug shims are NOT unset — runtime deps of _zdot_update_handle_update.
     unset -f _zdot_update_bootstrap_find_dotfiler 2>/dev/null
-    unset -f _zdot_update_get_parent_root 2>/dev/null
     unset -f _zdot_update_install_dotfiler_hook 2>/dev/null
     unset -f _zdot_update_cleanup 2>/dev/null
 }
