@@ -50,46 +50,45 @@
 
 # ---------------------------------------------------------------------------
 # Source update_core.zsh shared primitives
-# 3-step priority matching dotfiler-hook.zsh:
-#   1. zstyle ':zdot:dotfiler' scripts-dir override
-#   2. Parent repo .nounpack/dotfiler
-#   3. Plugin cache
+# Bootstrap lookup — finds dotfiler scripts dir using raw git commands
+# (update_core.zsh is not yet loaded).  Uses the same 3-step priority as
+# _zdot_update_find_dotfiler_scripts but only checks for update_core.zsh.
 # ---------------------------------------------------------------------------
-{
-    local _zdot_update_core_dir=""
+_zdot_update_bootstrap_find_dotfiler() {
+    local _candidate
 
     # 1. zstyle override
-    local _zdot_update_zstyle_dir
-    zstyle -s ':zdot:dotfiler' scripts-dir _zdot_update_zstyle_dir 2>/dev/null
-    if [[ -n "$_zdot_update_zstyle_dir" \
-       && -f "${_zdot_update_zstyle_dir}/update_core.zsh" ]]; then
-        _zdot_update_core_dir="$_zdot_update_zstyle_dir"
+    zstyle -s ':zdot:dotfiler' scripts-dir _candidate 2>/dev/null
+    if [[ -n "$_candidate" && -f "${_candidate}/update_core.zsh" ]]; then
+        REPLY="$_candidate"; return 0
     fi
 
-    # 2. Parent repo
-    if [[ -z "$_zdot_update_core_dir" ]]; then
-        local _zdot_update_parent
-        _zdot_update_parent=$(
-            git -C "$ZDOT_REPO" rev-parse --show-superproject-working-tree 2>/dev/null)
-        [[ -z "$_zdot_update_parent" ]] && \
-            _zdot_update_parent=$(
-                git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
-        if [[ -f "${_zdot_update_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
-            _zdot_update_core_dir="${_zdot_update_parent}/.nounpack/dotfiler"
-        fi
+    # 2. Parent repo (raw git — update_core.zsh not loaded yet)
+    local _parent
+    _parent=$(git -C "$ZDOT_REPO" \
+        rev-parse --show-superproject-working-tree 2>/dev/null)
+    [[ -z "$_parent" ]] && \
+        _parent=$(git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n "$_parent" && -f "${_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
+        REPLY="${_parent}/.nounpack/dotfiler"; return 0
     fi
 
     # 3. Plugin cache
-    if [[ -z "$_zdot_update_core_dir" ]]; then
-        local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
-        local _candidate="${_cache}/georgeharker/dotfiler"
-        [[ -f "${_candidate}/update_core.zsh" ]] && \
-            _zdot_update_core_dir="$_candidate"
+    local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
+    _candidate="${_cache}/georgeharker/dotfiler"
+    if [[ -f "${_candidate}/update_core.zsh" ]]; then
+        REPLY="$_candidate"; return 0
     fi
 
-    if [[ -n "$_zdot_update_core_dir" ]]; then
-        _zdot_dotfiler_scripts_dir="$_zdot_update_core_dir"
-        source "${_zdot_update_core_dir}/update_core.zsh" 2>/dev/null || true
+    REPLY=""; return 1
+}
+
+{
+    if _zdot_update_bootstrap_find_dotfiler; then
+        _zdot_dotfiler_scripts_dir="$REPLY"
+        # update_core.zsh is NOT sourced here — it is heavy and only needed at
+        # hook-run time.  _zdot_update_shell_hook sources it inside a ( )
+        # subshell which auto-cleans the entire namespace on exit.
     fi
 }
 
@@ -107,11 +106,25 @@ source "${ZDOT_DIR}/core/update-impl.zsh"
 # whether the linktree has a symlinked .git file.
 # Runs at source time; cheap ([[ -f ]] checks only).
 
-_zdot_update_install_dotfiler_hook() {
-    # Only install if _update_core_get_parent_root is available (update_core.zsh loaded)
-    (( ${+functions[_update_core_get_parent_root]} )) || return 0
+# Lightweight duplicate of _update_core_get_parent_root — avoids sourcing all
+# of update_core.zsh at load time just for this one call.  The full
+# update_core.zsh is sourced inside _zdot_update_shell_hook's ( ) subshell
+# which auto-cleans on exit.  Keep in sync with dotfiler/update_core.zsh.
+_zdot_update_get_parent_root() {
+    local _repo_dir=$1 _root
+    reply=()
+    _root=$(git -C "$_repo_dir" rev-parse --show-superproject-working-tree 2>/dev/null)
+    if [[ -n "$_root" ]]; then
+        reply=( ${_root:A} superproject ); return 0
+    fi
+    _root=$(git -C "$_repo_dir" rev-parse --show-toplevel 2>/dev/null) || {
+        reply=( "" none ); return 0
+    }
+    reply=( ${_root:A} toplevel ); return 0
+}
 
-    _update_core_get_parent_root "$ZDOT_REPO"
+_zdot_update_install_dotfiler_hook() {
+    _zdot_update_get_parent_root "$ZDOT_REPO"
     local _parent_root=${reply[1]}
     [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.zsh" ]] || return 0
 
@@ -145,6 +158,8 @@ _zdot_update_cleanup() {
     { (( ${+functions[_zdot_update_impl_cleanup_shell]} )) \
         && _zdot_update_impl_cleanup_shell; } 2>/dev/null || true
     # verbose/log_debug shims are NOT unset — runtime deps of _zdot_update_handle_update.
+    unset -f _zdot_update_bootstrap_find_dotfiler 2>/dev/null
+    unset -f _zdot_update_get_parent_root 2>/dev/null
     unset -f _zdot_update_install_dotfiler_hook 2>/dev/null
     unset -f _zdot_update_cleanup 2>/dev/null
 }
@@ -165,7 +180,20 @@ _zdot_update_cleanup() {
 # dotfiler hook path and must stay free of any shell-path setup logic.
 
 _zdot_update_shell_hook() {
+    # Run inside a ( ) subshell — everything sourced here (update_core.zsh,
+    # setup_core.zsh) is automatically cleaned up when the subshell exits.
+    # No explicit _update_core_cleanup needed.
     (
+        # update_core.zsh provides the _update_core_* functions needed by
+        # _zdot_update_handle_update (availability checks, locks, safe_rm, etc.)
+        local _update_core="${_zdot_dotfiler_scripts_dir}/update_core.zsh"
+        if [[ -f "$_update_core" ]]; then
+            source "$_update_core"
+        else
+            zdot_warn "zdot: update_core.zsh not found at ${_update_core}, skipping update"
+            return 1
+        fi
+
         local _setup_core="${_zdot_dotfiler_scripts_dir}/setup_core.zsh"
         if [[ -f "$_setup_core" ]]; then
             source "$_setup_core"

@@ -352,6 +352,16 @@ _zdot_update_hook_pull() {
 # unpack: setup.zsh for zdot files — called after ALL pulls complete.
 # By this point every repo is at new HEAD.
 _zdot_update_hook_unpack() {
+    # Required caller-scoped variables (set by update.zsh _update_parse_args
+    # in the dotfiler path, or empty/unset in the shell-hook path):
+    #   force[]     — non-empty array → force unpack (-U)
+    #   dry_run     — non-empty string → dry-run mode (-D)
+    #   quiet       — non-empty string → quiet mode (-q)
+    #   debug_flag  — non-empty string → debug mode (-g)
+    # Required functions (from update_core.zsh):
+    #   _update_core_safe_rm
+    # Required functions (from setup_core.zsh, inherited in subshell):
+    #   setup_core_main
     local _link_tree
     zstyle -s ':zdot:update' link-tree _link_tree || _link_tree=true
     [[ "$_link_tree" == false ]] && return 0
@@ -376,7 +386,7 @@ _zdot_update_hook_unpack() {
         _dest="${_link_dest}/${_f}"
         if [[ -L "$_dest" ]]; then
             zdot_verbose "zdot: removing symlink ${_dest}"
-            _update_safe_rm "$_dest"
+            _update_core_safe_rm "$_dest"
         else
             zdot_warn "zdot: ${_dest} is not a symlink, not removing"
         fi

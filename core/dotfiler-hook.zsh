@@ -40,51 +40,19 @@ if (( ! $+functions[zdot_warn] || ! $+functions[zdot_info] || \
 fi
 
 # ---------------------------------------------------------------------------
-# Locate update_core.zsh
-# Priority: 1. zstyle override  2. parent repo .nounpack/dotfiler  3. plugin cache
+# Locate dotfiler scripts directory
+# update_core.zsh is guaranteed loaded by the dotfiler caller — no need to
+# source it again.  We only need _zdot_dotfiler_scripts_dir for update-impl.zsh.
+# Source update-impl.zsh first (needs update_core.zsh functions), then use its
+# canonical _zdot_update_find_dotfiler_scripts to resolve the scripts path.
 # ---------------------------------------------------------------------------
-_zdot_hook_find_update_core() {
-    local _candidate
+source "${ZDOT_DIR}/core/update-impl.zsh" || return 2
 
-    # 1. Explicit zstyle override
-    zstyle -s ':zdot:dotfiler' scripts-dir _candidate 2>/dev/null
-    if [[ -n "$_candidate" && -f "$_candidate/update_core.zsh" ]]; then
-        REPLY=$_candidate; return 0
-    fi
-
-    # 2. Parent repo (superproject-then-toplevel fallback)
-    # Use ZDOT_REPO (real worktree) so git can resolve .git correctly.
-    local _root
-    _root=$(git -C "$ZDOT_REPO" \
-        rev-parse --show-superproject-working-tree 2>/dev/null)
-    [[ -z "$_root" ]] && \
-        _root=$(git -C "$ZDOT_REPO" rev-parse --show-toplevel 2>/dev/null)
-    if [[ -n "$_root" && -f "$_root/.nounpack/dotfiler/update_core.zsh" ]]; then
-        REPLY="$_root/.nounpack/dotfiler"; return 0
-    fi
-
-    # 3. Plugin cache
-    local _cache="${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zdot/plugins}"
-    _candidate="${_cache}/georgeharker/dotfiler"
-    if [[ -f "$_candidate/update_core.zsh" ]]; then
-        REPLY=$_candidate; return 0
-    fi
-
-    REPLY=""; return 1
-}
-
-_zdot_hook_find_update_core || {
-    error "could not find update_core.zsh"
+_zdot_update_find_dotfiler_scripts || {
+    error "could not locate dotfiler scripts directory"
     return 2
 }
 _zdot_dotfiler_scripts_dir="$REPLY"
-unset -f _zdot_hook_find_update_core
-
-source "${_zdot_dotfiler_scripts_dir}/update_core.zsh" || return 2
-# ---------------------------------------------------------------------------
-# Source shared implementation (all hook logic lives here)
-# ---------------------------------------------------------------------------
-source "${ZDOT_DIR}/core/update-impl.zsh" || return 2
 
 # ---------------------------------------------------------------------------
 # Entry point — register phase functions into the caller's registry
