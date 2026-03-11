@@ -12,4 +12,4 @@ _bun_init() {
 zdot_simple_hook bun --provides bun-ready
 
 # Register completions
-zdot_register_completion_file "bub" "bun completions zsh > $(zdot_get_completions_dir)/_bun"
+zdot_register_completion_file "bun" "bun completions zsh > $(zdot_get_completions_dir)/_bun"
