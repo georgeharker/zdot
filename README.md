@@ -78,6 +78,22 @@ What did work
 - cloning and pulling of plugins
 - handles simpler setups reasonably
 
+## What zdot offers
+
+if rc / init files are structured as a list of functions, rather than a simple list of commands to run, then we can invoke those functions in a specified order.
+
+Zdot works out what that order should be, saves it and then invokes that order on startup.  It's smart about when to invalidate the cached ordering.  Any of your modules change and it will invalidate the cache, but the usual startup is fast.
+
+Zdot also precompiles all of your startup code to .zwc.
+
+Zdot also helps manage plugins - either from omz, prezto or another source.  It can clone, manage and help source those plugins.  This portion of functionality overlaps with that provided by a traditional plugin manager like `antidote` / `Antigen` / `zinit` / `sheldon` (or others).
+
+## Is it better than (pick a plugin manager)
+
+Whilst zdot does manage plugins, it aims to be a bit more than that, offering a way to structure user setup modularly, integrating plugin management as part of your setup.  It doesn't aim to load all plugins at once, so you can customize what loads when and under what circumstances.
+
+Better?  Just Different. I've done some benchmarking and comparable setups are within comparable timeframes. Zdot appears performant in the comparisons - and whilst absolute best startup speed wasn't the goal, it should be fast enough (or with delayed loading features, faster) than the fastest of the plugin managers.
+
 ## Overview
 
 ### Key Features
@@ -87,7 +103,6 @@ What did work
 - **Dependency Management**: Hooks automatically execute in the correct order based on their dependencies
 - **Context Awareness**: Different configurations for interactive/non-interactive and login/non-login shells
 - **Optional Loading**: Modules can gracefully handle missing dependencies (e.g., if homebrew isn't installed)
-- **On-Demand Execution**: Support for manually-triggered phases (like cleanup tasks)
 - **Debug Tools**: Built-in tools to inspect module loading and hook execution
 
 ### Architecture
@@ -130,9 +145,6 @@ User modules live in a separate directory outside the core tree (see [User Modul
 # Source the zdot system
 source "${ZDOTDIR:-$HOME/.config/zsh}/zdot/zdot.zsh"
 
-# Promise any manually-triggered phases
-zdot_promise_phase finalize
-
 # Load all modules from lib/ directory
 zdot_load_modules
 
@@ -141,9 +153,6 @@ zdot_build_execution_plan
 
 # Execute all hooks in dependency order
 zdot_execute_all
-
-# Later: manually trigger cleanup phase
-zdot_provide_phase finalize
 ```
 
 ## Creating Modules
@@ -224,31 +233,6 @@ zdot_register_hook _mymodule_init interactive noninteractive \
     --optional
 ```
 
-### On-Demand Hooks (Cleanup Tasks)
-
-For hooks that depend on manually-triggered phases:
-
-```zsh
-_mymodule_cleanup() {
-    # This runs when 'finalize' phase is manually triggered
-    zdot_info "Cleaning up mymodule resources..."
-    
-    # Cleanup temporary files, close connections, etc.
-    rm -f "${TMPDIR}/mymodule-*.tmp"
-    
-    zdot_success "mymodule cleanup complete"
-    return 0
-}
-
-# Register as on-demand hook
-zdot_register_hook _mymodule_cleanup interactive noninteractive \
-    --requires finalize \
-    --on-demand \
-    --optional
-```
-
-The `--on-demand` flag tells zdot that this hook is waiting for a manually-triggered phase and won't show up as an error if `finalize` isn't provided by another hook.
-
 ## User Modules
 
 User modules let you add custom modules (or locally-modified copies of built-in modules) without
@@ -325,7 +309,6 @@ Register a function to be called during shell initialization.
 - `--requires phase1 phase2 ...`: Phases this hook depends on
 - `--provides phase_name`: Phase this hook provides (enables other hooks to depend on it)
 - `--optional`: Hook won't cause errors if requirements are missing
-- `--on-demand`: Hook depends on manually-triggered phases (won't show as error)
 
 **Examples:**
 ```zsh
@@ -337,11 +320,6 @@ zdot_register_hook _mymodule_init interactive \
     --requires xdg-configured brew-ready \
     --provides mymodule-ready \
     --optional
-
-# Cleanup hook (on-demand)
-zdot_register_hook _mymodule_cleanup interactive noninteractive \
-    --requires finalize \
-    --on-demand
 ```
 
 ### Sugar Functions
@@ -409,28 +387,6 @@ zdot_define_module autocomplete \
 **Phase flags:** `--configure`, `--load`, `--load-plugins`, `--post-init`, `--interactive-init`, `--noninteractive-init`
 **Modifier flags:** `--context`, `--configure-context`, `--load-context`, `--post-init-context`, `--post-init-requires`, `--provides-tool`, `--requires-tool`, `--requires`, `--auto-bundle`, `--group`
 
-### Phase Management
-
-#### `zdot_promise_phase <phase_name>`
-
-Promise that a phase will be manually provided later. Allows hooks to depend on phases that aren't provided by other hooks.
-
-**Example:**
-```zsh
-# In .zshrc, before building execution plan
-zdot_promise_phase finalize
-```
-
-#### `zdot_provide_phase <phase_name>`
-
-Manually trigger a phase, executing all hooks that were waiting for it.
-
-**Example:**
-```zsh
-# At the end of .zshrc or when shutting down
-zdot_provide_phase finalize
-```
-
 ### Execution Control
 
 #### `zdot_load_modules`
@@ -466,7 +422,6 @@ zdot_verbose "Debug details"              # Only shown with ZDOT_VERBOSE=1
 Show comprehensive debug information:
 - Loaded modules
 - All registered hooks organized by phase
-- On-demand hooks
 - Hooks with missing requirements (errors)
 - Completion system status
 
@@ -582,7 +537,6 @@ zdot_hooks_list --all
 
 Output shows:
 - **Hooks by Phase**: Standard hooks organized by what they provide
-- **On-demand Hooks**: Hooks waiting for manual triggers (marked `[on-demand]`)
 - **⚠️  Hooks with Missing Requirements**: Configuration errors
 
 ### Inspect Execution Plan
@@ -617,9 +571,8 @@ Shows complete system state including loaded modules, hooks, and completion stat
 ### Hook Registration
 
 1. **Always use `--optional` for external dependencies**: Homebrew, Docker, etc. might not be installed
-2. **Use `--on-demand` for cleanup hooks**: Hooks that depend on `finalize` or other manual phases
-3. **Be specific with contexts**: Don't register in `noninteractive` unless necessary
-4. **Return proper exit codes**: Return 1 on failure, 0 on success
+2. **Be specific with contexts**: Don't register in `noninteractive` unless necessary
+3. **Return proper exit codes**: Return 1 on failure, 0 on success
 
 ### Error Handling
 
@@ -763,10 +716,6 @@ _tempfiles_cleanup() {
 
 zdot_register_hook _tempfiles_init interactive noninteractive \
     --provides tempfiles-ready
-
-zdot_register_hook _tempfiles_cleanup interactive noninteractive \
-    --requires finalize \
-    --on-demand
 ```
 
 ### Complex Module with Multiple Hooks
