@@ -158,6 +158,20 @@ _zdot_update_init() {
 
 # check: is an update available?
 # Returns 0=available, 1=up-to-date, 2=zdot_error.
+#
+# Topology semantics mirror _update_core_is_dotfiler_available in update_core.zsh:
+#   standalone  — zdot is its own top-level repo; fetch + compare
+#   submodule   — zdot is a submodule; fetch submodule remote + compare
+#                 (surfaces upstream-ahead changes before parent bumps pointer)
+#   subtree     — zdot merged via git-subtree; compare SHA marker vs remote
+#   subdir      — plain subdirectory inside parent repo; the parent repo check
+#                 in is_update_available() already covers this — nothing extra
+#   none|*      — not a git repo; nothing to check
+#
+# NOTE: this function models Phase 2 (self-directed: is zdot upstream ahead?).
+# Phase 1 (parent-directed: did dotfiles move its zdot pointer?) is covered by
+# the _update_core_is_available(dotfiles_dir) check in is_update_available().
+# The two checks are intentionally asymmetric — together they cover both phases.
 _zdot_update_hook_check() {
     local _subtree_spec _subtree_url
     _zdot_update_init
@@ -165,15 +179,22 @@ _zdot_update_hook_check() {
     _update_core_detect_deployment "$ZDOT_REPO" "$_subtree_spec"
     local _topology="$REPLY"
 
-    if [[ "$_topology" == subtree ]]; then
-        _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url"
-        return $?
-    fi
-
-    # standalone / submodule / subdir: compare zdot's own HEAD against remote.
-    # allow_diverged=1: zdot_warn and proceed rather than treating diverged as zdot_error.
-    _update_core_is_available "$ZDOT_REPO" "" 1
-    return $?
+    case $_topology in
+        subtree)
+            _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url"
+            return $?
+            ;;
+        standalone|submodule)
+            # Compare zdot's own HEAD against remote.
+            # allow_diverged=1: warn and proceed rather than treating diverged as error.
+            _update_core_is_available "$ZDOT_REPO" "" 1
+            return $?
+            ;;
+        subdir|none|*)
+            # Parent repo manages zdot; is_update_available()'s main repo check covers it.
+            return 1
+            ;;
+    esac
 }
 
 # plan: populate _dotfiler_plan_zdot_* directly in the caller's process.
