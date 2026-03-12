@@ -319,7 +319,7 @@ _zdot_update_hook_pull() {
     zdot_info "zdot: pulling..."
     case "$_topology" in
         standalone)
-            _update_core_prompt_dirty "$_repo_dir" "zdot standalone" || return 1
+            _update_core_prompt_dirty "$_repo_dir" "zdot (standalone)" || return 1
             if [[ "$_phase" == dotfiles ]]; then
                 # Phase dotfiles: pin to exact SHA from dotfiles reference.
                 # Fetch was already done in plan_fn to materialise objects.
@@ -343,7 +343,7 @@ _zdot_update_hook_pull() {
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             zdot_log_debug "zdot: pull: parent=${_parent} target=${_target_ref}"
             local _stashed=0
-            _update_core_maybe_stash "$_parent" "zdot submodule" || return 1
+            _update_core_maybe_stash "$_parent" "dotfiles repo (zdot submodule)" || return 1
             _stashed=$REPLY
             local _sub_out _sub_rc
             if [[ "$_phase" == dotfiles ]]; then
@@ -358,11 +358,11 @@ _zdot_update_hook_pull() {
             _sub_rc=$?
             zdot_log_debug "zdot: pull: submodule output: ${_sub_out}"
             if (( _sub_rc != 0 )); then
-                (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
+                (( _stashed )) && _update_core_pop_stash "$_parent" "dotfiles repo (zdot submodule)"
                 zdot_warn "zdot: submodule update failed"
                 return 1
             fi
-            (( _stashed )) && _update_core_pop_stash "$_parent" "zdot submodule"
+            (( _stashed )) && _update_core_pop_stash "$_parent" "dotfiles repo (zdot submodule)"
             zdot_info "zdot: updated"
             ;;
         subtree)
@@ -373,14 +373,14 @@ _zdot_update_hook_pull() {
             zdot_verbose "zdot: pull: git subtree pull --prefix=${_rel} ${_remote} ${_branch} --squash"
             zdot_log_debug "zdot: pull: parent=${_parent} target=${_target_ref}"
             local _stashed=0
-            _update_core_maybe_stash "$_parent" "zdot subtree" || return 1
+            _update_core_maybe_stash "$_parent" "dotfiles repo (zdot subtree)" || return 1
             _stashed=$REPLY
             local _subtree_out _subtree_rc
             _subtree_out=$(git -C "$_parent" subtree pull \
                 --prefix="$_rel" "$_remote" "$_branch" --squash 2>&1)
             _subtree_rc=$?
             zdot_log_debug "zdot: pull: subtree output: ${_subtree_out}"
-            (( _stashed )) && _update_core_pop_stash "$_parent" "zdot subtree"
+            (( _stashed )) && _update_core_pop_stash "$_parent" "dotfiles repo (zdot subtree)"
             if (( _subtree_rc != 0 )); then
                 zdot_warn "zdot: subtree pull failed"; return 1
             fi
