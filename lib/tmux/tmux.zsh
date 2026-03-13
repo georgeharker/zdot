@@ -3,4 +3,5 @@
 
 zdot_define_module tmux \
     --load-plugins omz:plugins/tmux \
+    --context interactive \
     --auto-bundle
