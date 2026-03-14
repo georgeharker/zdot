@@ -933,7 +933,10 @@ _zdot_init_resolve_groups() {
                 _ZDOT_HOOK_REQUIRES[$_member]+="${_ZDOT_HOOK_REQUIRES[$_member]:+ }${_phase_begin}"
             fi
 
-            # Synthesise per-member phase and register it
+            # Synthesise per-member phase and register it.
+            # Use local _phase_member=... (with =) so re-declaration on
+            # subsequent loop iterations is a safe reinitialisation, not
+            # a bare reset that would print the previous value to stdout.
             local _phase_member="_group_member_${_grp}_${_member}"
             if [[ " ${_ZDOT_HOOK_PROVIDES[$_member]:-} " != *" ${_phase_member} "* ]]; then
                 _ZDOT_HOOK_PROVIDES[$_member]+="${_ZDOT_HOOK_PROVIDES[$_member]:+ }${_phase_member}"
@@ -944,13 +947,14 @@ _zdot_init_resolve_groups() {
             # (e.g. interactive-only tmux) than other members (noninteractive
             # node loaders), the group_end barrier appeared in the noninteractive
             # plan but its tmux member phase had no provider there.
-            # Using member-only contexts means _zdot_has_provider_in_contexts
-            # correctly returns false for that phase in noninteractive context,
-            # causing the optional group_end barrier to be skipped cleanly.
-            local _member_ctx
-            for _member_ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
-                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_member_ctx}:${_phase_member}]=$_member
+            # _reg_ctx is named distinctly from the outer _ctx (used for
+            # union building) to make clear these are separate iteration vars.
+            for _reg_ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_reg_ctx}:${_phase_member}]=$_member
             done
+            # _reg_ctx is a new name not used elsewhere in this function so
+            # declare it with = form inside the loop to keep it local cleanly.
+            # (The for loop above handles the actual iteration variable.)
 
             # End barrier must run after this member's phase.
             # Injected unconditionally into _ZDOT_HOOK_REQUIRES so the global
