@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
-typeset -g _ZDOT_CACHE_VERSION="17"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="18"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -284,6 +284,14 @@ zdot_cache_save_plan() {
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
             echo "_ZDOT_HOOK_CONTEXTS[$hook_id]='$contexts'"
             echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
+            # Serialise context restrictions on individual requires.
+            # Absent entry means unconditional (all contexts) — existing behaviour.
+            for _phase in ${=requires}; do
+                local _req_ctx_key="${hook_id}:${_phase}"
+                if [[ -v "_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]" ]]; then
+                    echo "_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]='${_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]}'"
+                fi
+            done
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
 
@@ -330,6 +338,13 @@ zdot_cache_save_plan() {
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
             echo "_ZDOT_HOOK_CONTEXTS[$hook_id]='$contexts'"
             echo "_ZDOT_HOOK_REQUIRES[$hook_id]='$requires'"
+            # Serialise context restrictions on individual requires.
+            for _phase in ${=requires}; do
+                local _req_ctx_key="${hook_id}:${_phase}"
+                if [[ -v "_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]" ]]; then
+                    echo "_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]='${_ZDOT_HOOK_REQUIRES_CONTEXTS[$_req_ctx_key]}'"
+                fi
+            done
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
         done

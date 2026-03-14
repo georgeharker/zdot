@@ -13,6 +13,7 @@ typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
+ typeset -gA _ZDOT_HOOK_REQUIRES_CONTEXTS # "hook_id:phase" -> "ctx1 ctx2 ..." (absent = all contexts)
  typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
  typeset -gA _ZDOT_HOOKS_EXEC_RESULT       # hook_id -> exit code for every attempted hook (0=ok, N=failed, 'missing'=fn not found)
  typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
@@ -29,7 +30,7 @@ typeset -ga _ZDOT_DEFERRED_HOOKS            # hook_ids marked as deferred (skip 
 typeset -gA _ZDOT_ACCEPTED_DEFERRED         # func_name -> "all" or "phase1 phase2 ..." (user-allowed force-deferral)
 typeset -gA _ZDOT_HOOK_GROUP                # hook_id -> group name (--group)
 typeset -gA _ZDOT_HOOK_PROVIDES_GROUP       # hook_id -> group name this hook provides into (--provides-group)
-typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
+ typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
 typeset -gA _ZDOT_HOOK_GROUPS               # hook_id -> "group1 group2 ..." (multi-group forward map)
 typeset -gA _ZDOT_GROUP_MEMBERS             # group_name -> "hook_id1 hook_id2 ..." (reverse index)
 typeset -gA _ZDOT_HOOK_DEFER_ARGS           # hook_id -> flag-set key (see _ZDOT_DEFER_FLAG_NAMES)
@@ -325,17 +326,37 @@ _zdot_has_provider_in_contexts() {
     return 1
 }
 
+# Check whether a context-restricted require is active in the current shell.
+# Consults _ZDOT_HOOK_REQUIRES_CONTEXTS["hook_id:phase"]:
+#   - absent entry  -> require is unconditional (all contexts) -> return 0
+#   - present entry -> require is active only in the listed contexts;
+#                      return 0 iff _ZDOT_CURRENT_CONTEXT overlaps them
+#
+# Must be called after zdot_build_context has set _ZDOT_CURRENT_CONTEXT.
+# Used at every site that iterates _ZDOT_HOOK_REQUIRES to ensure context-
+# restricted edges (e.g. group barrier member phases) are not acted upon
+# in shells where the providing member is absent.
+_zdot_require_active_in_ctx() {
+    local hook_id=$1 phase=$2
+    local _key="${hook_id}:${phase}"
+    # Absent = unconditional
+    [[ -z "${_ZDOT_HOOK_REQUIRES_CONTEXTS[$_key]+x}" ]] && return 0
+    # Present = check overlap with current context tokens
+    local _ctx
+    for _ctx in ${=_ZDOT_CURRENT_CONTEXT}; do
+        [[ " ${_ZDOT_HOOK_REQUIRES_CONTEXTS[$_key]} " == *" $_ctx "* ]] && return 0
+    done
+    return 1
+}
+
 # Build execution plan using topological sort (Kahn's algorithm)
 # Usage: zdot_build_execution_plan
 # Determines current shell context and builds dependency-ordered execution plan
 zdot_build_execution_plan() {
-    # Determine current shell context
-    local -a current_contexts
-    if [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]]; then
-        current_contexts+=(interactive)
-    else
-        current_contexts+=(noninteractive)
-    fi
+    # Determine current shell context via shared function so that the result
+    # is available globally for runtime consumers (deferred dispatch, etc.)
+    zdot_build_context
+    local -a current_contexts=(${=_ZDOT_CURRENT_CONTEXT})
     
     if [[ $_ZDOT_IS_LOGIN -eq 1 ]]; then
         current_contexts+=(login)
@@ -370,9 +391,12 @@ zdot_build_execution_plan() {
 
         local requires=(${=_ZDOT_HOOK_REQUIRES[$hook_id]})
         local degree=0
-        
-        # Count dependencies
+
+        # Count dependencies, skipping requires that are inactive in the
+        # current context (context-restricted requires have an entry in
+        # _ZDOT_HOOK_REQUIRES_CONTEXTS; absent entry means all contexts).
         for phase in $requires; do
+            _zdot_require_active_in_ctx "$hook_id" "$phase" || continue
             # Check if phase is promised or has a provider hook in current contexts
             if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}"; then
                 # Required phase has no provider in current context
@@ -421,6 +445,7 @@ zdot_build_execution_plan() {
     for _hid in ${(k)in_degree}; do
         local _reqs=(${=_ZDOT_HOOK_REQUIRES[$_hid]})
         for _ph in $_reqs; do
+            _zdot_require_active_in_ctx "$_hid" "$_ph" || continue
             # Find who provides this phase in current context
             for _ctx in "${current_contexts[@]}"; do
                 local _prov="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_ph}]}"
@@ -727,6 +752,7 @@ zdot_build_execution_plan() {
             local _force_reason=""
             local _force_phase=""
             for phase in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
+                _zdot_require_active_in_ctx "$hook_id" "$phase" || continue
                 if [[ ${phase_provider_reason[$phase]+x} ]]; then
                     _force_deferred=1
                     _force_reason="${phase_provider_reason[$phase]}"
@@ -912,13 +938,31 @@ _zdot_init_resolve_groups() {
             if [[ " ${_ZDOT_HOOK_PROVIDES[$_member]:-} " != *" ${_phase_member} "* ]]; then
                 _ZDOT_HOOK_PROVIDES[$_member]+="${_ZDOT_HOOK_PROVIDES[$_member]:+ }${_phase_member}"
             fi
-            for _ctx in ${(k)_ctx_union}; do
-                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_phase_member}]=$_member
+            # Register the phase provider only for contexts where the member
+            # hook itself participates.  The original code used _ctx_union here
+            # which caused a false-cycle: when a member had a narrower context
+            # (e.g. interactive-only tmux) than other members (noninteractive
+            # node loaders), the group_end barrier appeared in the noninteractive
+            # plan but its tmux member phase had no provider there.
+            # Using member-only contexts means _zdot_has_provider_in_contexts
+            # correctly returns false for that phase in noninteractive context,
+            # causing the optional group_end barrier to be skipped cleanly.
+            local _member_ctx
+            for _member_ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_member_ctx}:${_phase_member}]=$_member
             done
 
-            # End barrier must run after this member's phase
+            # End barrier must run after this member's phase.
+            # Injected unconditionally into _ZDOT_HOOK_REQUIRES so the global
+            # hook graph is complete for all contexts (resolve runs once, plans
+            # are built per context).  The context restriction is recorded in
+            # _ZDOT_HOOK_REQUIRES_CONTEXTS so every site that iterates requires
+            # can call _zdot_require_active_in_ctx to skip this edge in shells
+            # where the member is absent.  This keeps the barrier in-plan with
+            # only the present members contributing to its in-degree.
             if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid_end]:-} " != *" ${_phase_member} "* ]]; then
                 _ZDOT_HOOK_REQUIRES[$_hid_end]+="${_ZDOT_HOOK_REQUIRES[$_hid_end]:+ }${_phase_member}"
+                _ZDOT_HOOK_REQUIRES_CONTEXTS[${_hid_end}:${_phase_member}]="${_ZDOT_HOOK_CONTEXTS[$_member]}"
             fi
         done
 
@@ -1031,13 +1075,17 @@ _zdot_deferred_hook_wrapper() {
     _zdot_run_deferred_phase_check
 }
 
-# Return 0 if every phase required by hook_id is present in
-# `_ZDOT_PHASES_PROVIDED`, 1 otherwise.
+# Return 0 if every phase required by hook_id — that is active in the
+# current shell context — is present in `_ZDOT_PHASES_PROVIDED`, 1 otherwise.
+# Context-restricted requires (recorded in _ZDOT_HOOK_REQUIRES_CONTEXTS) are
+# skipped when they do not apply to this shell, so a hook is not stalled by
+# member phases that were never going to be provided in this context.
 _zdot_hook_requirements_met() {
     local hook_id=$1
     local requires=(${=_ZDOT_HOOK_REQUIRES[$hook_id]})
     local req
     for req in $requires; do
+        _zdot_require_active_in_ctx "$hook_id" "$req" || continue
         if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
             return 1
         fi
@@ -1126,6 +1174,7 @@ _zdot_run_deferred_phase_check() {
             [[ -n "$hook_name" ]] && hook_label+=" [${hook_name}]"
             missing_phases=()
             for req in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
+                _zdot_require_active_in_ctx "$hook_id" "$req" || continue
                 if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
                     missing_phases+=("$req")
                 fi
