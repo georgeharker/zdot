@@ -13,10 +13,10 @@ typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
- typeset -gA _ZDOT_HOOK_REQUIRES_CONTEXTS # "hook_id:phase" -> "ctx1 ctx2 ..." (absent = all contexts)
- typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
- typeset -gA _ZDOT_HOOKS_EXEC_RESULT       # hook_id -> exit code for every attempted hook (0=ok, N=failed, 'missing'=fn not found)
- typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
+typeset -gA _ZDOT_HOOK_REQUIRES_CONTEXTS # "hook_id:phase" -> "ctx1 ctx2 ..." (absent = all contexts)
+typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
+typeset -gA _ZDOT_HOOKS_EXEC_RESULT       # hook_id -> exit code for every attempted hook (0=ok, N=failed, 'missing'=fn not found)
+typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
@@ -30,7 +30,7 @@ typeset -ga _ZDOT_DEFERRED_HOOKS            # hook_ids marked as deferred (skip 
 typeset -gA _ZDOT_ACCEPTED_DEFERRED         # func_name -> "all" or "phase1 phase2 ..." (user-allowed force-deferral)
 typeset -gA _ZDOT_HOOK_GROUP                # hook_id -> group name (--group)
 typeset -gA _ZDOT_HOOK_PROVIDES_GROUP       # hook_id -> group name this hook provides into (--provides-group)
- typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
+typeset -gA _ZDOT_HOOK_REQUIRES_GROUP       # hook_id -> group name this hook requires from (--requires-group)
 typeset -gA _ZDOT_HOOK_GROUPS               # hook_id -> "group1 group2 ..." (multi-group forward map)
 typeset -gA _ZDOT_GROUP_MEMBERS             # group_name -> "hook_id1 hook_id2 ..." (reverse index)
 typeset -gA _ZDOT_HOOK_DEFER_ARGS           # hook_id -> flag-set key (see _ZDOT_DEFER_FLAG_NAMES)
