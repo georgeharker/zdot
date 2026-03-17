@@ -934,10 +934,10 @@ zdot_build_execution_plan() {
 # every context in the union so the DAG provider-check passes.
 _zdot_init_resolve_groups() {
     local _grp _hid _ctx _member _phase _hid_begin _hid_end
-    local _ctx_list _barrier_any_open _member_count _bm _bev _bv _phase_member _reg_ctx
+    local _ctx_list _barrier_any_open _member_count _barrier_member _excl_variant _variant _phase_member _reg_ctx
     local _fn_begin _fn_end _phase_begin _phase_end
     local -A _barrier_excl_counts
-    local -a _barrier_includes _barrier_excludes _bm_inc _bm_exc
+    local -a _barrier_includes _barrier_excludes _member_variant_includes _member_variant_excludes
 
     # ── Collect all group names ──────────────────────────────────────────────
     local -A _all_groups
@@ -990,21 +990,21 @@ _zdot_init_resolve_groups() {
         _barrier_includes=()
         _barrier_any_open=0       # 1 if any member has an empty include list
         _member_count=0
-        for _bm in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+        for _barrier_member in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
             (( _member_count++ ))
-            _bm_inc=(${=_ZDOT_HOOK_VARIANTS[$_bm]})
-            _bm_exc=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$_bm]})
-            if (( ${#_bm_inc} == 0 )); then
+            _member_variant_includes=(${=_ZDOT_HOOK_VARIANTS[$_barrier_member]})
+            _member_variant_excludes=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$_barrier_member]})
+            if (( ${#_member_variant_includes} == 0 )); then
                 _barrier_any_open=1
             else
-                for _bv in "${_bm_inc[@]}"; do
-                    if [[ " ${_barrier_includes[*]:-} " != *" $_bv "* ]]; then
-                        _barrier_includes+=("$_bv")
+                for _variant in "${_member_variant_includes[@]}"; do
+                    if [[ " ${_barrier_includes[*]:-} " != *" $_variant "* ]]; then
+                        _barrier_includes+=("$_variant")
                     fi
                 done
             fi
-            for _bv in "${_bm_exc[@]}"; do
-                (( _barrier_excl_counts[$_bv]++ ))
+            for _variant in "${_member_variant_excludes[@]}"; do
+                (( _barrier_excl_counts[$_variant]++ ))
             done
         done
 
@@ -1013,9 +1013,9 @@ _zdot_init_resolve_groups() {
 
         # Build exclude list: only variants excluded by ALL members.
         _barrier_excludes=()
-        for _bev in "${(k)_barrier_excl_counts[@]}"; do
-            if (( _barrier_excl_counts[$_bev] == _member_count )); then
-                _barrier_excludes+=("$_bev")
+        for _excl_variant in "${(k)_barrier_excl_counts[@]}"; do
+            if (( _barrier_excl_counts[$_excl_variant] == _member_count )); then
+                _barrier_excludes+=("$_excl_variant")
             fi
         done
 
