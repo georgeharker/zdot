@@ -455,6 +455,7 @@ zdot_build_execution_plan() {
     _zdot_build_variant_provider_index
 
     # Build dependency graph for hooks in current context
+    local _cc _bridge_phase _ctx_match
     local -A in_degree        # hook_id -> count of unsatisfied dependencies
     local -A adjacency_list   # phase_name -> "hook_id1 hook_id2 ..." (hooks that depend on this phase)
     local -a zero_in_degree   # Hooks with no dependencies
@@ -583,8 +584,7 @@ zdot_build_execution_plan() {
         # intersect the contexts we're building for, silently skip it — the
         # constraint is simply irrelevant to this execution plan.
         if [[ -n "$_ctx_spec" ]]; then
-            local _ctx_match=0
-            local _cc
+            _ctx_match=0
             for _cc in "${current_contexts[@]}"; do
                 if [[ "$_ctx_spec" == "$_cc" ]]; then
                     _ctx_match=1
@@ -637,7 +637,6 @@ zdot_build_execution_plan() {
         # Inject synthetic edge: use A's first provided phase as the bridge,
         # or create a synthetic phase name if A provides nothing
         local _provided_phases_a=(${=_ZDOT_HOOK_PROVIDES[$_hid_a]})
-        local _bridge_phase
         if [[ ${#_provided_phases_a[@]} -gt 0 ]]; then
             _bridge_phase="${_provided_phases_a[1]}"
         else
@@ -935,6 +934,10 @@ zdot_build_execution_plan() {
 # every context in the union so the DAG provider-check passes.
 _zdot_init_resolve_groups() {
     local _grp _hid _ctx _member _phase _hid_begin _hid_end
+    local _ctx_list _barrier_any_open _member_count _bm _bev _bv _phase_member _reg_ctx
+    local _fn_begin _fn_end _phase_begin _phase_end
+    local -A _barrier_excl_counts
+    local -a _barrier_includes _barrier_excludes _bm_inc _bm_exc
 
     # ── Collect all group names ──────────────────────────────────────────────
     local -A _all_groups
@@ -970,7 +973,7 @@ _zdot_init_resolve_groups() {
                 _ctx_union[$_ctx]=1
             done
         done
-        local _ctx_list="${(j: :)${(k)_ctx_union}}"
+        _ctx_list="${(j: :)${(k)_ctx_union}}"
 
         # -- Compute variant constraints for barriers from member hooks -------
         # Mirrors context-union logic: a barrier is active in a variant iff at
@@ -983,19 +986,17 @@ _zdot_init_resolve_groups() {
         #
         # Exclude list: intersection of all member exclude lists.  A variant is
         # only excluded from the barrier if every member excludes it.
-        local -A _barrier_excl_counts=()   # variant -> count of members that exclude it
-        local -a _barrier_includes=()
-        local _barrier_any_open=0          # 1 if any member has an empty include list
-        local _member_count=0
-        local _bm
+        _barrier_excl_counts=()   # variant -> count of members that exclude it
+        _barrier_includes=()
+        _barrier_any_open=0       # 1 if any member has an empty include list
+        _member_count=0
         for _bm in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
             (( _member_count++ ))
-            local -a _bm_inc=(${=_ZDOT_HOOK_VARIANTS[$_bm]})
-            local -a _bm_exc=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$_bm]})
+            _bm_inc=(${=_ZDOT_HOOK_VARIANTS[$_bm]})
+            _bm_exc=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$_bm]})
             if (( ${#_bm_inc} == 0 )); then
                 _barrier_any_open=1
             else
-                local _bv
                 for _bv in "${_bm_inc[@]}"; do
                     if [[ " ${_barrier_includes[*]:-} " != *" $_bv "* ]]; then
                         _barrier_includes+=("$_bv")
@@ -1011,8 +1012,7 @@ _zdot_init_resolve_groups() {
         (( _barrier_any_open )) && _barrier_includes=()
 
         # Build exclude list: only variants excluded by ALL members.
-        local -a _barrier_excludes=()
-        local _bev
+        _barrier_excludes=()
         for _bev in "${(k)_barrier_excl_counts[@]}"; do
             if (( _barrier_excl_counts[$_bev] == _member_count )); then
                 _barrier_excludes+=("$_bev")
@@ -1025,10 +1025,10 @@ _zdot_init_resolve_groups() {
         (( _ZDOT_HOOK_COUNTER++ ))
         _hid_end="hook_${_ZDOT_HOOK_COUNTER}"
 
-        local _fn_begin="_zdot_group_begin_${_grp}"
-        local _fn_end="_zdot_group_end_${_grp}"
-        local _phase_begin="_group_begin_${_grp}"
-        local _phase_end="_group_end_${_grp}"
+        _fn_begin="_zdot_group_begin_${_grp}"
+        _fn_end="_zdot_group_end_${_grp}"
+        _phase_begin="_group_begin_${_grp}"
+        _phase_end="_group_end_${_grp}"
 
         # -- Define barrier shell functions (no-ops; ordering is DAG-enforced) -
         eval "${_fn_begin}() { return 0; }"
@@ -1070,10 +1070,7 @@ _zdot_init_resolve_groups() {
             fi
 
             # Synthesise per-member phase and register it.
-            # Use local _phase_member=... (with =) so re-declaration on
-            # subsequent loop iterations is a safe reinitialisation, not
-            # a bare reset that would print the previous value to stdout.
-            local _phase_member="_group_member_${_grp}_${_member}"
+            _phase_member="_group_member_${_grp}_${_member}"
             if [[ " ${_ZDOT_HOOK_PROVIDES[$_member]:-} " != *" ${_phase_member} "* ]]; then
                 _ZDOT_HOOK_PROVIDES[$_member]+="${_ZDOT_HOOK_PROVIDES[$_member]:+ }${_phase_member}"
             fi
@@ -1083,14 +1080,9 @@ _zdot_init_resolve_groups() {
             # (e.g. interactive-only tmux) than other members (noninteractive
             # node loaders), the group_end barrier appeared in the noninteractive
             # plan but its tmux member phase had no provider there.
-            # _reg_ctx is named distinctly from the outer _ctx (used for
-            # union building) to make clear these are separate iteration vars.
             for _reg_ctx in ${=_ZDOT_HOOK_CONTEXTS[$_member]:-}; do
                 _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_reg_ctx}:${_phase_member}]=$_member
             done
-            # _reg_ctx is a new name not used elsewhere in this function so
-            # declare it with = form inside the loop to keep it local cleanly.
-            # (The for loop above handles the actual iteration variable.)
 
             # End barrier must run after this member's phase.
             # Injected unconditionally into _ZDOT_HOOK_REQUIRES so the global
