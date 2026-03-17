@@ -144,7 +144,10 @@ function zdot_hooks_list() {
     [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && interactive_ctx="interactive"
     local login_ctx="nonlogin"
     [[ $_ZDOT_IS_LOGIN -eq 1 ]] && login_ctx="login"
-    zdot_info "Current shell context: ${interactive_ctx}, ${login_ctx}"
+    local variant_display="${_ZDOT_VARIANT:-}"
+    local variant_line="Active context: ${interactive_ctx}, ${login_ctx}"
+    [[ -n "$variant_display" ]] && variant_line+="  variant: ${variant_display}"
+    zdot_info "$variant_line"
 
     if [[ $show_all -eq 1 ]]; then
         zdot_info "Showing: all contexts"
@@ -250,6 +253,10 @@ function zdot_hooks_list() {
                     [[ -n $_grp  ]] && zdot_info "    group:          $_grp"
                     [[ -n $_rgrp ]] && zdot_info "    requires-group: $_rgrp"
                     [[ -n $_pgrp ]] && zdot_info "    provides-group: $_pgrp"
+                    local _vr="${_ZDOT_HOOK_VARIANTS[$hook_id]:-}"
+                    local _ve="${_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]:-}"
+                    [[ -n $_vr ]] && zdot_info "    variant:         $_vr"
+                    [[ -n $_ve ]] && zdot_info "    variant-exclude: $_ve"
                     if [[ "$optional" == 1 ]]; then
                         zdot_info "    optional: yes"
                     fi
@@ -267,7 +274,12 @@ function zdot_hooks_list() {
                     [[ "$optional" == 1 ]] && optional_mark=" [optional]"
                     local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
                     _zdot_hook_display_marks "$hook_id" "$func"
-                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark$_status_mark"
+                    local _variant_mark=""
+                    local _vr="${_ZDOT_HOOK_VARIANTS[$hook_id]:-}"
+                    local _ve="${_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]:-}"
+                    [[ -n $_vr ]] && _variant_mark=" [variant: $_vr]"
+                    [[ -n $_ve ]] && _variant_mark=" [variant-excl: $_ve]"
+                    zdot_info "  • $func ($contexts)$optional_mark$_name_mark$_deferred_mark$_noquiet_mark$_status_mark$_variant_mark"
                 fi
             done
             zdot_info ""

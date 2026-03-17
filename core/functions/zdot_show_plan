@@ -11,6 +11,17 @@ function zdot_show_plan() {
     zdot_report "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks):"
     zdot_info ""
 
+    # Show active context including variant
+    local interactive_ctx="noninteractive"
+    [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && interactive_ctx="interactive"
+    local login_ctx="nonlogin"
+    [[ $_ZDOT_IS_LOGIN -eq 1 ]] && login_ctx="login"
+    local _variant_info="${_ZDOT_VARIANT:-}"
+    local _ctx_line="Active context: ${interactive_ctx}, ${login_ctx}"
+    [[ -n "$_variant_info" ]] && _ctx_line+="  variant: ${_variant_info}"
+    zdot_info "$_ctx_line"
+    zdot_info ""
+
     local i=1
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         local func=${_ZDOT_HOOKS[$hook_id]}
@@ -22,6 +33,10 @@ function zdot_show_plan() {
         zdot_info "   contexts: $contexts"
         zdot_info "   provides: $provides"
         zdot_info "   requires: $requires"
+        local _vr="${_ZDOT_HOOK_VARIANTS[$hook_id]:-}"
+        local _ve="${_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]:-}"
+        [[ -n $_vr ]] && zdot_info "   variant:         $_vr"
+        [[ -n $_ve ]] && zdot_info "   variant-exclude: $_ve"
         zdot_info ""
         (( i++ ))
     done

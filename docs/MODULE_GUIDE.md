@@ -220,6 +220,8 @@ Each takes a function name (the function must be defined before calling
 | `--requires <phases...>` | Extra requires for the load phase |
 | `--group <name>` | Group for the load phase |
 | `--auto-bundle` | Auto-detect bundle groups from plugin specs |
+| `--variant <name>` | Only register phases when this variant is active (repeatable) |
+| `--variant-exclude <name>` | Skip all phases when this variant is active |
 
 ### Examples
 
@@ -343,6 +345,7 @@ For modules that don't fit either sugar, use `zdot_register_hook` directly.
 
 - Multiple independent hooks with different dependency chains
 - Special flags like `--optional`, `--deferred-prompt`, `--requires-tool`
+- Variant-specific hooks that don't fit a module-level `--variant` flag
 - Cross-cutting concerns (hooks in shared groups like `omz-configure`)
 - Hooks that provide phases consumed by other modules
 
@@ -541,6 +544,16 @@ This triggers: clone -> bundle init -> group resolution -> plan -> execute.
 | `zdot_register_completion_file <name> <cmd>` | Register a completion generator |
 | `zdot_register_completion_live <name> <cmd>` | Register a live completion |
 
+**`zdot_register_hook` variant flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--variant <name>` | Only run in the named variant (repeatable for OR logic) |
+| `--variant-exclude <name>` | Skip in the named variant |
+
+`--variant` and `--variant-exclude` are mutually exclusive per call.
+Hooks with neither flag run in all variants (default/backward-compatible behaviour).
+
 ### Module Utilities
 
 | Function | Purpose |
@@ -552,6 +565,8 @@ This triggers: clone -> bundle init -> group resolution -> plan -> execute.
 | `zdot_has_tty` | Check if a TTY is available |
 | `zdot_interactive` | Check if shell is interactive |
 | `zdot_is_macos` / `zdot_is_linux` | Platform checks |
+| `zdot_variant` | Print the active variant string (may be empty) |
+| `zdot_is_variant <name>` | Return 0 if active variant matches `<name>` |
 
 ### Orchestration (in .zshrc)
 

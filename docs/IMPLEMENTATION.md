@@ -366,7 +366,13 @@ typeset -gA _ZDOT_HOOK_PROVIDES
 typeset -gA _ZDOT_HOOK_OPTIONAL
 # Example: _ZDOT_HOOK_OPTIONAL["hook_1"]=1
 
-# Hook ID → 1 (removed; no longer used)
+# Hook ID → variant include list (space-separated; empty = matches all variants)
+typeset -gA _ZDOT_HOOK_VARIANTS
+# Example: _ZDOT_HOOK_VARIANTS["hook_1"]="work contractor"
+
+# Hook ID → variant exclude list (space-separated)
+typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES
+# Example: _ZDOT_HOOK_VARIANT_EXCLUDES["hook_1"]="small"
 ```
 
 #### Phase Tracking
@@ -375,6 +381,10 @@ typeset -gA _ZDOT_HOOK_OPTIONAL
 # "context:phase" → Hook ID (reverse lookup for providers, scoped per context)
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT
 # Example: _ZDOT_PHASE_PROVIDERS_BY_CONTEXT["interactive:brew-ready"]="hook_1"
+
+# Variant-filtered view of _ZDOT_PHASE_PROVIDERS_BY_CONTEXT (built at plan time)
+typeset -gA _ZDOT_PHASE_PROVIDERS_ACTIVE
+# Same key format; only contains entries whose hook passes _zdot_variant_match
 
 # Phase name → 1 if actually provided at runtime
 typeset -gA _ZDOT_PHASES_PROVIDED
@@ -683,6 +693,42 @@ zdot_register_hook _env_init interactive noninteractive
 zdot_register_hook _universal_init interactive noninteractive login nonlogin
 ```
 
+### Variant System
+
+The **variant** is an optional third context dimension — a user-defined label orthogonal to interactivity and login status. At most one variant is active per shell session; an empty variant (the default) means no filtering is applied.
+
+**Detection** (`core/ctx.zsh`, `zdot_resolve_variant`): called once from `zdot_build_context` before plan building. Priority order:
+
+1. `$ZDOT_VARIANT` environment variable
+2. `zstyle ':zdot:variant' name <value>`
+3. User-defined `zdot_detect_variant()` function — must set `REPLY`
+4. Empty string (default — no filtering)
+
+**Global state** (`core/core.zsh`):
+```zsh
+typeset -g _ZDOT_VARIANT=""           # active variant (empty = default)
+typeset -g _ZDOT_VARIANT_DETECTED=0  # 1 once zdot_resolve_variant has run
+typeset -g _ZDOT_VARIANT_INDEX_BUILT=0 # 1 once _zdot_build_variant_provider_index has run
+```
+
+**Per-hook storage** (`core/hooks.zsh`):
+```zsh
+typeset -gA _ZDOT_HOOK_VARIANTS         # hook_id -> "v1 v2 ..." (include list; empty = all)
+typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES # hook_id -> "v1 v2 ..." (exclude list)
+```
+
+**Matching** (`_zdot_variant_match`): exclude list takes priority; empty include list matches all variants; non-empty include list requires the active variant to appear in it.
+
+**Provider index** (`_zdot_build_variant_provider_index`): called at plan-build time after `zdot_resolve_variant`. Populates `_ZDOT_PHASE_PROVIDERS_ACTIVE` — a variant-filtered view of `_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` used during dependency resolution so that phases provided only by variant-excluded hooks are not counted as satisfiable.
+
+**Public API:**
+```zsh
+zdot_variant          # print active variant string (may be empty)
+zdot_is_variant work  # returns 0 if active variant is 'work'
+```
+
+**Group barrier inheritance**: synthetic begin/end barrier hooks created by `_zdot_init_resolve_groups` inherit variant constraints derived from their members — include list = union of member include lists (any open member keeps the barrier open); exclude list = intersection of member exclude lists (all members must exclude a variant for the barrier to exclude it). This ensures that when all members of a group are variant-filtered out, the barriers are also filtered, keeping `--requires-group` dependency resolution correct.
+
 ### Context Matching Algorithm
 
 **Function**: `zdot_build_execution_plan()` (core/hooks.zsh)
@@ -702,24 +748,18 @@ else
     current_contexts+=(nonlogin)
 fi
 
-# For each hook, check if contexts match
+# For each hook, apply context then variant filter
 for hook_id in ${(k)_ZDOT_HOOKS}; do
-    local hook_contexts=(${=_ZDOT_HOOK_CONTEXTS[$hook_id]})
-
-    # Check if any hook context matches current context
-    local context_match=0
-    for ctx in "${current_contexts[@]}"; do
-        if [[ " ${hook_contexts[*]} " =~ " ${ctx} " ]]; then
-            context_match=1
-            break
-        fi
-    done
-
     # Skip hooks not in current context
-    if [[ $context_match -eq 0 ]]; then
+    if ! _zdot_context_match "$hook_id" "${current_contexts[@]}"; then
         continue
     fi
-    
+
+    # Skip hooks that don't match the active variant
+    if ! _zdot_variant_match "$hook_id"; then
+        continue
+    fi
+
     # Proceed with dependency resolution...
 done
 ```
@@ -729,6 +769,7 @@ done
 - If hook declares `interactive` and shell is `interactive` → match
 - If hook declares `interactive noninteractive` → always matches (all interactivity levels)
 - If hook declares `login` and shell is `login` → match
+- Variant filter is applied after context filter; hooks with no `--variant`/`--variant-exclude` always pass
 
 ### Context Design Decisions
 
@@ -1601,8 +1642,10 @@ The execution plan is cached separately in `~/.cache/zdot/plans/`:
 
 ```
 ~/.cache/zdot/plans/
-├── execution_plan_interactive_nonlogin.zsh         # Serialized execution plan
-└── execution_plan_interactive_nonlogin.zsh.zwc     # Compiled execution plan
+├── execution_plan_interactive_nonlogin_default.zsh      # no variant set
+├── execution_plan_interactive_nonlogin_default.zsh.zwc
+├── execution_plan_interactive_nonlogin_work.zsh         # ZDOT_VARIANT=work
+└── execution_plan_interactive_nonlogin_work.zsh.zwc
 ```
 
 This is a distinct caching mechanism from module/function caching.

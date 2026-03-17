@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="18"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="19"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -207,10 +207,11 @@ _zdot_source_module() {
 
 # Generate context-specific suffix for execution plan filenames
 # Usage: _zdot_cache_context_suffix
-# Returns: String like "interactive_nonlogin" or "noninteractive_nonlogin"
+# Returns: String like "interactive_nonlogin_default" or "interactive_login_work"
 _zdot_cache_context_suffix() {
     local interactive_str="noninteractive"
     local login_str="nonlogin"
+    local variant_str="${_ZDOT_VARIANT:-default}"
 
     if [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]]; then
         interactive_str="interactive"
@@ -220,7 +221,7 @@ _zdot_cache_context_suffix() {
         login_str="login"
     fi
 
-    REPLY="${interactive_str}_${login_str}"
+    REPLY="${interactive_str}_${login_str}_${variant_str}"
 }
 
 # Serialize the execution plan to cache
@@ -404,6 +405,29 @@ zdot_cache_save_plan() {
         for _gm_name in "${(k)_ZDOT_GROUP_MEMBERS[@]}"; do
             echo "_ZDOT_GROUP_MEMBERS[${(q)_gm_name}]=${(q)_ZDOT_GROUP_MEMBERS[$_gm_name]}"
         done
+
+        echo ""
+        echo "# Variant constraints per hook (include lists)"
+        echo "typeset -gA _ZDOT_HOOK_VARIANTS=()"
+        local _hv_id
+        for _hv_id in "${(k)_ZDOT_HOOK_VARIANTS[@]}"; do
+            [[ -n "${_ZDOT_HOOK_VARIANTS[$_hv_id]}" ]] || continue
+            echo "_ZDOT_HOOK_VARIANTS[${_hv_id}]=${(q)_ZDOT_HOOK_VARIANTS[$_hv_id]}"
+        done
+
+        echo ""
+        echo "# Variant exclude constraints per hook (exclude lists)"
+        echo "typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES=()"
+        local _hve_id
+        for _hve_id in "${(k)_ZDOT_HOOK_VARIANT_EXCLUDES[@]}"; do
+            [[ -n "${_ZDOT_HOOK_VARIANT_EXCLUDES[$_hve_id]}" ]] || continue
+            echo "_ZDOT_HOOK_VARIANT_EXCLUDES[${_hve_id}]=${(q)_ZDOT_HOOK_VARIANT_EXCLUDES[$_hve_id]}"
+        done
+
+        echo ""
+        echo "# Active variant (resolved at plan-build time)"
+        echo "typeset -g _ZDOT_VARIANT=${(q)_ZDOT_VARIANT:-}"
+        echo "typeset -g _ZDOT_VARIANT_DETECTED=1"
     } > "$plan_file"
 
     # Compile the plan file for faster loading (co-located)

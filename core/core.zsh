@@ -70,6 +70,11 @@ typeset -gA _ZDOT_USER_MODULES_LOADED  # user module_name -> 1 (separate from bu
 typeset -g _ZDOT_IS_INTERACTIVE   # Set to 1 if interactive shell, 0 otherwise
 typeset -g _ZDOT_IS_LOGIN         # Set to 1 if login shell, 0 otherwise
 
+# User variant state (resolved once at plan-build time from env/zstyle/function)
+typeset -g _ZDOT_VARIANT=""            # Active variant string (empty = default)
+typeset -g _ZDOT_VARIANT_DETECTED=0   # 1 once zdot_resolve_variant has run
+typeset -g _ZDOT_VARIANT_INDEX_BUILT=0 # 1 once _zdot_build_variant_provider_index has run
+
 # Phase execution tracking
 typeset -ga _ZDOT_PHASE_EXECUTION_ORDER  # Array of phase names in the order they were executed
 

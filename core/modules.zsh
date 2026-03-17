@@ -185,6 +185,8 @@ zdot_define_module() {
     local -a post_init_requires=() post_init_contexts=()
     local auto_bundle=0
     local -a contexts=(interactive noninteractive)
+    local -a module_variants=()
+    local -a module_variant_excludes=()
 
     while (( $# )); do
         case "$1" in
@@ -249,6 +251,10 @@ zdot_define_module() {
                     contexts+=("$1"); shift
                 done
                 ;;
+            --variant)
+                module_variants+=("$2"); shift 2 ;;
+            --variant-exclude)
+                module_variant_excludes+=("$2"); shift 2 ;;
             *)
                 zdot_warn "zdot_define_module: unknown flag: $1"; shift ;;
         esac
@@ -260,6 +266,16 @@ zdot_define_module() {
         return 1
     fi
 
+    # --- Build module-level variant args to forward to every hook ---
+    local -a _dm_variant_args=()
+    local _dmv
+    for _dmv in "${module_variants[@]}"; do
+        _dm_variant_args+=(--variant "$_dmv")
+    done
+    for _dmv in "${module_variant_excludes[@]}"; do
+        _dm_variant_args+=(--variant-exclude "$_dmv")
+    done
+
     # --- Configure phase ---
     if [[ -n "$configure_fn" ]]; then
         local -a cfg_ctx=("${contexts[@]}")
@@ -269,7 +285,8 @@ zdot_define_module() {
         zdot_register_hook "$configure_fn" "${cfg_ctx[@]}" \
             --name "${basename}-configure" \
             --requires xdg-configured \
-            --provides "${basename}-configured"
+            --provides "${basename}-configured" \
+            "${_dm_variant_args[@]}"
     fi
 
     # --- Load phase ---
@@ -310,7 +327,7 @@ zdot_define_module() {
 
     if [[ -n "$load_fn" ]]; then
         # Explicit load function
-        zdot_register_hook "$load_fn" "${ld_ctx[@]}" "${load_hook_args[@]}"
+        zdot_register_hook "$load_fn" "${ld_ctx[@]}" "${load_hook_args[@]}" "${_dm_variant_args[@]}"
 
     elif (( ${#load_plugins} )); then
         # Auto-generate loader from plugin specs
@@ -349,7 +366,7 @@ zdot_define_module() {
         done
         eval "${loader_name}() {"$'\n'"${loader_body}}"
 
-        zdot_register_hook "$loader_name" "${ld_ctx[@]}" "${load_hook_args[@]}"
+        zdot_register_hook "$loader_name" "${ld_ctx[@]}" "${load_hook_args[@]}" "${_dm_variant_args[@]}"
     fi
 
     # --- Determine whether a load phase was actually registered ---
@@ -381,7 +398,8 @@ zdot_define_module() {
             --name "${basename}-post-init" \
             --deferred \
             "${pi_req_args[@]}" \
-            --provides "${basename}-post-configured"
+            --provides "${basename}-post-configured" \
+            "${_dm_variant_args[@]}"
     fi
 
     # --- Interactive init (deferred) ---
@@ -395,7 +413,8 @@ zdot_define_module() {
             --name "${basename}-interactive-init" \
             --deferred \
             "${ii_req_args[@]}" \
-            --provides "${basename}-interactive-ready"
+            --provides "${basename}-interactive-ready" \
+            "${_dm_variant_args[@]}"
     fi
 
     # --- Noninteractive init (eager) ---
@@ -408,6 +427,7 @@ zdot_define_module() {
         zdot_register_hook "$noninteractive_init_fn" noninteractive \
             --name "${basename}-noninteractive-init" \
             "${ni_req_args[@]}" \
-            --provides "${basename}-noninteractive-ready"
+            --provides "${basename}-noninteractive-ready" \
+            "${_dm_variant_args[@]}"
     fi
 }

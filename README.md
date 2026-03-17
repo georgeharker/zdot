@@ -14,6 +14,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 - [User Modules](#user-modules)
 - [Core Functions Reference](#core-functions-reference)
 - [Hook System](#hook-system)
+- [Variants](#variants)
 - [Debugging](#debugging)
 - [Best Practices](#best-practices)
 
@@ -513,9 +514,89 @@ zdot_register_hook _welcome_message interactive login
 
 The system automatically detects the current context and only runs matching hooks.
 
-## Debugging
+## Variants
 
-### Enable Verbose Logging
+A **variant** is an optional third dimension of the context system — a user-defined label that lets you load different hooks on different machines or environments without maintaining separate config files.
+
+**Examples:**
+- `work` — load corporate VPN and extra tooling
+- `small` — skip heavy tools on a low-power machine
+- `home` — personal setup, no corporate modules
+
+### Setting the Active Variant
+
+Set the variant **before** `zdot_init` is called. zdot checks in this priority order:
+
+```zsh
+# Option A — environment variable (highest priority; set in .zshenv or a wrapper):
+export ZDOT_VARIANT=work
+
+# Option B — zstyle in .zshrc:
+zstyle ':zdot:variant' name small
+
+# Option C — detection function (most flexible):
+zdot_detect_variant() {
+    case $HOST in
+        (macbook-pro)  REPLY=work  ;;
+        (raspberry*)   REPLY=small ;;
+        (*)            REPLY=""    ;;
+    esac
+}
+```
+
+If none of the above is set, the variant is empty — all hooks run as normal (backward compatible).
+
+### Registering Variant-Constrained Hooks
+
+Add `--variant` or `--variant-exclude` to any `zdot_register_hook` call:
+
+```zsh
+# Only run on the 'work' variant:
+zdot_register_hook _vpn_init interactive noninteractive \
+    --variant work \
+    --requires brew-ready \
+    --provides vpn-ready
+
+# Run everywhere EXCEPT 'small':
+zdot_register_hook _heavy_tools_init interactive \
+    --variant-exclude small \
+    --requires brew-ready
+
+# Match any of several variants (multiple --variant flags):
+zdot_register_hook _corp_tools_init interactive \
+    --variant work --variant contractor \
+    --requires brew-ready
+
+# No --variant flag = runs in ALL variants (unchanged semantics):
+zdot_register_hook _xdg_init interactive noninteractive \
+    --provides xdg-configured
+```
+
+`--variant` and `--variant-exclude` are mutually exclusive on a single call.
+The same flags are accepted by `zdot_simple_hook` and `zdot_define_module`
+and are applied to every phase they register.
+
+### Querying the Variant at Runtime
+
+Use these inside hook bodies:
+
+```zsh
+zdot_variant          # prints active variant string (may be empty)
+zdot_is_variant work  # returns 0 if active variant is 'work', 1 otherwise
+
+_vpn_init() {
+    zdot_is_variant work || return 0
+    # work-specific setup...
+}
+```
+
+### Notes
+
+- **Backward compatible**: hooks with no `--variant` flag run in all variants including the empty default.
+- **Cache-aware**: the plan cache key includes the variant (`interactive_nonlogin_work`, `interactive_nonlogin_default`, etc.). Each variant gets its own cache file.
+- **Group barriers**: if all members of a `--group` are variant-excluded, the synthetic begin/end barriers are also excluded, so a `--requires-group` hook correctly sees its dependency as unsatisfied.
+
+## Debugging
 
 ```zsh
 export ZDOT_VERBOSE=1

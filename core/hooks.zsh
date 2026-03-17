@@ -35,6 +35,8 @@ typeset -gA _ZDOT_HOOK_GROUPS               # hook_id -> "group1 group2 ..." (mu
 typeset -gA _ZDOT_GROUP_MEMBERS             # group_name -> "hook_id1 hook_id2 ..." (reverse index)
 typeset -gA _ZDOT_HOOK_DEFER_ARGS           # hook_id -> flag-set key (see _ZDOT_DEFER_FLAG_NAMES)
 typeset -gA _ZDOT_DEFER_FLAG_NAMES          # flag-set key -> display name; extend here to add new defer modes
+typeset -gA _ZDOT_HOOK_VARIANTS             # hook_id -> "v1 v2 ..." (variant include list; empty = all)
+typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES     # hook_id -> "v1 v2 ..." (variant exclude list)
 _ZDOT_DEFER_FLAG_NAMES["--prompt"]="prompt"
 _ZDOT_DEFER_FLAG_NAMES["-p"]="prompt"
 _ZDOT_DEFER_FLAG_NAMES["--quiet"]="quiet"
@@ -107,6 +109,8 @@ zdot_register_hook() {
     local -a hook_groups=()
     local hook_provides_group=""
     local hook_requires_group=""
+    local -a hook_variants=()
+    local -a hook_variant_excludes=()
     local -a _raw_args=("$@")
     local -a _filtered_args=()
     local _i=1
@@ -129,6 +133,12 @@ zdot_register_hook() {
         elif [[ ${_raw_args[$_i]} == --requires-group ]]; then
             (( _i++ ))
             hook_requires_group="${_raw_args[$_i]}"
+        elif [[ ${_raw_args[$_i]} == --variant ]]; then
+            (( _i++ ))
+            hook_variants+=("${_raw_args[$_i]}")
+        elif [[ ${_raw_args[$_i]} == --variant-exclude ]]; then
+            (( _i++ ))
+            hook_variant_excludes+=("${_raw_args[$_i]}")
         else
             _filtered_args+=("${_raw_args[$_i]}")
         fi
@@ -273,6 +283,11 @@ zdot_register_hook() {
     if [[ -n "$_ZDOT_CURRENT_MODULE_NAME" ]]; then
         _ZDOT_HOOK_MODULES[$func_name]="$_ZDOT_CURRENT_MODULE_NAME"
     fi
+
+    # Store variant constraints
+    _ZDOT_HOOK_VARIANTS[$hook_id]="${hook_variants[*]}"
+    _ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]="${hook_variant_excludes[*]}"
+
     REPLY=$hook_id
 }
 
@@ -306,19 +321,91 @@ zdot_defer_order() {
 }
 
 # ============================================================================
+# Context and Variant Matching
+# ============================================================================
+
+# Returns 0 if hook_id should run in any of the supplied context tokens.
+# Usage: _zdot_context_match <hook_id> <ctx1> [ctx2 ...]
+# The caller passes the locally-augmented context list (which includes the
+# login/nonlogin token appended after zdot_build_context runs).
+_zdot_context_match() {
+    local hook_id="$1"
+    shift
+    local -a hook_contexts=(${=_ZDOT_HOOK_CONTEXTS[$hook_id]})
+    local ctx
+    for ctx in "$@"; do
+        [[ " ${hook_contexts[*]} " == *" ${ctx} "* ]] && return 0
+    done
+    return 1
+}
+
+# Returns 0 if hook_id should run in the currently active variant.
+# Logic:
+#   - Exclude list takes priority: if active variant is in the list, return 1.
+#   - Empty include list: matches all variants (return 0).
+#   - Non-empty include list: active variant must be present.
+_zdot_variant_match() {
+    local hook_id="$1"
+    local active_variant="${_ZDOT_VARIANT:-}"
+
+    local -a includes=(${=_ZDOT_HOOK_VARIANTS[$hook_id]})
+    local -a excludes=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]})
+
+    # Exclude list takes priority.
+    if (( ${#excludes} > 0 )); then
+        [[ " ${excludes[*]} " == *" ${active_variant} "* ]] && return 1
+    fi
+
+    # No include list: matches all variants.
+    (( ${#includes} == 0 )) && return 0
+
+    # Include list present: active variant must appear in it.
+    [[ " ${includes[*]} " == *" ${active_variant} "* ]]
+}
+
+# Build a variant-filtered view of _ZDOT_PHASE_PROVIDERS_BY_CONTEXT.
+# Called at plan-build time, after zdot_resolve_variant has run.
+# Populates _ZDOT_PHASE_PROVIDERS_ACTIVE with only the providers whose
+# hooks pass the variant filter, so that provider look-ups during plan
+# building correctly exclude variant-restricted hooks.
+_zdot_build_variant_provider_index() {
+    typeset -gA _ZDOT_PHASE_PROVIDERS_ACTIVE=()
+    local key hook_id
+    for key in ${(k)_ZDOT_PHASE_PROVIDERS_BY_CONTEXT}; do
+        hook_id="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$key]}"
+        if _zdot_variant_match "$hook_id"; then
+            _ZDOT_PHASE_PROVIDERS_ACTIVE[$key]="$hook_id"
+        fi
+    done
+    _ZDOT_VARIANT_INDEX_BUILT=1
+}
+
+# ============================================================================
 # Dependency Resolution (Topological Sort)
 # ============================================================================
 
 # Helper: Check if a phase has a provider in any of the given contexts
 # Usage: _zdot_has_provider_in_contexts <phase> <context1> <context2> ...
 # Returns: 0 if provider exists, 1 otherwise
+# During plan building, uses _ZDOT_PHASE_PROVIDERS_ACTIVE (variant-filtered).
+# At other times falls back to the full _ZDOT_PHASE_PROVIDERS_BY_CONTEXT.
 _zdot_has_provider_in_contexts() {
     local phase="$1"
     shift
     local -a contexts=("$@")
+    # Use the variant-filtered active index when it is populated (plan-build time).
+    # _ZDOT_VARIANT_INDEX_BUILT is set by _zdot_build_variant_provider_index and
+    # guards the switch — it is NOT set during cache fast-path loads, so calls from
+    # zdot_hooks_list and similar tools after cache load still use the full registry.
+    local -A _prov_src
+    if (( _ZDOT_VARIANT_INDEX_BUILT )); then
+        _prov_src=(${(kv)_ZDOT_PHASE_PROVIDERS_ACTIVE})
+    else
+        _prov_src=(${(kv)_ZDOT_PHASE_PROVIDERS_BY_CONTEXT})
+    fi
     for ctx in ${contexts[@]}; do
         local ctx_key="${ctx}:${phase}"
-        local val="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx_key]}"
+        local val="${_prov_src[$ctx_key]}"
         if [[ -n $val ]]; then
             return 0
         fi
@@ -357,35 +444,33 @@ zdot_build_execution_plan() {
     # is available globally for runtime consumers (deferred dispatch, etc.)
     zdot_build_context
     local -a current_contexts=(${=_ZDOT_CURRENT_CONTEXT})
-    
+
     if [[ $_ZDOT_IS_LOGIN -eq 1 ]]; then
         current_contexts+=(login)
     else
         current_contexts+=(nonlogin)
     fi
-    
+
+    # Build a variant-filtered provider index now that the variant is resolved.
+    _zdot_build_variant_provider_index
+
     # Build dependency graph for hooks in current context
     local -A in_degree        # hook_id -> count of unsatisfied dependencies
     local -A adjacency_list   # phase_name -> "hook_id1 hook_id2 ..." (hooks that depend on this phase)
     local -a zero_in_degree   # Hooks with no dependencies
     local -a execution_order
     local -a skipped_hooks    # Track skipped optional hooks
-    
+
     # Initialize graph
     for hook_id in ${(k)_ZDOT_HOOKS}; do
-        local hook_contexts=(${=_ZDOT_HOOK_CONTEXTS[$hook_id]})
-        
-        # Check if hook should run in current context
-        local context_match=0
-        for ctx in "${current_contexts[@]}"; do
-            if [[ " ${hook_contexts[*]} " =~ " ${ctx} " ]]; then
-                context_match=1
-                break
-            fi
-        done
-        
+
         # Skip hooks not in current context
-        if [[ $context_match -eq 0 ]]; then
+        if ! _zdot_context_match "$hook_id" "${current_contexts[@]}"; then
+            continue
+        fi
+
+        # Skip hooks that don't match the active variant
+        if ! _zdot_variant_match "$hook_id"; then
             continue
         fi
 
@@ -887,6 +972,53 @@ _zdot_init_resolve_groups() {
         done
         local _ctx_list="${(j: :)${(k)_ctx_union}}"
 
+        # -- Compute variant constraints for barriers from member hooks -------
+        # Mirrors context-union logic: a barrier is active in a variant iff at
+        # least one member would be active in that variant.
+        #
+        # Include list: union of all member include lists.  If any member has
+        # an empty include (matches all variants), the barrier also gets an
+        # empty include (= matches all variants) — one open member keeps the
+        # barrier open.
+        #
+        # Exclude list: intersection of all member exclude lists.  A variant is
+        # only excluded from the barrier if every member excludes it.
+        local -A _barrier_excl_counts=()   # variant -> count of members that exclude it
+        local -a _barrier_includes=()
+        local _barrier_any_open=0          # 1 if any member has an empty include list
+        local _member_count=0
+        local _bm
+        for _bm in ${=_ZDOT_GROUP_MEMBERS[$_grp]:-}; do
+            (( _member_count++ ))
+            local -a _bm_inc=(${=_ZDOT_HOOK_VARIANTS[$_bm]})
+            local -a _bm_exc=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$_bm]})
+            if (( ${#_bm_inc} == 0 )); then
+                _barrier_any_open=1
+            else
+                local _bv
+                for _bv in "${_bm_inc[@]}"; do
+                    if [[ " ${_barrier_includes[*]:-} " != *" $_bv "* ]]; then
+                        _barrier_includes+=("$_bv")
+                    fi
+                done
+            fi
+            for _bv in "${_bm_exc[@]}"; do
+                (( _barrier_excl_counts[$_bv]++ ))
+            done
+        done
+
+        # If any member is open (no include constraint), barrier is open too.
+        (( _barrier_any_open )) && _barrier_includes=()
+
+        # Build exclude list: only variants excluded by ALL members.
+        local -a _barrier_excludes=()
+        local _bev
+        for _bev in "${(k)_barrier_excl_counts[@]}"; do
+            if (( _barrier_excl_counts[$_bev] == _member_count )); then
+                _barrier_excludes+=("$_bev")
+            fi
+        done
+
         # -- Allocate barrier hook IDs ---------------------------------------
         (( _ZDOT_HOOK_COUNTER++ ))
         _hid_begin="hook_${_ZDOT_HOOK_COUNTER}"
@@ -910,6 +1042,8 @@ _zdot_init_resolve_groups() {
         _ZDOT_HOOK_REQUIRES[$_hid_begin]=""
         _ZDOT_HOOK_PROVIDES[$_hid_begin]="$_phase_begin"
         _ZDOT_HOOK_OPTIONAL[$_hid_begin]=1
+        _ZDOT_HOOK_VARIANTS[$_hid_begin]="${_barrier_includes[*]}"
+        _ZDOT_HOOK_VARIANT_EXCLUDES[$_hid_begin]="${_barrier_excludes[*]}"
 
         # -- Register end barrier --------------------------------------------
         _ZDOT_HOOKS[$_hid_end]=$_fn_end
@@ -919,6 +1053,8 @@ _zdot_init_resolve_groups() {
         _ZDOT_HOOK_REQUIRES[$_hid_end]=""
         _ZDOT_HOOK_PROVIDES[$_hid_end]="$_phase_end"
         _ZDOT_HOOK_OPTIONAL[$_hid_end]=1
+        _ZDOT_HOOK_VARIANTS[$_hid_end]="${_barrier_includes[*]}"
+        _ZDOT_HOOK_VARIANT_EXCLUDES[$_hid_end]="${_barrier_excludes[*]}"
 
         # -- Register begin/end phases into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT -
         for _ctx in ${(k)_ctx_union}; do
