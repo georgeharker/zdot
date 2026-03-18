@@ -866,7 +866,9 @@ system: dotfiler manages the repo and symlink tree, zdot manages the zsh
 configuration inside it.
 
 zdot does not require being in a dotfiler repor, and dotfiler is not required by zdot. Each
-works independently. When used together, dotfiler handles updating zdot
+works independently. 
+
+When used together, dotfiler handles updating zdot
 itself as a registered component. Note: zdot will internally use dotfiler implementation to perform self-updates)
 
 ### Overview
@@ -947,7 +949,6 @@ implies `-u` — unpacking both the main dotfiles and zdot.
 After the first setup, use:
 
 ```zsh
-dotfiler setup -u       # unpack main dotfiles + all hook components
 dotfiler update         # pull updates for main dotfiles + all hook components
 ```
 
