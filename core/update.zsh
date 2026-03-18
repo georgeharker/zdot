@@ -94,42 +94,6 @@ _zdot_update_bootstrap_find_dotfiler() {
 }
 
 # ---------------------------------------------------------------------------
-# Hook self-installation
-# ---------------------------------------------------------------------------
-# When zdot is running inside a dotfiler-managed repo, write a stub hook
-# script into the dotfiler hooks directory.  Uses ZDOT_REPO (the real backing
-# repo path, symlinks resolved) so git operations work correctly regardless of
-# whether the linktree has a symlinked .git file.
-# Runs at source time; cheap ([[ -f ]] checks only).
-# _zdot_update_get_parent_root is provided by update-impl.zsh (already sourced).
-
-_zdot_update_install_dotfiler_hook() {
-    _zdot_update_get_parent_root "$ZDOT_REPO"
-    local _parent_root=${reply[1]}
-    [[ -f "${_parent_root}/.nounpack/dotfiler/update_core.zsh" ]] || return 0
-
-    local _hooks_dir
-    zstyle -s ':dotfiler:hooks' dir _hooks_dir \
-        || _hooks_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiler/hooks"
-    [[ -d "$_hooks_dir" ]] || mkdir -p "$_hooks_dir" 2>/dev/null || return 0
-
-    local _hook_src="${ZDOT_REPO}/core/dotfiler-hook.zsh"
-    [[ -f "$_hook_src" ]] || return 0
-
-    local _hook_link="${_hooks_dir}/zdot.zsh"
-
-    # Install/update symlink — dotfiler sources hooks (not exec's them),
-    # so no +x needed. %x:A in dotfiler-hook.zsh resolves the symlink correctly.
-    local _current
-    [[ -L "$_hook_link" ]] && _current=$(readlink "$_hook_link" 2>/dev/null)
-    if [[ "$_current" != "$_hook_src" ]]; then
-        ln -sf "$_hook_src" "$_hook_link" 2>/dev/null
-    fi
-}
-
-_zdot_update_install_dotfiler_hook
-
-# ---------------------------------------------------------------------------
 # Cleanup: unset all private helpers after the hook is wired.
 # _zdot_update_handle_update is kept — it IS the hook body.
 # ---------------------------------------------------------------------------
