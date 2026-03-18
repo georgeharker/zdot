@@ -38,8 +38,11 @@ _fzf_plugins_load_omz() {
 }
 
 _fzf_init() {
-    # preview directory's content with eza when completing cd
-    zstyle ':fzf-tab:complete:cx:*' fzf-preview 'eza -1 --color=always --icons $realpath'
+    # preview directory's content with eza when completing the zoxide jump command.
+    # Only registered if ZOXIDE_CMD_OVERRIDE is set (the completion target name varies).
+    if [[ -n "${ZOXIDE_CMD_OVERRIDE}" ]]; then
+        zstyle ":fzf-tab:complete:${ZOXIDE_CMD_OVERRIDE}:*" fzf-preview 'eza -1 --color=always --icons $realpath'
+    fi
 
     # custom fzf flags
     # NOTE: fzf-tab does not follow FZF_DEFAULT_OPTS by default
@@ -77,8 +80,12 @@ _fzf_post_plugin_keybinds() {
 
 _fzf_post_plugin() {
     # Load fzf theme
-    [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/tokyonight_night.sh" ] && \
-        source "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/tokyonight_night.sh"
+    # Configure via: zstyle ':zdot:fzf' theme '/path/to/theme.sh'
+    # Set to empty string to disable theme loading entirely.
+    local _fzf_default_theme="${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/tokyonight_night.sh"
+    local _fzf_theme
+    zstyle -s ':zdot:fzf' theme _fzf_theme || _fzf_theme="${_fzf_default_theme}"
+    [[ -n "${_fzf_theme}" && -f "${_fzf_theme}" ]] && source "${_fzf_theme}"
 
     # Load fzf shell integration
     [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/fzf.zsh" ] && \

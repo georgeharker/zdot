@@ -482,6 +482,17 @@ zdot_define_module fzf \
 
 ## Registering in .zshrc
 
+### Module Search Path
+
+To add modules from your own directories (which shadow built-in modules of the
+same name), set the search path before any `zdot_load_module` calls:
+
+```zsh
+zstyle ':zdot:modules' search-path "${XDG_CONFIG_HOME}/zsh/modules"
+```
+
+`lib/` is always the final fallback entry.
+
 ### Loading Modules
 
 ```zsh

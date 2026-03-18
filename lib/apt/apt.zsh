@@ -6,11 +6,10 @@ _apt_init() {
     # .zshrc only loads this module on Debian, but guard defensively
     zdot_is_debian || return 0
 
-    zdot_verify_tools op eza oh-my-posh gh tailscale zoxide rg bat fd
+    zdot_verify_tools_zstyle ':zdot:apt' op eza oh-my-posh gh tailscale zoxide rg bat fd
 }
 
-# Register hooks - requires xdg-configured, provides tool availability on Debian
+# Tool list: override via zstyle ':zdot:apt' verify-tools <tool...>
+zdot_provides_tool_args ':zdot:apt' op eza oh-my-posh gh tailscale zoxide rg bat fd
 zdot_simple_hook apt --requires xdg-configured env-configured --provides apt-ready \
-    --provides-tool op --provides-tool eza --provides-tool oh-my-posh \
-    --provides-tool gh --provides-tool tailscale --provides-tool zoxide \
-    --provides-tool rg --provides-tool bat --provides-tool fd
+    "${reply[@]}"

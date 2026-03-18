@@ -118,9 +118,9 @@ Point zdot at your modules directory and load the module before calling
 `zdot_init`:
 
 ```zsh
-zstyle ':zdot:user-modules' path "${XDG_CONFIG_HOME}/zsh/modules"
+zstyle ':zdot:modules' search-path "${XDG_CONFIG_HOME}/zsh/modules"
 zdot_load_module secrets              # built-in
-zdot_load_user_module my-secrets      # your configure hook
+zdot_load_module my-secrets          # your configure hook (found in search-path)
 zdot_init
 ```
 

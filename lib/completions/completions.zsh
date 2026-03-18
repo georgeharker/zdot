@@ -15,9 +15,12 @@ _completions_init() {
         fpath=("$completions_dir" $fpath)
     fi
 
-    # Add per-module completion directories to fpath
-    for module_dir in "$_ZDOT_LIB_DIR"/*(/); do
-        local comp_dir="${module_dir}/completions"
+    # Add per-module completion directories to fpath.
+    # Uses the loaded-module map so user-path modules are included alongside lib/ modules.
+    local _mod _mod_dir
+    for _mod in "${(k)_ZDOT_MODULE_SOURCE_DIR}"; do
+        _mod_dir="${_ZDOT_MODULE_SOURCE_DIR[$_mod]}"
+        local comp_dir="${_mod_dir}/completions"
         if [[ -d "$comp_dir" ]]; then
             fpath=("$comp_dir" $fpath)
         fi

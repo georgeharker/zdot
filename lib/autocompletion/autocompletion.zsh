@@ -64,10 +64,16 @@ _autocomplete_plugins_load() {
 
 _autocomplete_plugins_post_init() {
     # Fast-syntax-highlighting theme (after plugins load)
+    # Configure via: zstyle ':zdot:autocompletion' fsh-theme '/path/to/theme.ini'
+    # Set to empty string to disable theme loading entirely.
     if zdot_interactive; then
-        if [[ -f ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini ]]; then
-            if [[ ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini:A -nt ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/current_theme.zsh:A ]]; then
-                zdot_defer -q fast-theme -q ${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini
+        local _fsh_default="${XDG_CONFIG_HOME:-${HOME}/.config}/fast-syntax-highlighting/tokyonight.ini"
+        local _fsh_theme
+        zstyle -s ':zdot:autocompletion' fsh-theme _fsh_theme || _fsh_theme="${_fsh_default}"
+        if [[ -n "${_fsh_theme}" && -f "${_fsh_theme}" ]]; then
+            local _fsh_current="${_fsh_theme:h}/current_theme.zsh"
+            if [[ "${_fsh_theme:A}" -nt "${_fsh_current:A}" ]]; then
+                zdot_defer -q fast-theme -q "${_fsh_theme}"
             fi
         fi
     fi

@@ -23,8 +23,8 @@ in the main `lib/` tree.
 | `lib/bun` | Sources bun env, registers completion. Fully standard. |
 | `lib/uv` | Sources uv env, registers completions. Fully standard. |
 | `lib/prompt` | Generic — reads oh-my-posh config via XDG. |
-| `lib/tmux` | Loads OMZ tmux plugin. No personal config. |
-| `lib/ssh` | Manages tmux autostart on SSH connections. No personal data. |
+| `lib/tmux` | Loads OMZ tmux plugin. SSH auto-start behaviour merged in as configure phase. |
+| `lib/ssh` | Empty stub — content merged into `lib/tmux`. May be removed. |
 | `lib/sudo` | Adjusts XDG dirs when running as sudo user. Generic. |
 | `lib/plugins` | Framework plugin management + OMZ init. Generic. |
 | `lib/local_rc` | Sources `~/.zshrc_local` — explicitly the personal override escape hatch. |
@@ -214,7 +214,7 @@ zdot/
   ...
 ```
 
-Users point `zstyle ':zdot:user-modules' path` at their own directory and copy/adapt
+Users point `zstyle ':zdot:modules' search-path` at their own directory and copy/adapt
 from `examples/` as needed.
 
 ---
@@ -249,22 +249,31 @@ from `examples/` as needed.
   `':zdot:secrets' ssh-platforms` (OSTYPE glob array, default `darwin*`) and
   `':zdot:secrets' ssh-func` (optional predicate). See `lib/secrets/README.md`.
 
-- [ ] **`lib/fzf`**: Make Tokyo Night theme path a zstyle or remove entirely. Make
-  `cx` preview conditional on `ZOXIDE_CMD_OVERRIDE` being set.
+- [x] **`lib/fzf`**: Tokyo Night theme path read from `zstyle ':zdot:fzf' theme`;
+  defaults to `$XDG_CONFIG_HOME/fzf/tokyonight_night.sh`. Set to empty string to
+  disable. `cx` fzf-tab preview is now conditional on `ZOXIDE_CMD_OVERRIDE` being
+  set, and uses that value as the completion target name.
 
-- [ ] **`lib/autocompletion`**: Make FSH theme path
-  (`fast-syntax-highlighting/tokyonight.ini`) a zstyle or remove from framework.
+- [x] **`lib/autocompletion`**: FSH theme path read from
+  `zstyle ':zdot:autocompletion' fsh-theme`; defaults to
+  `$XDG_CONFIG_HOME/fast-syntax-highlighting/tokyonight.ini`. Set to empty string
+  to disable theme loading entirely.
 
-- [ ] **`lib/shell-extras`**: Convert unconditional `zstyle` sets to conditional
-  (`zstyle -T` pattern or check-then-set) so user-set values take priority.
+- [x] **`lib/shell-extras`**: eza zstyle defaults now use check-then-set pattern
+  (`zstyle -s` read first; only set if unset) so user-configured values take
+  priority. Users can override before this module's configure phase runs.
 
 - [x] **`lib/nodejs`**: `lazy-cmd` list read from `zstyle ':zdot:nodejs' lazy-cmd`
   with built-in default `(opencode mcp-hub copilot prettierd claude-code)`.
   `node-configure` group hook available for user overrides. See `lib/nodejs/README.md`.
 
-- [ ] **`lib/env`**: Strip personal exports. Move `DEFAULT_USER`, `DEVDIR`,
-  `DEPLOYDIR`, `EXTDEVDIR`, `BASIC_MEMORY_*`, personal tool preferences to an
-  example user module. Keep `LANG`, `LC_ALL`, `PAGER`, `TMPDIR`, `EDITOR`.
+- [ ] **`lib/env`** *(demote personal content to user setup)*: Strip personal exports.
+  Move the following to an example user module:
+  - `DEFAULT_USER=geohar`
+  - `DEVDIR`, `DEPLOYDIR`, `EXTDEVDIR`
+  - `BASIC_MEMORY_HOME`, `BASIC_MEMORY_CONFIG_DIR`
+  - `EDITOR=nvim`, `BAT_THEME=tokyonight_night`, personal ripgrep config path
+  Keep only `LANG`, `LC_ALL`, `PAGER`, `TMPDIR`, `EDITOR` (as a generic default).
 
 - [x] **`lib/venv`**: Python version reads from `zstyle ':zdot:venv' python-version-macos`
   and `':zdot:venv' python-version-linux`, defaulting to Homebrew `python3.14` and
@@ -275,16 +284,22 @@ from `examples/` as needed.
   (same key as `core/update.zsh`), falling back to `$XDG_DATA_HOME/dotfiler` then
   `$HOME/.dotfiles/.nounpack/dotfiler`. Module is a silent no-op when none resolve.
 
-- [ ] **`lib/aliases`**: Move `ytdl` alias to example user module. Module can then
-  be a no-op stub or removed.
+- [ ] **`lib/aliases`** *(demote to user setup)*: Entire module is personal preference.
+  Move to user overrides. Items to extract:
+  - `ytdl` alias
+  - Any other aliases present in the module at time of extraction.
+  Module becomes a no-op stub or is removed from `lib/`.
 
-- [ ] **`lib/mcp`**: Move entirely to `examples/mcp/`. Not frameworkable without
-  complete rewrite.
+- [ ] **`lib/mcp`** *(demote to user setup)*: Move entirely to `examples/mcp/`.
+  Not frameworkable without complete rewrite. Items to extract:
+  - Gmail account management functions
+  - GCP OAuth credential functions (1Password vault references)
+  - Any MCP server config templates
 
 ---
 
 ### Infrastructure
 
 - [ ] **Create `examples/` directory** with annotated versions of personal modules.
-- [ ] **Update top-level README** to document user-module override pattern and the
-  `':zdot:user-modules' path` zstyle.
+- [ ] **Update top-level README** to document module search path and the
+  `':zdot:modules' search-path` zstyle.

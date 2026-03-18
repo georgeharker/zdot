@@ -21,10 +21,9 @@ _brew_init() {
         eval "$(/usr/local/bin/brew shellenv)"
     fi
 
-    zdot_verify_tools op eza oh-my-posh gh tailscale
+    zdot_verify_tools_zstyle ':zdot:brew' op eza oh-my-posh gh tmux tailscale
 }
 
-# Register hooks - requires xdg-configured, provides brew-ready and tool availability
-zdot_simple_hook brew --provides brew-ready \
-    --provides-tool op --provides-tool eza --provides-tool oh-my-posh \
-    --provides-tool gh --provides-tool tmux --provides-tool tailscale
+# Tool list: override via zstyle ':zdot:brew' verify-tools <tool...>
+zdot_provides_tool_args ':zdot:brew' op eza oh-my-posh gh tmux tailscale
+zdot_simple_hook brew --provides brew-ready "${reply[@]}"

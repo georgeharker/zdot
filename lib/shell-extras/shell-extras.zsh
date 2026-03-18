@@ -2,9 +2,13 @@
 # shell-extras: git, eza, ssh, debian OMZ plugins
 
 _shell_extras_configure() {
-    zstyle ':omz:plugins:eza' 'dirs-first' yes
-    zstyle ':omz:plugins:eza' 'git-status' yes
-    zstyle ':omz:plugins:eza' 'icons' yes
+    # Set eza defaults only if the user has not already configured them.
+    # Override any of these before this module loads, e.g. in a configure hook:
+    #   zstyle ':omz:plugins:eza' 'dirs-first' no
+    local _val
+    zstyle -s ':omz:plugins:eza' 'dirs-first' _val || zstyle ':omz:plugins:eza' 'dirs-first' yes
+    zstyle -s ':omz:plugins:eza' 'git-status' _val || zstyle ':omz:plugins:eza' 'git-status' yes
+    zstyle -s ':omz:plugins:eza' 'icons'      _val || zstyle ':omz:plugins:eza' 'icons'      yes
 }
 
 # Custom loader needed for conditional debian plugin
