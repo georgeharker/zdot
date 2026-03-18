@@ -26,9 +26,22 @@ zsh configuration. It assumes macOS or Linux with git and zsh already installed.
 dotfiler keeps `~/.dotfiles` up to date and manages the `~/.config` symlink
 tree. zdot loads from `~/.config/zdot` at shell startup.
 
+dotfiler defaults to `~/.dotfiles` as the repo location. If you want it
+elsewhere, set `DOTFILES` in your environment.
+
 ---
 
-## Step 1 — Install dotfiler
+## Step 1 — Create your dotfiles repo
+
+```zsh
+mkdir -p ~/.dotfiles
+cd ~/.dotfiles
+git init
+```
+
+---
+
+## Step 2 — Install dotfiler
 
 ```zsh
 git clone https://github.com/georgeharker/dotfiler ~/.dotfiles/.nounpack/dotfiler
@@ -39,23 +52,6 @@ wired up:
 
 ```zsh
 export PATH="$HOME/.dotfiles/.nounpack/dotfiler:$PATH"
-```
-
----
-
-## Step 2 — Create your dotfiles repo
-
-```zsh
-mkdir -p ~/.dotfiles
-cd ~/.dotfiles
-git init
-```
-
-Tell dotfiler where the repo lives (it defaults to `~/.dotfiles`, but being
-explicit avoids surprises):
-
-```zsh
-export DOTFILES="$HOME/.dotfiles"
 ```
 
 ---
@@ -165,7 +161,7 @@ Once your dotfiles repo is on a remote (GitHub, etc.) and you're setting up a
 new machine:
 
 ```zsh
-# 1. Install dotfiler
+# 1. Clone dotfiler
 git clone https://github.com/georgeharker/dotfiler ~/.dotfiles/.nounpack/dotfiler
 export PATH="$HOME/.dotfiles/.nounpack/dotfiler:$PATH"
 
@@ -174,7 +170,7 @@ git clone <your-repo-url> ~/.dotfiles
 git -C ~/.dotfiles submodule update --init --recursive
 
 # 3. Unpack everything (reads hook directly from repo, no linktree needed yet)
-DOTFILES=~/.dotfiles dotfiler setup --bootstrap
+dotfiler setup --bootstrap
 ```
 
 After `--bootstrap` completes the linktree is in place and subsequent shells
