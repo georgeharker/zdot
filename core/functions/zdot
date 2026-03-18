@@ -269,9 +269,16 @@ function zdot() {
                         fi
                     done
                     if [[ -z "$dest_root" ]]; then
-                        zdot_error "zdot module clone: no user directory configured in search path"
-                        zdot_info "  Set one via: zstyle ':zdot:modules' search-path <dir>"
-                        return 1
+                        # Fall back to the XDG default even if it doesn't exist yet;
+                        # we'll create it below.
+                        dest_root="${XDG_CONFIG_HOME:-${HOME}/.config}/zdot-modules"
+                    fi
+                    if [[ ! -d "$dest_root" ]]; then
+                        if ! mkdir -p "$dest_root"; then
+                            zdot_error "zdot module clone: could not create user module directory: $dest_root"
+                            return 1
+                        fi
+                        zdot_info "Created user module directory: $dest_root"
                     fi
                     local dest_dir="${dest_root}/${name}"
                     if [[ -d "$dest_dir" ]]; then
