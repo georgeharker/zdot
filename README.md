@@ -9,7 +9,8 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 
 - [Motivation](#motivation)
 - [Overview](#overview)
-- [Quick Start](#quick-start)
+- [Quick Start — Usage](#quick-start--usage)
+- [Quickstart: dotfiler + zdot from scratch](#quickstart-dotfiler--zdot-from-scratch)
 - [Creating Modules](#creating-modules)
 - [Module Search Path](#module-search-path)
 - [Core Functions Reference](#core-functions-reference)
@@ -18,6 +19,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 - [Debugging](#debugging)
 - [Best Practices](#best-practices)
 - [dotfiler Integration](#dotfiler-integration)
+- [Further Reading](#further-reading)
 
 ## Motivation
 
@@ -119,7 +121,7 @@ The system automatically:
 - Skips modules when dependencies are missing (if marked optional)
 - Runs hooks in the correct order during shell initialization
 
-## Quick Start
+## Quick Start — Usage
 
 ### Directory Structure
 
@@ -156,6 +158,18 @@ zdot_build_execution_plan
 # Execute all hooks in dependency order
 zdot_execute_all
 ```
+
+## Quickstart: dotfiler + zdot from scratch
+
+New to dotfiler? See **[docs/quickstart-dotfiler.md](docs/quickstart-dotfiler.md)** for step-by-step instructions to:
+
+- Create a dotfiles git repo from scratch
+- Add zdot as a submodule
+- Wire up the dotfiler hook
+- Unpack the linktree and start your first shell
+- Bootstrap everything on a new machine
+
+---
 
 ## Creating Modules
 
@@ -967,4 +981,16 @@ update lifecycle, and configuration.
 - Set `ZDOT_VERBOSE=1` for detailed logging
 - Check module files in `lib/` for real-world examples
 
-For implementation details and core system architecture, see [IMPLEMENTATION.md](./IMPLEMENTATION.md).
+## Further Reading
+
+| Document | Description |
+|---|---|
+| [docs/quickstart-dotfiler.md](docs/quickstart-dotfiler.md) | **Start here** — create a dotfiles repo with dotfiler + zdot from scratch |
+| [docs/implementation.md](docs/implementation.md) | Internal architecture, data structures, algorithms and design decisions |
+| [docs/module-guide.md](docs/module-guide.md) | Module writer's guide — from quick start to complex plugin-loading lifecycles |
+| [docs/commands.md](docs/commands.md) | Full CLI reference for the `zdot` command |
+| [docs/plugins.md](docs/plugins.md) | Plugin system overview and usage |
+| [docs/plugin-implementation.md](docs/plugin-implementation.md) | Plugin system internals and architecture |
+| [docs/compinit.md](docs/compinit.md) | Completion system (`compinit`) and compaudit controls |
+| [docs/caching-implementation.md](docs/caching-implementation.md) | Bytecode compilation and execution plan caching internals |
+| [docs/zstyle-reference.md](docs/zstyle-reference.md) | Complete reference for all `zstyle` configuration options |
