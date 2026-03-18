@@ -473,7 +473,7 @@ load_cache() {
     # Check if any source files are newer than the plan
     # This ensures cache invalidation when modules change
     local core_dir="${ZDOT_DIR}/core"
-    local lib_dir="${_ZDOT_LIB_DIR}"
+    local module_dir="${_ZDOT_MODULE_DIR}"
 
     for core_file in "$core_dir"/*.zsh(N); do
         if [[ -f "$core_file" ]] && zdot_is_newer_or_missing "$core_file" "$plan_file"; then
@@ -482,7 +482,7 @@ load_cache() {
         fi
     done
 
-    for module_dir in "$lib_dir"/*(N/); do
+    for module_dir in ""/*(N/); do
         local module_name="${module_dir:t}"
         local module_file="${module_dir}/${module_name}.zsh"
         if [[ -f "$module_file" ]] && zdot_is_newer_or_missing "$module_file" "$plan_file"; then
@@ -495,7 +495,7 @@ load_cache() {
     _zdot_build_module_search_path
     local _sp_dir
     for _sp_dir in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
-        [[ "$_sp_dir" == "$lib_dir" ]] && continue   # already checked above
+        [[ "$_sp_dir" == "" ]] && continue   # already checked above
         for module_dir in "$_sp_dir"/*(N/); do
             local module_name="${module_dir:t}"
             local module_file="${module_dir}/${module_name}.zsh"
@@ -601,8 +601,8 @@ zdot_cache_invalidate() {
     # Fallback: if no modules are loaded (e.g. called before zdot_init),
     # fall back to scanning lib/ directly so a bare `zdot cache invalidate`
     # still clears lib/ bytecode.
-    if [[ ${#_ZDOT_MODULE_SOURCE_DIR} -eq 0 && -d "${_ZDOT_LIB_DIR}" ]]; then
-        for module_dir in "${_ZDOT_LIB_DIR}"/*(N/); do
+    if [[ ${#_ZDOT_MODULE_SOURCE_DIR} -eq 0 && -d "${_ZDOT_MODULE_DIR}" ]]; then
+        for module_dir in "${_ZDOT_MODULE_DIR}"/*(N/); do
             for zwc_file in "$module_dir"/*.zwc(N); do
                 if [[ -f "$zwc_file" ]]; then
                     rm -f "$zwc_file"
@@ -657,7 +657,7 @@ zdot_cache_stats() {
         src_dir="${_ZDOT_MODULE_SOURCE_DIR[$module]}"
         local zwc_file="${src_dir}/${module}.zsh.zwc"
         if [[ -f "$zwc_file" ]]; then
-            if [[ "$src_dir" == "${_ZDOT_LIB_DIR}/${module}" ]]; then
+            if [[ "$src_dir" == "${_ZDOT_MODULE_DIR}/${module}" ]]; then
                 (( lib_count++ ))
             else
                 (( user_count++ ))
@@ -678,7 +678,7 @@ zdot_cache_stats() {
     echo "Context: $context_suffix"
     echo "Compiled modules (co-located): $compiled_count"
     echo "  - Core modules: $core_count"
-    echo "  - Lib modules: $lib_count"
+    echo "  - Built-in modules: $lib_count"
     echo "  - User modules: $user_count"
     echo "Execution plan cached: $plan_exists"
 

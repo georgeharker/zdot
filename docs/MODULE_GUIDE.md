@@ -491,7 +491,7 @@ same name), set the search path before any `zdot_load_module` calls:
 zstyle ':zdot:modules' search-path "${XDG_CONFIG_HOME}/zsh/modules"
 ```
 
-`lib/` is always the final fallback entry.
+`modules/` is always the final fallback entry.
 
 ### Loading Modules
 

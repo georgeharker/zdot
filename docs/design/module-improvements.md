@@ -2,10 +2,10 @@
 
 ## Objective
 
-Assess which `lib/` modules are safe for third-party reuse and which contain
+Assess which `modules/` modules are safe for third-party reuse and which contain
 personal configuration, with a view to making this a properly generic, publishable
 framework where personal overrides live in a user-controlled directory rather than
-in the main `lib/` tree.
+in the main .modules/. tree.
 
 ---
 
@@ -17,10 +17,10 @@ in the main `lib/` tree.
 |---|---|
 | `lib/xdg` | Pure XDG standard directory setup. The root dependency for almost every other module. |
 | `lib/shell` | History config using XDG paths only. |
-| `lib/keybinds` | Pure key bindings, nothing personal. |
+| `modules/keyinds` | Pure key bindings, nothing personal. |
 | `lib/completions` | Completion path/runner scaffolding. Tool list (`gh`, `tailscale`, `sharedserver`) is opinionated but not personal. |
 | `lib/rust` | Sources `~/.cargo/env`, registers `rustup`/`cargo` completions. Fully standard. |
-| `lib/bun` | Sources bun env, registers completion. Fully standard. |
+| `modules/un` | Sources bun env, registers completion. Fully standard. |
 | `lib/uv` | Sources uv env, registers completions. Fully standard. |
 | `lib/prompt` | Generic — reads oh-my-posh config via XDG. |
 | `lib/tmux` | Loads OMZ tmux plugin. SSH auto-start behaviour merged in as configure phase. |
@@ -28,7 +28,7 @@ in the main `lib/` tree.
 | `lib/sudo` | Adjusts XDG dirs when running as sudo user. Generic. |
 | `lib/plugins` | Framework plugin management + OMZ init. Generic. |
 | `lib/local_rc` | Sources `~/.zshrc_local` — explicitly the personal override escape hatch. |
-| `lib/brew` | Homebrew init + tool verification. Opinionated tool list but not personal. |
+| `modules/rew` | Homebrew init + tool verification. Opinionated tool list but not personal. |
 | `lib/apt` | Debian equivalent of brew. Same situation. |
 
 ---
@@ -225,10 +225,10 @@ from `examples/` as needed.
 
 - [x] `lib/xdg`
 - [x] `lib/shell`
-- [x] `lib/keybinds`
+- [x] `modules/keyinds`
 - [x] `lib/completions` *(tool list is opinionated but not personal)*
 - [x] `lib/rust`
-- [x] `lib/bun`
+- [x] `modules/un`
 - [x] `lib/uv`
 - [x] `lib/prompt`
 - [x] `lib/tmux`
@@ -236,7 +236,7 @@ from `examples/` as needed.
 - [x] `lib/sudo`
 - [x] `lib/plugins`
 - [x] `lib/local_rc`
-- [x] `lib/brew`
+- [x] `modules/rew`
 - [x] `lib/apt`
 
 ---

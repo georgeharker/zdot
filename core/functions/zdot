@@ -263,7 +263,7 @@ function zdot() {
                     local dest_root=""
                     local _sp_entry
                     for _sp_entry in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
-                        if [[ "$_sp_entry" != "${_ZDOT_LIB_DIR}" ]]; then
+                        if [[ "$_sp_entry" != "${_ZDOT_MODULE_DIR}" ]]; then
                             dest_root="$_sp_entry"
                             break
                         fi
@@ -366,7 +366,7 @@ function zdot() {
             zdot_info ""
             zdot_info "Paths:"
             zdot_info "  base:  ${ZDOT_DIR:-<unset>}"
-            zdot_info "  lib:   ${_ZDOT_LIB_DIR:-<unset>}"
+            zdot_info "  modules: ${_ZDOT_MODULE_DIR:-<unset>}"
             zdot_info "  cache: ${_ZDOT_CACHE_DIR:-<unset>}"
             zdot_info ""
             zdot_info "Shell context:"

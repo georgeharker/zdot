@@ -22,7 +22,7 @@
 _zdot_this_script_file="${${(%):-%x}:a}"
 _zdot_base_dir="${_zdot_this_script_file:h:h}"     # .../zdot (go up twice from core/)
 typeset -g ZDOT_DIR="${_zdot_base_dir}"              # Export as global (linktree path)
-typeset -g _ZDOT_LIB_DIR="${_zdot_base_dir}/lib"            # .../zdot/lib
+typeset -g _ZDOT_MODULE_DIR="${_zdot_base_dir}/modules"      # .../zdot/modules
 _zdot_this_real_script_file="${${(%):-%x}:A}"
 _zdot_repo_dir="${_zdot_this_real_script_file:h:h}" # .../zdot real path (symlinks resolved)
 typeset -g ZDOT_REPO="${_zdot_repo_dir}"             # Export as global (real repo path)
@@ -66,7 +66,7 @@ typeset -g _ZDOT_CURRENT_MODULE_NAME  # Set by zdot_load_module, module name bei
 
 # Ordered list of directories to search when resolving a module by name.
 # Populated lazily by _zdot_build_module_search_path from
-# zstyle ':zdot:modules' search-path (array); _ZDOT_LIB_DIR is always appended last.
+# zstyle ':zdot:modules' search-path (array); _ZDOT_MODULE_DIR is always appended last.
 # Example zstyle:
 #   zstyle ':zdot:modules' search-path \
 #       "${XDG_CONFIG_HOME}/zsh/modules" \
@@ -74,7 +74,7 @@ typeset -g _ZDOT_CURRENT_MODULE_NAME  # Set by zdot_load_module, module name bei
 typeset -ga _ZDOT_MODULE_SEARCH_PATH
 
 # module_name -> absolute directory it was loaded from (the module's own dir, not the search root)
-# e.g. _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/lib/xdg"
+# e.g. _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/modules/xdg"
 typeset -gA _ZDOT_MODULE_SOURCE_DIR
 
 # Context detection state (computed once at runtime)

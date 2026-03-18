@@ -15,7 +15,12 @@ zdot_is_newer_or_missing() {
     if [[ ! -f "$dst" ]]; then
         return 0
     fi
+    # Check the resolved target mtime
     if [[ -f "$src" && "$src:A" -nt "$dst:A" ]]; then
+        return 0
+    fi
+    # Also check the symlink's own mtime (covers retargeted/recreated symlinks)
+    if [[ -L "$src" && "$src" -nt "$dst:A" ]]; then
         return 0
     fi
     return 1

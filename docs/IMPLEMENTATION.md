@@ -95,7 +95,7 @@ zdot/
 │   │   └── ...
 │   └── plugin-bundles/
 │       └── omz.zsh                  # OMZ plugin bundle (two-phase compinit, compdef queue)
-└── lib/                             # User modules
+└── modules/                             # User modules
     ├── xdg/
     │   └── xdg.zsh
     ├── brew/
@@ -273,7 +273,7 @@ zdot_has_tty     || return 0    # skip when no terminal I/O available
 
 ##### `_zdot_build_module_search_path()` (private)
 
-Populates `_ZDOT_MODULE_SEARCH_PATH` on first call. Reads the `zstyle ':zdot:modules' search-path` array, tilde-expands each entry, then appends `_ZDOT_LIB_DIR` as the final built-in fallback. Subsequent calls are no-ops (idempotent guard).
+Populates `_ZDOT_MODULE_SEARCH_PATH` on first call. Reads the `zstyle ':zdot:modules' search-path` array, tilde-expands each entry, then appends `_ZDOT_MODULE_DIR` as the final built-in fallback. Subsequent calls are no-ops (idempotent guard).
 
 ##### `zdot_load_module()` (public)
 
@@ -289,7 +289,7 @@ Searches the path for `<name>/<name>.zsh` and sets `REPLY` to the first match. R
 
 ##### `zdot_module_list()` (public)
 
-Lists all loaded modules from `_ZDOT_MODULES_LOADED`, annotating each with its source directory. Modules loaded from `lib/` are shown as `(lib)`; others show their full directory path.
+Lists all loaded modules from `_ZDOT_MODULES_LOADED`, annotating each with its source directory. Modules loaded from .modules/. are shown as `(modules)`; others show their full directory path.
 
 **Design Note**: `zdot_module_dir()` is also defined here — it allows module authors to retrieve their own directory at load time via the `_ZDOT_CURRENT_MODULE_DIR` context variable set by `_zdot_source_module`.
 
@@ -403,7 +403,7 @@ typeset -gA _ZDOT_MODULES_LOADED
 
 # module_name → absolute directory the module was loaded from (the module's own dir)
 typeset -gA _ZDOT_MODULE_SOURCE_DIR
-# Example: _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/lib/xdg"
+# Example: _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/modules/xdg"
 
 # Ordered list of directories to search when resolving a module by name.
 # Populated once by _zdot_build_module_search_path; lib/ is always last.
@@ -412,7 +412,7 @@ typeset -ga _ZDOT_MODULE_SEARCH_PATH
 
 # Transient: set during _zdot_source_module, unset immediately after sourcing
 typeset -g _ZDOT_CURRENT_MODULE_NAME   # e.g. "xdg"
-typeset -g _ZDOT_CURRENT_MODULE_DIR    # e.g. "/Users/user/.config/zdot/lib/xdg"
+typeset -g _ZDOT_CURRENT_MODULE_DIR    # e.g. "/Users/user/.config/zdot/modules/xdg"
 ```
 
 ### Global Arrays
@@ -869,7 +869,7 @@ zstyle ':zdot:modules' search-path \
     "${HOME}/.dotfiles/zsh-extra"
 ```
 
-`lib/` (`$_ZDOT_LIB_DIR`) is always appended as the final entry, so built-in modules
+`lib/` (`$_ZDOT_MODULE_DIR`) is always appended as the final entry, so built-in modules
 are available without any configuration. The path is built once on first use and
 cached in `_ZDOT_MODULE_SEARCH_PATH`.
 
@@ -938,7 +938,7 @@ zdot module clone xdg
 
 **Algorithm:**
 ```
-1. Scan ${ZDOTDIR}/lib/ directory
+1. Scan ${ZDOTDIR}/modules/ directory
 2. Find all *.zsh files (non-recursive, only lib/ directory itself)
 3. For each module file:
    a. Extract module name from filename
@@ -1135,7 +1135,7 @@ zdot_error "Failed to initialize: $error_message"
 **Output Sections:**
 
 1. **Loaded Modules** (lines 5-12):
-   - Lists all files sourced from `lib/` directory
+   - Lists all files sourced from .modules/. directory
    - Helps verify which modules are loaded
    - Extracted from `$ZDOTDIR/lib/**/*.zsh` files
 
@@ -1616,7 +1616,7 @@ Each module file (`*.zsh`) gets a co-located bytecode file:
 
 ```
 ~/.config/zsh/zdot/core/core.zsh      → core.zsh.zwc (co-located)
-~/.config/zsh/zdot/lib/git/git.zsh    → git.zsh.zwc (co-located)
+~/.config/zsh/zdot/modules/git/git.zsh    → git.zsh.zwc (co-located)
 ```
 
 Implementation:
@@ -1633,7 +1633,7 @@ source module.zsh              # Zsh uses module.zsh.zwc transparently
 Each function file gets its own co-located `.zwc` file:
 
 ```
-~/.config/zsh/zdot/lib/git/functions/
+~/.config/zsh/zdot/modules/git/functions/
 ├── git-status
 ├── git-status.zwc             # Per-file bytecode (co-located)
 ├── git-branch
@@ -1647,7 +1647,7 @@ zcompile git-status.zwc git-status
 zcompile git-branch.zwc git-branch
 
 # Add directory to fpath (Zsh finds .zwc automatically)
-fpath=(~/zdot/lib/git/functions $fpath)
+fpath=(~/zdot/modules/git/functions $fpath)
 autoload -Uz git-status git-branch
 ```
 
@@ -1797,7 +1797,7 @@ With zdot installed, bytecode files are co-located with source files:
 │   ├── cache.zsh
 │   ├── cache.zsh.zwc                  ← Co-located bytecode
 │   └── ...
-├── lib/
+├── modules/
 │   ├── git/
 │   │   ├── git.zsh
 │   │   ├── git.zsh.zwc                ← Co-located bytecode
@@ -1857,7 +1857,7 @@ zdot_cache_is_enabled && echo "Caching enabled" || echo "Caching disabled"
 
 # Verify .zwc files exist
 ls -la ~/.config/zsh/zdot/core/*.zwc
-ls -la ~/.config/zsh/zdot/lib/*/*.zwc
+ls -la ~/.config/zsh/zdot/modules/*/*.zwc
 
 # Invalidate and regenerate cache
 zdot_cache_invalidate
@@ -2037,7 +2037,7 @@ When adding features:
 **Debug Steps:**
 1. Check file location:
    ```zsh
-   ls -la ~/.dotfiles/.config/zsh/zdot/lib/mymodule/mymodule.zsh
+   ls -la ~/.dotfiles/.config/zsh/zdot/modules/mymodule/mymodule.zsh
    ```
 
 2. Check file is sourced:
@@ -2047,7 +2047,7 @@ When adding features:
 
 3. Check for syntax errors:
    ```zsh
-   zsh -n ~/.dotfiles/.config/zsh/zdot/lib/mymodule/mymodule.zsh
+   zsh -n ~/.dotfiles/.config/zsh/zdot/modules/mymodule/mymodule.zsh
    ```
 
 **Common Causes:**

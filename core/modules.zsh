@@ -7,8 +7,11 @@
 # ============================================================================
 
 # Build (once) the ordered list of directories to search for modules.
-# Reads zstyle ':zdot:modules' search-path (array) for user-supplied dirs,
-# then appends _ZDOT_LIB_DIR as the final built-in fallback.
+# Order:
+#   1. User-supplied paths from zstyle ':zdot:modules' search-path (tilde-expanded)
+#   2. XDG default user module dir: ${XDG_CONFIG_HOME}/zdot-modules (if it exists)
+#   3. Built-in modules dir: _ZDOT_MODULE_DIR (always included)
+# Non-existent directories from the zstyle list are silently skipped.
 # Cached in _ZDOT_MODULE_SEARCH_PATH after the first call.
 _zdot_build_module_search_path() {
     [[ ${#_ZDOT_MODULE_SEARCH_PATH} -gt 0 ]] && return 0
@@ -16,9 +19,17 @@ _zdot_build_module_search_path() {
     zstyle -a ':zdot:modules' search-path extra_paths
     local p
     for p in "${extra_paths[@]}"; do
-        _ZDOT_MODULE_SEARCH_PATH+=("${~p}")   # tilde-expand each entry
+        local _expanded="${~p}"
+        [[ -d "$_expanded" ]] && _ZDOT_MODULE_SEARCH_PATH+=("$_expanded")
     done
-    _ZDOT_MODULE_SEARCH_PATH+=("${_ZDOT_LIB_DIR}")
+    # XDG default: include automatically if it exists, no zstyle needed
+    local _xdg_default="${XDG_CONFIG_HOME:-${HOME}/.config}/zdot-modules"
+    if [[ -d "$_xdg_default" ]]; then
+        # Only add if not already present via zstyle
+        [[ " ${_ZDOT_MODULE_SEARCH_PATH[*]} " != *" ${_xdg_default} "* ]] && \
+            _ZDOT_MODULE_SEARCH_PATH+=("$_xdg_default")
+    fi
+    _ZDOT_MODULE_SEARCH_PATH+=("${_ZDOT_MODULE_DIR}")
 }
 
 # ============================================================================
@@ -104,8 +115,8 @@ zdot_module_list() {
     local module src
     for module in ${(ko)_ZDOT_MODULES_LOADED}; do
         src="${_ZDOT_MODULE_SOURCE_DIR[$module]:-unknown}"
-        if [[ "$src" == "${_ZDOT_LIB_DIR}/${module}" ]]; then
-            zdot_info "  ${module}  (lib)"
+        if [[ "$src" == "${_ZDOT_MODULE_DIR}/${module}" ]]; then
+            zdot_info "  ${module}  (modules)"
         else
             zdot_info "  ${module}  (${src})"
         fi

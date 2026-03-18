@@ -140,7 +140,7 @@ zdot info
 ```
 
 **Output includes:**
-- Key paths: `$ZDOT_DIR`, `$_ZDOT_LIB_DIR`, `$_ZDOT_CACHE_DIR`
+- Key paths: `$ZDOT_DIR`, `$_ZDOT_MODULE_DIR`, `$_ZDOT_CACHE_DIR`
 - Shell context: `$_ZDOT_IS_INTERACTIVE`, `$_ZDOT_IS_LOGIN`
 - Cache config: enabled flag, version string
 - Counts: plugins declared/loaded, hooks registered/executed, modules loaded
