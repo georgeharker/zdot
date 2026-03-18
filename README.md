@@ -865,9 +865,9 @@ keeps your config repo in sync across machines. Together they form a layered
 system: dotfiler manages the repo and symlink tree, zdot manages the zsh
 configuration inside it.
 
-zdot is not required by dotfiler, and dotfiler is not required by zdot. Each
+zdot does not require being in a dotfiler repor, and dotfiler is not required by zdot. Each
 works independently. When used together, dotfiler handles updating zdot
-itself as a registered component.
+itself as a registered component. Note: zdot will internally use dotfiler implementation to perform self-updates)
 
 ### Overview
 
