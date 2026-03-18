@@ -6,7 +6,7 @@ function _zdot() {
         'cache:cache management (status, invalidate, compile)'
         'hook:hook and execution-plan management (list, plan)'
         'plugin:plugin management (list, update, clean, reclone)'
-        'module:module management (list, user-list, user-clone)'
+        'module:module management (list, clone)'
         'completion:shell completion management (refresh)'
         'secret:secret management (refresh)'
         'update:self-update management (check-updates, apply)'
@@ -49,9 +49,8 @@ function _zdot() {
     )
 
     verbs_module=(
-        'list:list all loaded modules and their status'
-        'user-list:list loaded user modules'
-        'user-clone:copy a built-in module to the user modules directory'
+        'list:list all loaded modules and their source directory'
+        'clone:copy a module to the first user directory in the search path'
         'help:show help for module'
     )
 
@@ -158,10 +157,16 @@ function _zdot() {
                 plugin:clean)           _arguments -s "${flags_plugin_clean[@]}" ;;
                 update:check-updates)   _arguments -s "${flags_update[@]}" ;;
                 update:apply)           _arguments -s "${flags_update[@]}" ;;
-                module:user-clone)
-                    local -a builtin_modules
-                    builtin_modules=( ${_ZDOT_LIB_DIR}/*(N/:t) )
-                    _describe -t modules 'built-in module' builtin_modules
+                module:clone)
+                    # Offer all modules visible in the search path as clone candidates
+                    _zdot_build_module_search_path
+                    local -a all_modules
+                    local _sp
+                    for _sp in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
+                        all_modules+=( ${_sp}/*(N/:t) )
+                    done
+                    all_modules=( ${(u)all_modules} )   # deduplicate
+                    _describe -t modules 'module' all_modules
                     ;;
                 *)                      ;;
             esac

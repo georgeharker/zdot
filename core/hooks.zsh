@@ -1125,6 +1125,36 @@ zdot_verify_tools() {
     done
 }
 
+# Read tool list from zstyle at call time and verify each.
+# Usage: zdot_verify_tools_zstyle <zstyle-context> <default-tool...>
+# Reads array from zstyle; falls back to default list if unset.
+zdot_verify_tools_zstyle() {
+    local _ctx="$1"; shift
+    local -a _tools
+    zstyle -a "$_ctx" verify-tools _tools
+    [[ ${#_tools} -eq 0 ]] && _tools=("$@")
+    zdot_verify_tools "${_tools[@]}"
+}
+
+# Build a --provides-tool arg list from a zstyle tool list.
+# Usage: zdot_provides_tool_args <zstyle-context> <default-tool...>
+# Returns the arg array in $REPLY (as a scalar with args separated by \0).
+# Typical use: eval "$(zdot_provides_tool_args ':zdot:brew' op eza gh)"
+#   then use $reply array, or capture into an array directly:
+#   zdot_provides_tool_args ':zdot:brew' op eza gh
+#   zdot_simple_hook brew --provides brew-ready "${reply[@]}"
+zdot_provides_tool_args() {
+    local _ctx="$1"; shift
+    local -a _tools
+    zstyle -a "$_ctx" verify-tools _tools
+    [[ ${#_tools} -eq 0 ]] && _tools=("$@")
+    reply=()
+    local _t
+    for _t in "${_tools[@]}"; do
+        reply+=(--provides-tool "$_t")
+    done
+}
+
 # Internal helper to execute a single hook
 # Usage: _zdot_execute_hook <hook_id> <function_name> [stop_callback]
 # Returns:

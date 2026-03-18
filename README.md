@@ -11,7 +11,7 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that makes i
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Creating Modules](#creating-modules)
-- [User Modules](#user-modules)
+- [Module Search Path](#module-search-path)
 - [Core Functions Reference](#core-functions-reference)
 - [Hook System](#hook-system)
 - [Variants](#variants)
@@ -138,7 +138,7 @@ The system automatically:
 └── config/               # Static configuration files
 ```
 
-User modules live in a separate directory outside the core tree (see [User Modules](#user-modules)).
+User modules live in directories you control, outside the core `lib/` tree (see [Module Search Path](#module-search-path)).
 
 ### Basic Usage in .zshrc
 
@@ -234,23 +234,34 @@ zdot_register_hook _mymodule_init interactive noninteractive \
     --optional
 ```
 
-## User Modules
+## Module Search Path
 
-User modules let you add custom modules (or locally-modified copies of built-in modules) without
-touching the core `lib/` tree. They follow the same structure and load the same way; the framework
-keeps them separate so updates to `lib/` never overwrite your customisations.
+`zdot_load_module` resolves module names against an ordered list of directories.
+User-supplied directories are searched first; `lib/` is always the final fallback.
+This means a module in your own directory shadows the built-in module of the same name.
 
 ### Setup
 
-Tell zdot where your user modules live by adding a `zstyle` before `zdot_load_modules`:
+Add a `zstyle` before your `zdot_load_module` calls:
 
 ```zsh
-zstyle ':zdot:user-modules' path ~/path/to/my-modules
+zstyle ':zdot:modules' search-path ~/path/to/my-modules
 ```
+
+Multiple paths are accepted (array):
+
+```zsh
+zstyle ':zdot:modules' search-path \
+    "${XDG_CONFIG_HOME}/zsh/modules" \
+    "${HOME}/.dotfiles/zsh-extra"
+```
+
+The path list is built once on first use. `lib/` is always appended last.
 
 ### Module structure
 
-Identical to built-in modules — one directory per module, main file named the same as the directory:
+Identical to built-in modules — one directory per module, main file named the same
+as the directory:
 
 ```
 ~/my-modules/
@@ -258,21 +269,21 @@ Identical to built-in modules — one directory per module, main file named the 
     └── mymodule.zsh     # Main module file
 ```
 
-### Loading user modules
+### Loading modules
 
 ```zsh
-# In your .zshrc (after the zstyle and before zdot_build_execution_plan):
-zdot_load_user_module mymodule
+# In your .zshrc, before zdot_init:
+zdot_load_module mymodule
 ```
 
-The framework tracks user modules in `_ZDOT_USER_MODULES_LOADED` in addition to the shared
-`_ZDOT_MODULES_LOADED` map, so there are no name collisions and every module is sourced at
-most once regardless of whether it is built-in or user-provided.
+The same call works for both built-in and user-supplied modules. The first directory
+in the search path that contains `mymodule/mymodule.zsh` wins. All modules share a
+single dedup registry, so each module is sourced at most once.
 
-### Cloning a built-in module as a starting point
+### Cloning a module as a starting point
 
 ```zsh
-zdot module user-clone brew   # copies lib/brew/ into your user modules directory
+zdot module clone brew   # copies lib/brew/ into the first user directory in the search path
 ```
 
 The destination must not already exist. Edit the copy freely — the original in `lib/` is untouched.
@@ -281,16 +292,16 @@ The destination must not already exist. Edit the copy freely — the original in
 
 | Command | Description |
 |---|---|
-| `zdot module user-list` | List loaded user modules |
-| `zdot module user-clone <name>` | Copy a built-in module to the user modules directory |
+| `zdot module list` | List all loaded modules and their source directory |
+| `zdot module clone <name>` | Copy a module to the first user directory in the search path |
 
 ### Public API
 
 | Function | Description |
 |---|---|
-| `zdot_load_user_module <name>` | Source a user module (dedup-safe) |
-| `zdot_user_module_list` | Print loaded user module names |
-| `zdot_user_module_path <name>` | Return the path to a user module's main file |
+| `zdot_load_module <name>` | Load a module (search path, dedup-safe) |
+| `zdot_module_path <name>` | Return the path to a module's main file (sets `REPLY`) |
+| `zdot_module_list` | Print all loaded modules with source directory |
 
 ---
 

@@ -3,6 +3,25 @@
 # Provides module lifecycle management
 
 # ============================================================================
+# Module Search Path
+# ============================================================================
+
+# Build (once) the ordered list of directories to search for modules.
+# Reads zstyle ':zdot:modules' search-path (array) for user-supplied dirs,
+# then appends _ZDOT_LIB_DIR as the final built-in fallback.
+# Cached in _ZDOT_MODULE_SEARCH_PATH after the first call.
+_zdot_build_module_search_path() {
+    [[ ${#_ZDOT_MODULE_SEARCH_PATH} -gt 0 ]] && return 0
+    local -a extra_paths
+    zstyle -a ':zdot:modules' search-path extra_paths
+    local p
+    for p in "${extra_paths[@]}"; do
+        _ZDOT_MODULE_SEARCH_PATH+=("${~p}")   # tilde-expand each entry
+    done
+    _ZDOT_MODULE_SEARCH_PATH+=("${_ZDOT_LIB_DIR}")
+}
+
+# ============================================================================
 # Module Loading
 # ============================================================================
 
@@ -20,22 +39,30 @@ zdot_module_dir() {
     fi
 }
 
-# Get the path to a module's main file
+# Find the first occurrence of a module across the search path.
 # Usage: zdot_module_path <module-name>; local path="$REPLY"
+# Sets REPLY to the full path of <name>/<name>.zsh, or returns 1 if not found.
 zdot_module_path() {
     local module="$1"
-
     if [[ -z "$module" ]]; then
         zdot_error "zdot_module_path: module name required"
         return 1
     fi
-
-    REPLY="${_ZDOT_LIB_DIR}/${module}/${module}.zsh"
+    _zdot_build_module_search_path
+    local dir
+    for dir in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
+        local candidate="${dir}/${module}/${module}.zsh"
+        if [[ -f "$candidate" ]]; then
+            REPLY="$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Internal: load a module from an explicit file path.
-# Handles dedup, existence check, source/cache, marks _ZDOT_MODULES_LOADED.
-# Extra tracking arrays (e.g. _ZDOT_USER_MODULES_LOADED) are the caller's responsibility.
+# Handles dedup, existence check, source/cache, marks _ZDOT_MODULES_LOADED
+# and _ZDOT_MODULE_SOURCE_DIR.
 # Usage: _zdot_load_module_file <module-name> <module-file>
 _zdot_load_module_file() {
     local module="$1" module_file="$2"
@@ -46,95 +73,42 @@ _zdot_load_module_file() {
     fi
     _zdot_source_module "$module" "$module_file"
     _ZDOT_MODULES_LOADED[$module]=1
+    _ZDOT_MODULE_SOURCE_DIR[$module]="${module_file:h}"
 }
 
-# Load a module by name
+# Load a module by name, searching the configured path.
+# User-supplied directories (zstyle ':zdot:modules' search-path) are searched
+# first; lib/ is always the final fallback. First match wins.
 # Usage: zdot_load_module <module-name>
 zdot_load_module() {
     local module="$1"
     [[ -z "$module" ]] && { zdot_error "zdot_load_module: module name required"; return 1 }
-    _zdot_load_module_file "$module" "${_ZDOT_LIB_DIR}/${module}/${module}.zsh"
-}
-
-# List all loaded modules
-# Usage: zdot_module_list
-zdot_module_list() {
-    zdot_report "Loaded modules:"
-    for module in ${(k)_ZDOT_MODULES_LOADED}; do
-        zdot_info "  $module"
+    _zdot_build_module_search_path
+    local dir module_file
+    for dir in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
+        module_file="${dir}/${module}/${module}.zsh"
+        if [[ -f "$module_file" ]]; then
+            _zdot_load_module_file "$module" "$module_file"
+            return $?
+        fi
     done
-}
-
-# ============================================================================
-# User Module Loading
-# ============================================================================
-
-# Resolve the user modules directory from zstyle or cached global
-# Usage: _zdot_user_modules_dir; local dir="$REPLY"
-# Sets REPLY to the directory path, or returns 1 if unset
-_zdot_user_modules_dir() {
-    if [[ -n "$_ZDOT_USER_MODULES_DIR" ]]; then
-        REPLY="$_ZDOT_USER_MODULES_DIR"
-        return 0
-    fi
-
-    local dir
-    zstyle -s ':zdot:user-modules' path dir
-    if [[ -n "$dir" ]]; then
-        dir="${~dir}"
-        _ZDOT_USER_MODULES_DIR="$dir"
-        REPLY="$dir"
-        return 0
-    fi
-
+    zdot_error "zdot_load_module: module '${module}' not found in search path"
     return 1
 }
 
-# Get the path to a user module's main file
-# Usage: zdot_user_module_path <module-name>
-zdot_user_module_path() {
-    local module="$1"
-
-    if [[ -z "$module" ]]; then
-        zdot_error "zdot_user_module_path: module name required"
-        return 1
-    fi
-
-    local user_dir
-    if ! _zdot_user_modules_dir; then
-        zdot_error "zdot_user_module_path: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
-        return 1
-    fi
-    user_dir="$REPLY"
-
-    REPLY="${user_dir}/${module}/${module}.zsh"
-}
-
-# Load a user module by name
-# Usage: zdot_load_user_module <module-name>
-zdot_load_user_module() {
-    local module="$1"
-    [[ -z "$module" ]] && { zdot_error "zdot_load_user_module: module name required"; return 1 }
-    local user_dir
-    if ! _zdot_user_modules_dir; then
-        zdot_error "zdot_load_user_module: user modules directory not configured (zstyle ':zdot:user-modules' path <dir>)"
-        return 1
-    fi
-    user_dir="$REPLY"
-    _zdot_load_module_file "$module" "${user_dir}/${module}/${module}.zsh" || return 1
-    _ZDOT_USER_MODULES_LOADED[$module]=1
-}
-
-# List all loaded user modules
-# Usage: zdot_user_module_list
-zdot_user_module_list() {
-    if [[ ${#_ZDOT_USER_MODULES_LOADED} -eq 0 ]]; then
-        zdot_info "No user modules loaded."
-        return 0
-    fi
-    zdot_report "Loaded user modules:"
-    for module in ${(k)_ZDOT_USER_MODULES_LOADED}; do
-        zdot_info "  $module"
+# List all loaded modules with their source directory.
+# Modules from lib/ are labelled "(lib)"; others show their directory path.
+# Usage: zdot_module_list
+zdot_module_list() {
+    zdot_report "Loaded modules:"
+    local module src
+    for module in ${(ko)_ZDOT_MODULES_LOADED}; do
+        src="${_ZDOT_MODULE_SOURCE_DIR[$module]:-unknown}"
+        if [[ "$src" == "${_ZDOT_LIB_DIR}/${module}" ]]; then
+            zdot_info "  ${module}  (lib)"
+        else
+            zdot_info "  ${module}  (${src})"
+        fi
     done
 }
 

@@ -333,9 +333,8 @@ zdot_cache_invalidate() {
 The framework's named module loading follows a strict call chain:
 
 ```
-zdot_module_load <name>           (core/modules.zsh — public entry point)
-  └── zdot_user_module_load <name>    OR
-      _zdot_load_module_file <name> <file>   (core/modules.zsh — dedup + existence check)
+zdot_load_module <name>           (core/modules.zsh — search path walk, public entry point)
+  └── _zdot_load_module_file <name> <file>   (core/modules.zsh — dedup + existence check)
             └── _zdot_source_module <name> <file>   (core/cache.zsh — compile + source)
                       └── zdot_cache_compile_file <file>   (compile if stale)
                       └── source <file>              (Zsh uses .zwc automatically)

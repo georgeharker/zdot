@@ -86,7 +86,7 @@ zdot/
 │   ├── functions.zsh                # Function autoloading setup
 │   ├── hooks.zsh                    # Hook system (943 lines)
 │   ├── logging.zsh                  # Logging functions (56 lines)
-│   ├── modules.zsh                  # Module loading pipeline (zdot_load_module, zdot_load_user_module, _zdot_load_module_file)
+│   ├── modules.zsh                  # Module loading pipeline (zdot_load_module, _zdot_build_module_search_path, _zdot_load_module_file)
 │   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer) + sugar functions (zdot_define_module, zdot_simple_hook)
 │   ├── utils.zsh                    # Utility functions (zdot_interactive, zdot_login, …)
 │   ├── functions/                   # Autoloaded functions (zdot, zdot_hooks_list, …)
@@ -263,34 +263,33 @@ zdot_has_tty     || return 0    # skip when no terminal I/O available
 #### core/modules.zsh (Module Loading System)
 
 **Responsibilities:**
-- Built-in module loading (`zdot_load_module`)
-- User module loading (`zdot_load_user_module`)
+- Module search path management (`_zdot_build_module_search_path`)
+- Module loading with first-match search (`zdot_load_module`)
 - Deduplication and existence checking (`_zdot_load_module_file`)
-- User modules directory resolution (`_zdot_user_modules_dir`)
-- Module path helpers (`zdot_module_path`, `zdot_user_module_path`)
-- Module listing (`zdot_module_list`, `zdot_user_module_list`)
+- Module path resolution across the search path (`zdot_module_path`)
+- Module listing with provenance (`zdot_module_list`)
 
 **Key Functions:**
 
-##### `_zdot_load_module_file()` (private, lines 40–49)
+##### `_zdot_build_module_search_path()` (private)
 
-Internal entry point for loading any module file. Handles deduplication, existence checking, and marks `_ZDOT_MODULES_LOADED`. All extra per-category tracking (e.g. `_ZDOT_USER_MODULES_LOADED`) is the caller's responsibility.
+Populates `_ZDOT_MODULE_SEARCH_PATH` on first call. Reads the `zstyle ':zdot:modules' search-path` array, tilde-expands each entry, then appends `_ZDOT_LIB_DIR` as the final built-in fallback. Subsequent calls are no-ops (idempotent guard).
 
-##### `zdot_load_module()` (lines 53–57)
+##### `zdot_load_module()` (public)
 
-Public API for loading a named built-in module from `$_ZDOT_LIB_DIR/<name>/<name>.zsh`. Delegates to `_zdot_load_module_file`.
+Public API for loading a named module. Builds the search path if needed, then walks each directory looking for `<name>/<name>.zsh`. The first match is loaded via `_zdot_load_module_file`. User-supplied directories shadow built-in modules of the same name by appearing earlier in the path. Errors if no match is found.
 
-##### `zdot_load_user_module()` (lines 114–124)
+##### `_zdot_load_module_file()` (private)
 
-Public API for loading a named user module. Resolves the user modules directory via `_zdot_user_modules_dir()`, delegates to `_zdot_load_module_file`, then sets `_ZDOT_USER_MODULES_LOADED[$module]=1`.
+Internal entry point for loading any module file. Handles deduplication (returns immediately if `_ZDOT_MODULES_LOADED[$module]` is set), existence checking, and records the module in both `_ZDOT_MODULES_LOADED` and `_ZDOT_MODULE_SOURCE_DIR`.
 
-##### `_zdot_user_modules_dir()` (private, lines 75–91)
+##### `zdot_module_path()` (public)
 
-Resolves and caches the user modules directory. First checks `$_ZDOT_USER_MODULES_DIR`; if unset, reads the zstyle value for `':zdot:user-modules' path`, expands `~`, caches in `_ZDOT_USER_MODULES_DIR`, and prints it. Returns 1 if unconfigured.
+Searches the path for `<name>/<name>.zsh` and sets `REPLY` to the first match. Returns 1 if the module is not found anywhere in the path.
 
-##### `zdot_user_module_list()` (lines 128–137)
+##### `zdot_module_list()` (public)
 
-Lists all loaded user modules from `_ZDOT_USER_MODULES_LOADED`.
+Lists all loaded modules from `_ZDOT_MODULES_LOADED`, annotating each with its source directory. Modules loaded from `lib/` are shown as `(lib)`; others show their full directory path.
 
 **Design Note**: `zdot_module_dir()` is also defined here — it allows module authors to retrieve their own directory at load time via the `_ZDOT_CURRENT_MODULE_DIR` context variable set by `_zdot_source_module`.
 
@@ -402,13 +401,14 @@ typeset -gA _ZDOT_HOOKS_EXECUTED
 typeset -gA _ZDOT_MODULES_LOADED
 # Example: _ZDOT_MODULES_LOADED["xdg"]=1
 
-# User-loaded module names → 1 (subset of _ZDOT_MODULES_LOADED; user modules only)
-typeset -gA _ZDOT_USER_MODULES_LOADED
-# Example: _ZDOT_USER_MODULES_LOADED["my-custom"]=1
+# module_name → absolute directory the module was loaded from (the module's own dir)
+typeset -gA _ZDOT_MODULE_SOURCE_DIR
+# Example: _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/lib/xdg"
 
-# Cached resolved path to the user modules directory (set by _zdot_user_modules_dir)
-typeset -g _ZDOT_USER_MODULES_DIR
-# Example: _ZDOT_USER_MODULES_DIR="/Users/user/.config/zdot-user"
+# Ordered list of directories to search when resolving a module by name.
+# Populated once by _zdot_build_module_search_path; lib/ is always last.
+typeset -ga _ZDOT_MODULE_SEARCH_PATH
+# Example: _ZDOT_MODULE_SEARCH_PATH=("/Users/user/.config/zsh/modules" "/Users/user/.config/zdot/lib")
 
 # Transient: set during _zdot_source_module, unset immediately after sourcing
 typeset -g _ZDOT_CURRENT_MODULE_NAME   # e.g. "xdg"
@@ -794,23 +794,24 @@ done
 The framework loads named modules through a three-layer call chain:
 
 ```
-zdot_load_module <name>          # public — load a built-in module
-zdot_load_user_module <name>     # public — load a user module
+zdot_load_module <name>                  # public — search path walk, first match wins
+        │
+        │  _zdot_build_module_search_path  (lazy, one-time)
+        │  walk _ZDOT_MODULE_SEARCH_PATH for <name>/<name>.zsh
+        ▼
+_zdot_load_module_file <name> <file>     # private — dedup + existence check + load
         │
         ▼
-_zdot_load_module_file <name> <file>   # private — dedup + existence check + load
+_zdot_source_module <name> <file>        # private — compile if stale, set context vars, source
         │
         ▼
-_zdot_source_module <name> <file>      # private — compile if stale, set context vars, source
-        │
-        ▼
-zdot_cache_compile_file <file>         # compile .zsh → .zwc if needed (core/cache.zsh)
+zdot_cache_compile_file <file>           # compile .zsh → .zwc if needed (core/cache.zsh)
 source <compiled-or-original-file>
 ```
 
 #### `_zdot_load_module_file` (core/modules.zsh)
 
-Central private helper. Both `zdot_load_module` and `zdot_load_user_module` delegate to it.
+Central private helper. `zdot_load_module` delegates to it after locating the module file via the search path.
 
 ```zsh
 _zdot_load_module_file() {
@@ -853,46 +854,60 @@ _zdot_source_module() {
 
 ---
 
-### User Module Loading
+### Module Search Path
 
-User modules are community or personal modules that live outside the zdot library tree. They use the same structure as built-in modules and are loaded through the same pipeline.
+`zdot_load_module` resolves module names against an ordered list of directories
+(`_ZDOT_MODULE_SEARCH_PATH`). The first directory that contains `<name>/<name>.zsh`
+wins. This allows user-supplied directories to shadow built-in modules.
 
 #### Configuration
 
 ```zsh
-# In your .zshrc or zdot init file:
-zstyle ':zdot:user-modules' path ~/path/to/user-modules
+# In your .zshrc, before zdot_load_module calls:
+zstyle ':zdot:modules' search-path \
+    "${XDG_CONFIG_HOME}/zsh/modules" \
+    "${HOME}/.dotfiles/zsh-extra"
 ```
 
-The path is resolved once by `_zdot_user_modules_dir` and cached in `_ZDOT_USER_MODULES_DIR`.
+`lib/` (`$_ZDOT_LIB_DIR`) is always appended as the final entry, so built-in modules
+are available without any configuration. The path is built once on first use and
+cached in `_ZDOT_MODULE_SEARCH_PATH`.
 
 #### Module Structure
 
+Identical to built-in modules — one directory per module, main file named the same
+as the directory:
+
 ```
-<user-modules-dir>/
+<user-dir>/
 └── <name>/
     └── <name>.zsh          # entry point (same convention as built-in modules)
 ```
 
-#### Loading a User Module
+#### Loading a Module
 
 ```zsh
-zdot_load_user_module my-custom
+zdot_load_module my-custom
 ```
 
-This calls `_zdot_load_module_file "my-custom" "${_ZDOT_USER_MODULES_DIR}/my-custom/my-custom.zsh"` and additionally sets `_ZDOT_USER_MODULES_LOADED[$module]=1` so user modules can be listed independently.
+`zdot_load_module` walks the search path, loads from the first matching directory,
+and records the source in `_ZDOT_MODULE_SOURCE_DIR[$module]`. Both built-in and
+user-supplied modules go through the same pipeline.
 
 #### Deduplication
 
-User modules share `_ZDOT_MODULES_LOADED` with built-in modules. If a built-in module named `foo` is already loaded, calling `zdot_load_user_module foo` is a no-op. Choose unique names for user modules.
+All modules share `_ZDOT_MODULES_LOADED`. Loading the same name twice is a no-op
+regardless of which directory it came from.
 
-#### Cloning a Built-in Module
+#### Cloning a Module
 
-The `user-clone` CLI command copies a built-in module into the user modules directory as a starting point for customisation:
+The `clone` CLI command copies any module (by name) to the first user-supplied
+directory in the search path, as a starting point for customisation:
 
 ```zsh
-zdot module user-clone xdg
-# copies $_ZDOT_LIB_DIR/xdg/ → <user-modules-dir>/xdg/
+zdot module clone xdg
+# finds xdg in the search path (lib/ by default)
+# copies it to <first-user-dir>/xdg/
 # fails if destination already exists
 ```
 
@@ -900,22 +915,22 @@ zdot module user-clone xdg
 
 | Function | Description |
 |---|---|
-| `zdot_load_user_module <name>` | Load a user module (deduped) |
-| `zdot_user_module_list` | Print names of all loaded user modules |
-| `zdot_user_module_path <name>` | Return the path to a user module's main file |
+| `zdot_load_module <name>` | Load a module (search path, deduped) |
+| `zdot_module_path <name>` | Return the path to a module's main file (REPLY) |
+| `zdot_module_list` | Print all loaded modules with source directory |
 
 #### CLI Reference
 
 | Command | Description |
 |---|---|
-| `zdot module user-list` | List loaded user modules |
-| `zdot module user-clone <name>` | Clone a built-in module into user modules dir |
+| `zdot module list` | List all loaded modules with their source directory |
+| `zdot module clone <name>` | Clone a module into the first user directory |
 
 ---
 
 ### Automatic Module Discovery
 
-> **Note**: For user configurations, explicit loading via `zdot_load_module` / `zdot_load_user_module`
+> **Note**: For user configurations, explicit loading via `zdot_load_module`
 > is the preferred approach. `zdot_load_modules()` is used internally during framework initialisation
 > and is not intended for direct use in module or user init files.
 

@@ -59,12 +59,23 @@ zdot_get_completions_dir() {
 # ============================================================================
 
 typeset -gA _ZDOT_PHASES          # phase_name@context -> array of hook functions
-typeset -gA _ZDOT_MODULES_LOADED  # module_name -> 1 (loaded status)
-typeset -gA _ZDOT_HOOK_MODULES    # hook_function -> module_name (tracks which module registered each hook)
-typeset -g _ZDOT_CURRENT_MODULE_DIR  # Set by zdot_load_module, used by modules
+typeset -gA _ZDOT_MODULES_LOADED    # module_name -> 1 (loaded status)
+typeset -gA _ZDOT_HOOK_MODULES      # hook_function -> module_name (tracks which module registered each hook)
+typeset -g _ZDOT_CURRENT_MODULE_DIR   # Set by zdot_load_module, used by modules
 typeset -g _ZDOT_CURRENT_MODULE_NAME  # Set by zdot_load_module, module name being loaded
-typeset -g  _ZDOT_USER_MODULES_DIR     # Resolved lazily from zstyle ':zdot:user-modules' path
-typeset -gA _ZDOT_USER_MODULES_LOADED  # user module_name -> 1 (separate from built-in tracking)
+
+# Ordered list of directories to search when resolving a module by name.
+# Populated lazily by _zdot_build_module_search_path from
+# zstyle ':zdot:modules' search-path (array); _ZDOT_LIB_DIR is always appended last.
+# Example zstyle:
+#   zstyle ':zdot:modules' search-path \
+#       "${XDG_CONFIG_HOME}/zsh/modules" \
+#       "${HOME}/.dotfiles/zsh-extra"
+typeset -ga _ZDOT_MODULE_SEARCH_PATH
+
+# module_name -> absolute directory it was loaded from (the module's own dir, not the search root)
+# e.g. _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/lib/xdg"
+typeset -gA _ZDOT_MODULE_SOURCE_DIR
 
 # Context detection state (computed once at runtime)
 typeset -g _ZDOT_IS_INTERACTIVE   # Set to 1 if interactive shell, 0 otherwise

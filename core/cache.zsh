@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="19"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="20"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -149,19 +149,19 @@ zdot_cache_compile_all() {
         done
     fi
 
-    # Compile library modules
-    local lib_dir="${_ZDOT_LIB_DIR}"
-    if [[ -d "$lib_dir" ]]; then
-        for module_dir in "$lib_dir"/*(N/); do
-            local module_name="${module_dir:t}"
-            local module_file="${module_dir}/${module_name}.zsh"
-            if [[ -f "$module_file" ]]; then
-                if ! zdot_cache_compile_file "$module_file"; then
-                    failed=1
-                fi
+    # Compile every module that was actually loaded, using the recorded source dir.
+    # This is path-model-correct: it only compiles files we know about, regardless
+    # of which directory they came from.
+    local module src_dir module_file
+    for module in "${(k)_ZDOT_MODULE_SOURCE_DIR}"; do
+        src_dir="${_ZDOT_MODULE_SOURCE_DIR[$module]}"
+        module_file="${src_dir}/${module}.zsh"
+        if [[ -f "$module_file" ]]; then
+            if ! zdot_cache_compile_file "$module_file"; then
+                failed=1
             fi
-        done
-    fi
+        fi
+    done
 
     if [[ $failed -eq 1 ]]; then
         zdot_error "zdot_cache_compile_all: some compilations failed"
@@ -491,6 +491,21 @@ load_cache() {
         fi
     done
 
+    # Also check user module directories in the search path
+    _zdot_build_module_search_path
+    local _sp_dir
+    for _sp_dir in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
+        [[ "$_sp_dir" == "$lib_dir" ]] && continue   # already checked above
+        for module_dir in "$_sp_dir"/*(N/); do
+            local module_name="${module_dir:t}"
+            local module_file="${module_dir}/${module_name}.zsh"
+            if [[ -f "$module_file" ]] && zdot_is_newer_or_missing "$module_file" "$plan_file"; then
+                zdot_verbose "zdot: cache: invalidated — user module newer: $module_name"
+                return 1
+            fi
+        done
+    done
+
     local zdot_entry="${ZDOT_DIR}/zdot.zsh"
     if [[ -f "$zdot_entry" ]] && zdot_is_newer_or_missing "$zdot_entry" "$plan_file"; then
         zdot_verbose "zdot: cache: invalidated — zdot.zsh modified"
@@ -558,9 +573,8 @@ zdot_cache_invalidate() {
         zdot_cache_create_dirs
     fi
 
-    # Remove co-located .zwc files from core and lib directories
+    # Remove co-located .zwc files from core directory
     local core_dir="${ZDOT_DIR}/core"
-    local lib_dir="${_ZDOT_LIB_DIR}"
 
     # Remove compiled core files
     if [[ -d "$core_dir" ]]; then
@@ -571,9 +585,24 @@ zdot_cache_invalidate() {
         done
     fi
 
-    # Remove compiled library modules
-    if [[ -d "$lib_dir" ]]; then
-        for module_dir in "$lib_dir"/*(N/); do
+    # Remove compiled module files using the source-dir map.
+    # This is path-model-correct: removes .zwc for every loaded module
+    # regardless of which directory (lib/ or user) it came from.
+    local module src_dir
+    for module in "${(k)_ZDOT_MODULE_SOURCE_DIR}"; do
+        src_dir="${_ZDOT_MODULE_SOURCE_DIR[$module]}"
+        for zwc_file in "${src_dir}"/*.zwc(N); do
+            if [[ -f "$zwc_file" ]]; then
+                rm -f "$zwc_file"
+            fi
+        done
+    done
+
+    # Fallback: if no modules are loaded (e.g. called before zdot_init),
+    # fall back to scanning lib/ directly so a bare `zdot cache invalidate`
+    # still clears lib/ bytecode.
+    if [[ ${#_ZDOT_MODULE_SOURCE_DIR} -eq 0 && -d "${_ZDOT_LIB_DIR}" ]]; then
+        for module_dir in "${_ZDOT_LIB_DIR}"/*(N/); do
             for zwc_file in "$module_dir"/*.zwc(N); do
                 if [[ -f "$zwc_file" ]]; then
                     rm -f "$zwc_file"
@@ -610,20 +639,33 @@ zdot_cache_stats() {
     # Get current shell context
     _zdot_cache_context_suffix
     local context_suffix="$REPLY"
-    
-    # Count co-located .zwc files in core/ and lib/
+
+    # Count co-located .zwc files.
+    # Core: scan core/ directory directly.
+    # Modules: use the source-dir map so we count exactly what was loaded,
+    # from wherever it came from (lib/ or user search-path dirs).
     local core_count=0
     local lib_count=0
-    
+    local user_count=0
+
     if [[ -d "${ZDOT_DIR}/core" ]]; then
-        core_count=$(find "${ZDOT_DIR}/core" -name "*.zwc" 2>/dev/null | wc -l | tr -d ' ')
+        core_count=$(find "${ZDOT_DIR}/core" -maxdepth 1 -name "*.zwc" 2>/dev/null | wc -l | tr -d ' ')
     fi
-    
-    if [[ -d "${_ZDOT_LIB_DIR}" ]]; then
-        lib_count=$(find "${_ZDOT_LIB_DIR}" -name "*.zwc" 2>/dev/null | wc -l | tr -d ' ')
-    fi
-    
-    local compiled_count=$((core_count + lib_count))
+
+    local module src_dir
+    for module in "${(k)_ZDOT_MODULE_SOURCE_DIR}"; do
+        src_dir="${_ZDOT_MODULE_SOURCE_DIR[$module]}"
+        local zwc_file="${src_dir}/${module}.zsh.zwc"
+        if [[ -f "$zwc_file" ]]; then
+            if [[ "$src_dir" == "${_ZDOT_LIB_DIR}/${module}" ]]; then
+                (( lib_count++ ))
+            else
+                (( user_count++ ))
+            fi
+        fi
+    done
+
+    local compiled_count=$(( core_count + lib_count + user_count ))
     
     # Check for context-specific execution plan
     local plan_file="${_ZDOT_CACHE_DIR}/plans/execution_plan_${context_suffix}.zsh"
@@ -637,6 +679,7 @@ zdot_cache_stats() {
     echo "Compiled modules (co-located): $compiled_count"
     echo "  - Core modules: $core_count"
     echo "  - Lib modules: $lib_count"
+    echo "  - User modules: $user_count"
     echo "Execution plan cached: $plan_exists"
 
     if [[ $plan_exists -eq 1 ]]; then

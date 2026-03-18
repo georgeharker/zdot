@@ -17,7 +17,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | `cache` | `status`, `invalidate`, `compile` |
 | `hook` | `list [-v] [-a]`, `plan` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
-| `module` | `list`, `user-list`, `user-clone <name>` |
+| `module` | `list`, `clone <name>` |
 | `completion` | `refresh` |
 | `secret` | `refresh` |
 | `info` | *(no verb)* |
@@ -91,19 +91,19 @@ zdot plugin reclone
 
 ## module
 
-Module inspection and user module management.
+Module inspection and management.
 
 ```
-zdot module list               # List all loaded built-in modules
-zdot module user-list          # List all loaded user modules
-zdot module user-clone <name>  # Copy a built-in module into the user modules directory
+zdot module list           # List all loaded modules with their source directory
+zdot module clone <name>   # Copy a module to the first user directory in the search path
 ```
 
-`user-clone` copies `$_ZDOT_LIB_DIR/<name>/` into the user modules directory as a starting
-point for local customisation. Fails if the destination already exists.
+`clone` finds the module via the search path (user directories first, then `lib/`) and
+copies it into the first non-`lib/` directory in the search path as a starting point
+for local customisation. Fails if the destination already exists.
 
-**Implementation**: delegates to `zdot_module_list`, `zdot_user_module_list`,
-`zdot_load_user_module` (core/modules.zsh).
+**Implementation**: delegates to `zdot_module_list` and the `clone` dispatch block
+in `core/functions/zdot`.
 
 ---
 
