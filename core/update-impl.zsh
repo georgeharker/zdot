@@ -237,7 +237,9 @@ _zdot_update_hook_plan() {
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
         # Fetch to materialise _new objects locally for build_file_lists.
-        git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>/dev/null
+        local _fetch_err
+        _fetch_err=$(git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>&1 >/dev/null) || \
+            log_debug "zdot: plan: fetch ${_remote}/${_branch} failed: ${_fetch_err}"
     elif [[ "$_phase" == components ]]; then
         # Phase components: self-directed. No hint; fetch own remote, advance to tip.
         # _update_core_component_tip_range handles topology differences:
