@@ -295,7 +295,8 @@ _zdot_update_hook_plan() {
 
     # Build file lists using the shared update_core helper
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
-    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}"
+    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}" || \
+        zdot_warn "zdot: file list unavailable — unpack may be incomplete"
 
     local _nu=${#_update_core_files_to_unpack[@]}
     local _nr=${#_update_core_files_to_remove[@]}
