@@ -147,16 +147,11 @@ User modules live in directories you control, outside the core `lib/` tree (see 
 
 ```zsh
 # Source the zdot system
-source "${ZDOTDIR:-$HOME/.config/zsh}/zdot/zdot.zsh"
+source "${XDG_CONFIG_HOME:-${HOME}/.config}/zdot/zdot.zsh"
 
-# Load all modules from lib/ directory
-zdot_load_modules
 
-# Build execution plan from registered hooks
-zdot_build_execution_plan
-
-# Execute all hooks in dependency order
-zdot_execute_all
+zdot_load_module keybinds       # Key bindings
+zdot_init
 ```
 
 ## Quickstart: dotfiler + zdot from scratch
