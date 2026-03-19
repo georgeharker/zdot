@@ -482,9 +482,17 @@ load_cache() {
         fi
     done
 
-    for module_dir in ""/*(N/); do
-        local module_name="${module_dir:t}"
-        local module_file="${module_dir}/${module_name}.zsh"
+    local _builtin_mod_dir="${_ZDOT_MODULE_DIR}"
+
+    # Check the built-in modules directory itself (catches new/removed modules)
+    if [[ -d "$_builtin_mod_dir" ]] && zdot_is_newer_or_missing "$_builtin_mod_dir" "$plan_file"; then
+        zdot_verbose "zdot: cache: invalidated — modules directory changed (new/removed module)"
+        return 1
+    fi
+
+    for _mod_entry in "$_builtin_mod_dir"/*(N/); do
+        local module_name="${_mod_entry:t}"
+        local module_file="${_mod_entry}/${module_name}.zsh"
         if [[ -f "$module_file" ]] && zdot_is_newer_or_missing "$module_file" "$plan_file"; then
             zdot_verbose "zdot: cache: invalidated — module newer: $module_name"
             return 1
@@ -495,7 +503,14 @@ load_cache() {
     _zdot_build_module_search_path
     local _sp_dir
     for _sp_dir in "${_ZDOT_MODULE_SEARCH_PATH[@]}"; do
-        [[ "$_sp_dir" == "" ]] && continue   # already checked above
+        [[ "$_sp_dir" == "$_builtin_mod_dir" ]] && continue   # already checked above
+
+        # Check the user directory itself (catches new/removed modules)
+        if [[ -d "$_sp_dir" ]] && zdot_is_newer_or_missing "$_sp_dir" "$plan_file"; then
+            zdot_verbose "zdot: cache: invalidated — user module directory changed: $_sp_dir"
+            return 1
+        fi
+
         for module_dir in "$_sp_dir"/*(N/); do
             local module_name="${module_dir:t}"
             local module_file="${module_dir}/${module_name}.zsh"

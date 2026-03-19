@@ -4,24 +4,34 @@
 # Utility Functions
 # ============================================================================
 
-# Check if source file is newer than destination or destination is missing.
-# Resolves symlinks on both paths via :A (zsh builtin, faster than realpath)
-# so that mtime comparisons use the real file mtimes, not the symlink mtimes.
-# This is important because zsh's -nt uses lstat() and does not follow symlinks.
+# Check if source is newer than destination or destination is missing.
+# Works with files and directories.
+# Handles symlink-to-real-file layouts (e.g. dotfiler symlink trees):
+#   1. Resolved target mtime vs dest (detects content changes)
+#   2. Symlink lstat mtime vs dest  (detects retargeted/recreated symlinks)
+# Note: zsh's -nt follows symlinks (stat, not lstat), so we must use zstat -L
+# for the symlink's own mtime.
 # Usage: if zdot_is_newer_or_missing <source> <dest>; then ...; fi
 zdot_is_newer_or_missing() {
     local src="$1"
     local dst="$2"
-    if [[ ! -f "$dst" ]]; then
+    if [[ ! -e "$dst" ]]; then
         return 0
     fi
-    # Check the resolved target mtime
-    if [[ -f "$src" && "$src:A" -nt "$dst:A" ]]; then
+    # Check 1: resolved target mtime vs resolved dest mtime.
+    # :A resolves symlinks; -nt then compares the real entries' mtimes.
+    if [[ -e "$src" && "${src:A}" -nt "${dst:A}" ]]; then
         return 0
     fi
-    # Also check the symlink's own mtime (covers retargeted/recreated symlinks)
-    if [[ -L "$src" && "$src" -nt "$dst:A" ]]; then
-        return 0
+    # Check 2: symlink lstat mtime vs dest mtime.
+    # zsh's -nt follows symlinks, so it cannot see the symlink's own mtime.
+    # Use zstat -L (lstat) to get the symlink creation/recreation timestamp.
+    if [[ -L "$src" ]]; then
+        zmodload -F zsh/stat b:zstat 2>/dev/null
+        local -A _src_st _dst_st
+        zstat -LH _src_st "$src" 2>/dev/null && \
+        zstat -H  _dst_st "${dst:A}" 2>/dev/null && \
+        (( _src_st[mtime] > _dst_st[mtime] )) && return 0
     fi
     return 1
 }
