@@ -1,5 +1,14 @@
 #!/usr/bin/env zsh
 # venv: Python virtual environment management
+#
+# To configure Python versions, register a hook into the venv-configure group:
+#
+#   _my_venv_config() {
+#       zstyle ':zdot:venv' python-version-macos '/opt/homebrew/bin/python3.13'
+#       zstyle ':zdot:venv' python-version-linux 'cpython@3.13.0'
+#   }
+#   zdot_register_hook _my_venv_config interactive noninteractive \
+#       --group venv-configure
 
 # ============================================================================
 # Module Initialization
@@ -13,10 +22,6 @@ _venv_init() {
     # and Homebrew-linked native libraries.
     #
     # On Linux the default uses uv's managed CPython distribution.
-    #
-    # Override via:
-    #   zstyle ':zdot:venv' python-version-macos '/opt/homebrew/bin/python3.13'
-    #   zstyle ':zdot:venv' python-version-linux 'cpython@3.13.0'
     if is-macos; then
         local default_python="$(command -v python3.14 2>/dev/null || echo python3)"
         zstyle -s ':zdot:venv' python-version-macos DEFAULT_PYTHON_VERSION \
@@ -42,6 +47,7 @@ _activate_global_venv() {
 # Register hooks
 zdot_register_hook _venv_init interactive noninteractive \
     --requires xdg-configured \
+    --requires-group venv-configure \
     --provides venv-configured
 
 zdot_register_hook _activate_global_venv interactive noninteractive \

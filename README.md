@@ -986,7 +986,8 @@ update lifecycle, and configuration.
 | Document | Description |
 |---|---|
 | [docs/quickstart-dotfiler.md](docs/quickstart-dotfiler.md) | **Start here** — create a dotfiles repo with dotfiler + zdot from scratch |
-| [docs/implementation.md](docs/implementation.md) | Internal architecture, data structures, algorithms and design decisions |
+| [docs/modules.md](docs/modules.md) | Reference for all built-in modules — what each does, dependencies, and zstyle options |
+| [docs/module-guide.md](docs/module-guide.md) | Module writer's guide — from quick start to complex plugin-loading lifecycles |
 | [docs/module-guide.md](docs/module-guide.md) | Module writer's guide — from quick start to complex plugin-loading lifecycles |
 | [docs/commands.md](docs/commands.md) | Full CLI reference for the `zdot` command |
 | [docs/plugins.md](docs/plugins.md) | Plugin system overview and usage |
