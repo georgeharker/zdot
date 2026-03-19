@@ -311,7 +311,7 @@ zdot_load_module <module-name>
 
 Searches the configured module path in order:
 1. User-supplied directories (via zstyle `:zdot:modules` `search-path`)
-2. `${XDG_CONFIG_HOME}/zsh/modules` (default user dir)
+2. `${XDG_CONFIG_HOME}/zdot-modules` (default user dir, if it exists)
 3. Built-in `modules/` directory
 
 First match wins. Deduplicates automatically (loading the same module twice is

@@ -484,14 +484,27 @@ zdot_define_module fzf \
 
 ### Module Search Path
 
-To add modules from your own directories (which shadow built-in modules of the
-same name), set the search path before any `zdot_load_module` calls:
+By default, `${XDG_CONFIG_HOME}/zdot-modules` (typically
+`~/.config/zdot-modules`) is automatically included in the search path if it
+exists. Create it and place your modules there:
 
-```zsh
-zstyle ':zdot:modules' search-path "${XDG_CONFIG_HOME}/zsh/modules"
+```
+~/.config/zdot-modules/
+└── mymod/
+    └── mymod.zsh
 ```
 
-`modules/` is always the final fallback entry.
+To add additional directories (which shadow built-in modules of the same name),
+set the search path before any `zdot_load_module` calls:
+
+```zsh
+zstyle ':zdot:modules' search-path \
+  "${XDG_CONFIG_HOME}/zsh/modules" \
+  ~/work/zsh-modules
+```
+
+Search order: zstyle paths (in order), then `${XDG_CONFIG_HOME}/zdot-modules`,
+then the built-in `modules/` directory (always last).
 
 ### Loading Modules
 
