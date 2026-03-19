@@ -288,12 +288,30 @@ for the full reference.
 ### Module Search Path
 
 `zdot_load_module` searches directories in order -- user directories first, then
-the built-in `modules/` directory. This lets you override any built-in module:
+the built-in `modules/` directory. This lets you override any built-in module
+or add your own without touching the zdot repo.
+
+By default, `${XDG_CONFIG_HOME}/zdot-modules` (typically
+`~/.config/zdot-modules`) is included in the search path automatically if the
+directory exists. Create it and drop modules in:
+
+```
+~/.config/zdot-modules/
+└── mymodule/
+    └── mymodule.zsh
+```
+
+You can add additional directories via zstyle:
 
 ```zsh
-zstyle ':zdot:modules' search-path "${XDG_CONFIG_HOME}/zsh/modules"
+zstyle ':zdot:modules' search-path \
+  "${XDG_CONFIG_HOME}/zsh/modules" \
+  ~/work/zsh-modules
 
-# Now your modules/ dir is searched first
+# Search order:
+#   1. Paths from zstyle (in order)
+#   2. ${XDG_CONFIG_HOME}/zdot-modules  (default user dir)
+#   3. Built-in modules/ inside the zdot repo (always last)
 zdot_load_module brew    # loads yours if it exists, falls back to built-in
 ```
 
