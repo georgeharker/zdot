@@ -33,8 +33,9 @@ This document provides technical implementation details for the zdot system. It 
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. Module Loading (zdot_load_modules)                       │
-│    - Scan lib/ directory for *.zsh files                    │
+│ 2. Module Loading (zdot_load_module)                        │
+│    - User calls zdot_load_module for each desired module     │
+│    - Searches configured module path (user dirs, then modules/) │
 │    - Source each module file                                 │
 │    - Modules register hooks via zdot_register_hook()        │
 └─────────────────────────────────────────────────────────────┘
@@ -138,7 +139,7 @@ fi
 - Hook execution (`zdot_execute_all`)
 - Deferred hook dispatch (`_zdot_run_deferred_phase_check`)
 - Phase management (`zdot_allow_defer`)
-- Module loading (`zdot_load_modules`)
+- Module loading (`zdot_load_module`)
 
 **Key Functions:**
 
@@ -229,13 +230,13 @@ Executes hooks in planned order.
 
 **Key Functions:**
 
-##### `zdot_debug_info()` (lines 3-60)
+##### `zdot debug` / `zdot info`
 
-Comprehensive debug output.
+Comprehensive debug output available via the CLI.
 
 **Output Sections:**
 1. Loaded modules list
-2. Registered hooks (via `zdot_hooks_list`)
+2. Registered hooks (via `zdot hook list`)
 3. Completion system status
 
 **Design Note**: Entry point for troubleshooting configuration issues.
@@ -406,9 +407,9 @@ typeset -gA _ZDOT_MODULE_SOURCE_DIR
 # Example: _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/modules/xdg"
 
 # Ordered list of directories to search when resolving a module by name.
-# Populated once by _zdot_build_module_search_path; lib/ is always last.
+# Populated once by _zdot_build_module_search_path; modules/ is always last.
 typeset -ga _ZDOT_MODULE_SEARCH_PATH
-# Example: _ZDOT_MODULE_SEARCH_PATH=("/Users/user/.config/zsh/modules" "/Users/user/.config/zdot/lib")
+# Example: _ZDOT_MODULE_SEARCH_PATH=("/Users/user/.config/zsh/modules" "/Users/user/.config/zdot/modules")
 
 # Transient: set during _zdot_source_module, unset immediately after sourcing
 typeset -g _ZDOT_CURRENT_MODULE_NAME   # e.g. "xdg"
@@ -869,7 +870,7 @@ zstyle ':zdot:modules' search-path \
     "${HOME}/.dotfiles/zsh-extra"
 ```
 
-`lib/` (`$_ZDOT_MODULE_DIR`) is always appended as the final entry, so built-in modules
+`modules/` (`$_ZDOT_MODULE_DIR`) is always appended as the final entry, so built-in modules
 are available without any configuration. The path is built once on first use and
 cached in `_ZDOT_MODULE_SEARCH_PATH`.
 
@@ -906,7 +907,7 @@ directory in the search path, as a starting point for customisation:
 
 ```zsh
 zdot module clone xdg
-# finds xdg in the search path (lib/ by default)
+# finds xdg in the search path (modules/ by default)
 # copies it to <first-user-dir>/xdg/
 # fails if destination already exists
 ```
@@ -930,16 +931,17 @@ zdot module clone xdg
 
 ### Automatic Module Discovery
 
-> **Note**: For user configurations, explicit loading via `zdot_load_module`
-> is the preferred approach. `zdot_load_modules()` is used internally during framework initialisation
-> and is not intended for direct use in module or user init files.
+> **Note**: `zdot_load_modules()` (plural) is no longer part of the public API.
+> Use `zdot_load_module <name>` (singular) in your `.zshrc` to load each module
+> explicitly. The framework no longer auto-discovers modules from a directory scan.
+> The section below is retained for historical reference.
 
-**Function**: `zdot_load_modules()` (core/hooks.zsh:364-397)
+**Function**: `zdot_load_modules()` *(removed)*
 
 **Algorithm:**
 ```
 1. Scan ${ZDOTDIR}/modules/ directory
-2. Find all *.zsh files (non-recursive, only lib/ directory itself)
+2. Find all *.zsh files (non-recursive, only modules/ directory itself)
 3. For each module file:
    a. Extract module name from filename
    b. Log loading message
@@ -947,10 +949,10 @@ zdot module clone xdg
 4. Return count of loaded modules
 ```
 
-**Code** (core/hooks.zsh:364-397):
+**Code** *(historical)*:
 ```zsh
 zdot_load_modules() {
-    local module_dir="${ZDOTDIR}/lib"
+    local module_dir="${ZDOTDIR}/modules"
     local loaded_count=0
     
     if [[ ! -d "$module_dir" ]]; then
@@ -960,7 +962,7 @@ zdot_load_modules() {
     
     zdot_verbose "Loading modules from: $module_dir"
     
-    # Discover and source all .zsh files in lib/
+    # Discover and source all .zsh files in modules/
     for module_file in "${module_dir}"/**/*.zsh(N); do
         local module_name="${module_file:t:r}"  # Extract filename without extension
         
@@ -980,8 +982,8 @@ zdot_load_modules() {
 ```
 
 **Filename Patterns:**
-- Matches: `lib/*/module.zsh`
-- Matches: `lib/subdir/nested/module.zsh`
+- Matches: `modules/*/module.zsh`
+- Matches: `modules/subdir/nested/module.zsh`
 - Ignores: Non-.zsh files
 - Ignores: Hidden files (start with `.`)
 
@@ -1126,31 +1128,31 @@ zdot_error "Failed to initialize: $error_message"
 
 ## Debugging Tools
 
-### zdot_debug_info()
+### `zdot info` / `zdot debug`
 
 **Purpose**: Show comprehensive system state for troubleshooting.
 
-**Location**: core/utils.zsh:3-60
+**Available via**: `zdot info` (summary), `zdot debug` (verbose).
 
 **Output Sections:**
 
-1. **Loaded Modules** (lines 5-12):
-   - Lists all files sourced from .modules/. directory
+1. **Loaded Modules**:
+   - Lists all modules loaded via `zdot_load_module`
    - Helps verify which modules are loaded
-   - Extracted from `$ZDOTDIR/lib/**/*.zsh` files
 
-2. **Registered Hooks** (lines 14-16):
-   - Calls `zdot_hooks_list` to show hook organization
+2. **Registered Hooks**:
+   - Shows hook organization (via `zdot hook list`)
    - Shows phases, unplanned hooks, and errors
 
-3. **Completion Status** (lines 18-60):
+3. **Completion Status**:
    - Shows completion commands to be generated
    - Shows live completion functions
    - Helps debug completion issues
 
 **Usage:**
 ```zsh
-zdot_debug_info
+zdot info
+zdot debug
 ```
 
 **When to use:**
@@ -1561,7 +1563,7 @@ the deferred queue has fully drained — no manual triggering required.
 **Critical Path:**
 1. Source zdot.zsh (~28 lines, fast)
 2. Source core modules (~650 total lines, fast)
-3. Load modules from lib/ (varies, usually <1000 lines)
+3. Load modules from modules/ (varies, usually <1000 lines)
 4. Build execution plan (O(n²) in worst case, n=number of hooks)
 5. Execute hooks (depends on hook implementations)
 
@@ -1915,13 +1917,13 @@ Before submitting changes:
 1. **Test all contexts:**
 ```zsh
 # Interactive
-zsh -i -c 'zdot_debug_info'
+zsh -i -c 'zdot info'
 
 # Non-interactive
-zsh -c 'zdot_debug_info'
+zsh -c 'zdot info'
 
 # Login
-zsh -l -c 'zdot_debug_info'
+zsh -l -c 'zdot info'
 ```
 
 2. **Test edge cases:**
@@ -1937,8 +1939,8 @@ ZDOT_VERBOSE=1 zsh -c 'source ~/.zshrc'
 
 4. **Verify output:**
 ```zsh
-zdot_hooks_list --all
-zdot_debug_info
+zdot hook list --all
+zdot info
 ```
 
 ### Documentation
@@ -2031,7 +2033,7 @@ When adding features:
 ### Module Not Loading
 
 **Symptoms:**
-- Module file exists but not showing in `zdot_debug_info`
+- Module file exists but not showing in `zdot info`
 - Hooks not registered
 
 **Debug Steps:**

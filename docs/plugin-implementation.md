@@ -338,8 +338,7 @@ the filesystem is ready.
 | `plugins-cloned`  | `zdot_init` step 1 | every plugin-loading hook           |
 
 The core clone hook registration lives in `core/plugins.zsh`.  `zdot_init` is called
-at the bottom of `lib/plugins/plugins.zsh` (or whichever file completes the last
-`zdot_use_plugin` declaration).
+at the bottom of the user's `.zshrc` (after all `zdot_use_plugin` declarations).
 
 ---
 
@@ -347,17 +346,17 @@ at the bottom of `lib/plugins/plugins.zsh` (or whichever file completes the last
 
 ```
 Shell startup (.zshrc / .zshenv):
-  └─> modules sourced (lib/plugins/ per-concern modules:
-       │   autocomplete, fzf, nodejs, shell-extras, tmux)
-       └─> zdot_use_plugin / zdot_use_plugin -hook / zdot_use_plugin -defer calls register specs
+  └─> modules sourced (modules/plugins/, modules/fzf/, modules/nodejs/, etc.
+       │   via zdot_load_module calls)
+       └─> zdot_use_plugin / zdot_use_plugin hook / zdot_use_plugin defer calls register specs
            and hook functions against named phases
-       └─> zdot_init called at end of file
+       └─> zdot_init called at end of .zshrc
 
-zdot_init (core/plugins.zsh):
+zdot_init (core/init.zsh):
   1. zdot_plugins_clone_all        — clone all repos; emits plugins-cloned
   2. bundle init pass              — calls zdot_bundle_omz_init (provides: omz-lib-loaded)
-     NOTE: The former monolithic lib/plugins/plugins.zsh has been split into
-           per-concern modules (autocomplete, fzf, nodejs, shell-extras, tmux).
+     NOTE: The former monolithic plugins.zsh has been split into
+           per-concern modules (autocompletion, fzf, nodejs, shell-extras, tmux).
   3. resolve group annotations     — injects edges for --group/--provides-group/--requires-group
   4. build execution plan          — topological sort of registered hooks
   5. execute all hooks in order

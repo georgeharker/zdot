@@ -19,7 +19,7 @@ quick start to complex plugin-loading lifecycles.
 
 ## Quick Start
 
-Create `lib/mymod/mymod.zsh`:
+Create `modules/mymod/mymod.zsh`:
 
 ```zsh
 #!/usr/bin/env zsh
@@ -46,7 +46,7 @@ Done. The hook system handles ordering automatically.
 ## Module Structure
 
 ```
-lib/mymod/
+modules/mymod/
     mymod.zsh          # Required: main module file
     functions/          # Optional: autoloaded function files
         myfunc          # Each file = one function (lazy loaded)
@@ -55,7 +55,7 @@ lib/mymod/
 ```
 
 **Naming conventions:**
-- Directory and file share the same name: `lib/foo/foo.zsh`
+- Directory and file share the same name: `modules/foo/foo.zsh`
 - Init function: `_<name>_init` (e.g., `_mymod_init`)
 - Phase tokens: `<name>-configured`, `<name>-loaded`, `<name>-ready`
 
@@ -575,7 +575,7 @@ Hooks with neither flag run in all variants (default/backward-compatible behavio
 | `zdot_verify_tools <tools...>` | Verify tools are available |
 | `zdot_has_tty` | Check if a TTY is available |
 | `zdot_interactive` | Check if shell is interactive |
-| `zdot_is_macos` / `zdot_is_linux` | Platform checks |
+| `zdot_is_macos` / `zdot_is_platform <name>` | Platform checks |
 | `zdot_variant` | Print the active variant string (may be empty) |
 | `zdot_is_variant <name>` | Return 0 if active variant matches `<name>` |
 

@@ -49,7 +49,7 @@ Zsh has built-in support for bytecode compilation that works automatically:
 
 **Files affected**:
 - Core modules: `~/.config/zsh/zdot/core/*.zsh` → `*.zsh.zwc` (8 files)
-- Lib modules: `~/.config/zsh/zdot/lib/**/*.zsh` → `*.zsh.zwc` (22 files)
+- Lib modules: `~/.config/zsh/zdot/modules/**/*.zsh` → `*.zsh.zwc` (22 files)
 
 **Key principle**: Co-location ensures Zsh can find and use bytecode files automatically.
 
@@ -59,12 +59,12 @@ Zsh has built-in support for bytecode compilation that works automatically:
 
 **How it works**:
 - Each function file compiled to its own co-located `.zwc` file
-- Example: `~/.config/zsh/zdot/lib/git/functions/git-status` → `git-status.zwc` (same directory)
+- Example: `~/.config/zsh/zdot/modules/fzf/functions/fzf_fd` → `fzf_fd.zwc` (same directory)
 - Directory added to `fpath` with co-located per-function `.zwc` files
 - Functions autoloaded normally - Zsh uses bytecode automatically
 
 **Files affected**:
-- Function directories: `~/.config/zsh/zdot/lib/*/functions/` — each function file gets its own `funcname.zwc`
+- Function directories: `~/.config/zsh/zdot/modules/*/functions/` — each function file gets its own `funcname.zwc`
 
 **Compilation syntax**:
 ```zsh
@@ -155,15 +155,14 @@ zdot_cache_is_enabled && echo "Caching enabled" || echo "Caching disabled"
 │   ├── logging.zsh
 │   ├── modules.zsh
 │   └── utils.zsh
-└── lib/
-    ├── aliases/aliases.zsh   # Library modules (source)
-    ├── brew/brew.zsh
-    ├── git/
-    │   ├── git.zsh
+└── modules/
+    ├── brew/brew.zsh         # Built-in modules (source)
+    ├── fzf/
+    │   ├── fzf.zsh
     │   └── functions/        # Function files (source)
-    │       ├── git-status
-    │       └── git-branch
-    └── ... (21 lib modules)
+    │       ├── fzf_fd
+    │       └── fzf_rg
+    └── ... (26 modules)
 ```
 
 ### Compiled Files (in symlink directory)
@@ -180,19 +179,19 @@ When caching is enabled, `.zwc` files are created in the **symlink directory** (
 │   ├── completions.zsh
 │   ├── completions.zsh.zwc   # ← Bytecode
 │   └── ... (8 .zwc files)
-└── lib/
-    ├── aliases/
-    │   ├── aliases.zsh
-    │   └── aliases.zsh.zwc   # ← Bytecode
-    ├── git/
-    │   ├── git.zsh
-    │   ├── git.zsh.zwc       # ← Bytecode
+└── modules/
+    ├── brew/
+    │   ├── brew.zsh
+    │   └── brew.zsh.zwc     # ← Bytecode
+    ├── fzf/
+    │   ├── fzf.zsh
+    │   ├── fzf.zsh.zwc      # ← Bytecode
     │   └── functions/
-    │       ├── git-status      # Function file
-    │       ├── git-status.zwc  # ← Per-function bytecode
-    │       ├── git-branch      # Function file
-    │       └── git-branch.zwc  # ← Per-function bytecode
-    └── ... (22 lib .zwc files + 26 function .zwc files)
+    │       ├── fzf_fd         # Function file
+    │       ├── fzf_fd.zwc     # ← Per-function bytecode
+    │       ├── fzf_rg         # Function file
+    │       └── fzf_rg.zwc    # ← Per-function bytecode
+    └── ... (26 module .zwc files + function .zwc files)
 
 ~/.cache/zdot/
 └── plans/
@@ -326,7 +325,7 @@ zdot_cache_invalidate() {
 **What it deletes**:
 1. Execution plan cache in `$_ZDOT_CACHE_DIR/plans/` (then recreates the directory structure)
 2. All `*.zwc` files in `core/` (core module bytecodes)
-3. All `*.zwc` files in each top-level directory under `lib/` (lib module and function bytecodes)
+3. All `*.zwc` files in each top-level directory under `modules/` (module and function bytecodes)
 
 ### Module Loading Pipeline (in `core/cache.zsh` and `core/modules.zsh`)
 
@@ -505,7 +504,7 @@ Bytecode is automatically updated when source files change:
 
 ```zsh
 # Edit a module
-vim ~/.config/zsh/zdot/lib/git/git.zsh
+vim ~/.config/zsh/zdot/modules/fzf/fzf.zsh
 
 # Restart shell
 exec zsh
@@ -571,7 +570,7 @@ exec zsh
 
 # Shows cache operations:
 # [CACHE] Compiling: ~/.config/zsh/zdot/core/core.zsh
-# [CACHE] Using cached: ~/.config/zsh/zdot/lib/git/git.zsh.zwc
+# [CACHE] Using cached: ~/.config/zsh/zdot/modules/fzf/fzf.zsh.zwc
 ```
 
 ### Verify Cache Files Exist
@@ -644,7 +643,7 @@ ls -la ~/.config/zsh/zdot/core/*.zwc
 **Diagnosis**:
 ```zsh
 # Check if .zwc is newer than source
-ls -lt ~/.config/zsh/zdot/lib/git/git.zsh*
+ls -lt ~/.config/zsh/zdot/modules/fzf/fzf.zsh*
 ```
 
 **Solutions**:
@@ -662,10 +661,10 @@ ls -lt ~/.config/zsh/zdot/lib/git/git.zsh*
 echo $fpath | grep functions
 
 # Check if function files exist
-ls ~/.config/zsh/zdot/lib/git/functions/
+ls ~/.config/zsh/zdot/modules/fzf/functions/
 
 # Check if per-function .zwc files exist
-ls ~/.config/zsh/zdot/lib/git/functions/*.zwc
+ls ~/.config/zsh/zdot/modules/fzf/functions/*.zwc
 ```
 
 **Solutions**:
@@ -731,7 +730,7 @@ source "${module_dir}/module.zsh"
 **Problem**: Added cache directory to `fpath` instead of source directory:
 ```zsh
 # WRONG - functions not found
-fpath=("${cache_dir}/lib/git/functions" $fpath)
+fpath=("${cache_dir}/modules/fzf/functions" $fpath)
 ```
 
 **Root cause**: Functions must be in original directory with co-located `.zwc`.
@@ -739,7 +738,7 @@ fpath=("${cache_dir}/lib/git/functions" $fpath)
 **Fix**: Add source directory to `fpath`:
 ```zsh
 # CORRECT - functions found with .zwc
-fpath=("${ZDOT_DIR}/lib/git/functions" $fpath)
+fpath=("${ZDOT_DIR}/modules/fzf/functions" $fpath)
 ```
 
 **Files modified**:
@@ -809,13 +808,13 @@ exec zsh
 
 ```zsh
 # Touch a source file to make it newer
-touch ~/.config/zsh/zdot/lib/git/git.zsh
+touch ~/.config/zsh/zdot/modules/fzf/fzf.zsh
 
 # Restart shell
 exec zsh
 
 # Verify .zwc was updated
-[[ ~/.config/zsh/zdot/lib/git/git.zsh.zwc -nt ~/.config/zsh/zdot/lib/git/git.zsh ]] && echo "UPDATED"
+[[ ~/.config/zsh/zdot/modules/fzf/fzf.zsh.zwc -nt ~/.config/zsh/zdot/modules/fzf/fzf.zsh ]] && echo "UPDATED"
 ```
 
 #### Test 4: Performance Improvement
@@ -871,7 +870,7 @@ test_cache_invalidation() {
 
 # Test cache updates
 test_cache_updates() {
-    local test_file=~/.config/zsh/zdot/lib/git/git.zsh
+    local test_file=~/.config/zsh/zdot/modules/fzf/fzf.zsh
     local test_zwc="${test_file}.zwc"
     
     touch "$test_file"

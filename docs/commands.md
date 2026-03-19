@@ -69,7 +69,7 @@ zdot plugin list [--loaded|--installed|--declared]
   # List plugins. Default: all declared plugins.
   # --loaded     Show only plugins successfully loaded this session
   # --installed  Show only plugins with a local directory on disk
-  # --declared   Show only plugins registered via zdot_plugin_declare
+  # --declared   Show only plugins registered via zdot_use_plugin
 
 zdot plugin update [spec]
   # Update one or all plugins.
@@ -98,8 +98,8 @@ zdot module list           # List all loaded modules with their source directory
 zdot module clone <name>   # Copy a module to the first user directory in the search path
 ```
 
-`clone` finds the module via the search path (user directories first, then `lib/`) and
-copies it into the first non-`lib/` directory in the search path as a starting point
+`clone` finds the module via the search path (user directories first, then `modules/`) and
+copies it into the first non-`modules/` directory in the search path as a starting point
 for local customisation. Fails if the destination already exists.
 
 **Implementation**: delegates to `zdot_module_list` and the `clone` dispatch block

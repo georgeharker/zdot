@@ -15,7 +15,7 @@ The plugin system works in phases:
 ### Declaring Plugins
 
 ```zsh
-# In your module files (e.g., lib/plugins/plugins.zsh)
+# In your module files (e.g., modules/plugins/plugins.zsh)
 zdot_use_plugin Aloxaf/fzf-tab
 zdot_use_plugin omz:plugins/git
 zdot_use_plugin omz:lib

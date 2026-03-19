@@ -151,7 +151,7 @@ updates at the next login shell.
 | Re-unpack after manual repo changes | `dotfiler setup -u` |
 | Add a new module | `zdot_load_module <name>` in `.zshrc`, then `exec zsh` |
 | Customise a built-in module | `zdot module clone <name>` |
-| Debug zdot loading | `zdot_debug_info` |
+| Debug zdot loading | `zdot info` or `zdot debug` |
 
 ---
 
