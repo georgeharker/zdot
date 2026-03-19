@@ -506,7 +506,7 @@ function zdot_hooks_list() {
     # Defer Order Constraints
     _zdot_defer_order_display
 
-    zdot_info "Run 'zdot_show_defer_queue' to see deferred task submission order."
+    zdot_info "Run 'zdot hook defer-queue' to see deferred task submission order."
     zdot_info ""
 
     # Summary

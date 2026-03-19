@@ -4,7 +4,8 @@ function _zdot() {
     local -a nouns
     nouns=(
         'cache:cache management (status, invalidate, compile)'
-        'hook:hook and execution-plan management (list, plan)'
+        'hook:hook and execution-plan management (list, plan, status, defer-queue)'
+        'phase:phase and tool phase inspection (list)'
         'plugin:plugin management (list, update, clean, reclone)'
         'module:module management (list, clone)'
         'completion:shell completion management (refresh)'
@@ -32,6 +33,8 @@ function _zdot() {
     verbs_hook=(
         'list:list registered hooks'
         'plan:print the full execution plan'
+        'status:show per-hook run status from last startup'
+        'defer-queue:show deferred task submission order'
         'help:show help for hook'
     )
 

@@ -2,6 +2,7 @@
 # Show the deferred task queue in submission order.
 # Populated at runtime when an interactive shell starts; run this after startup.
 # Usage: zdot_show_defer_queue
+#        zdot hook defer-queue
 
 function zdot_show_defer_queue() {
     if (( _ZDOT_DEFER_COUNTER == 0 )); then
@@ -9,10 +10,12 @@ function zdot_show_defer_queue() {
         return 0
     fi
 
-    zdot_report "Deferred Queue (submission order):"
+    zdot_report "Deferred Queue (submission order)"
     zdot_info ""
 
     local i task_num=0 sentinel_num=0
+    local prev_hook=""
+
     for (( i = 1; i <= ${#_ZDOT_DEFER_CMDS[@]}; i++ )); do
         local cmd="${_ZDOT_DEFER_CMDS[$i]}"
         local hook="${_ZDOT_DEFER_HOOKS[$i]}"
@@ -20,15 +23,41 @@ function zdot_show_defer_queue() {
         local spec="${_ZDOT_DEFER_SPECS[$i]}"
         local explicit_label="${_ZDOT_DEFER_LABELS[$i]}"
 
+        # ── Sentinel (phase boundary) ────────────────────────────────────
         if [[ "$spec" == "__sentinel__" ]]; then
             (( sentinel_num++ ))
-            zdot_info "  ── $cmd ──"
+            zdot_info "  %F{240}────── $cmd ──────%f"
+            zdot_info ""
+            prev_hook=""
             continue
         fi
 
         (( task_num++ ))
 
-        # Label priority: explicit --label > spec name > raw command
+        # ── Hook grouping header ─────────────────────────────────────────
+        if [[ "$hook" != "$prev_hook" ]]; then
+            if [[ "$hook" != "?" ]]; then
+                # Look up the hook's named label if one was set
+                local _hook_name=""
+                local _hid
+                for _hid in ${(k)_ZDOT_HOOKS}; do
+                    if [[ "${_ZDOT_HOOKS[$_hid]}" == "$hook" ]]; then
+                        _hook_name="${_ZDOT_HOOK_NAMES[$_hid]:-}"
+                        break
+                    fi
+                done
+                if [[ -n "$_hook_name" && "$_hook_name" != "$hook" ]]; then
+                    zdot_info "  %F{blue}◆ ${hook}%f %F{240}($_hook_name)%f"
+                else
+                    zdot_info "  %F{blue}◆ ${hook}%f"
+                fi
+            else
+                zdot_info "  %F{240}◆ (outside hook context)%f"
+            fi
+            prev_hook="$hook"
+        fi
+
+        # ── Label: explicit --label > spec name > truncated command ──────
         local label
         if [[ -n "$explicit_label" ]]; then
             label="$explicit_label"
@@ -37,41 +66,26 @@ function zdot_show_defer_queue() {
         else
             label="$cmd"
         fi
-
-        # Truncate label to 50 chars for alignment
-        if (( ${#label} > 50 )); then
-            label="${label[1,47]}..."
+        # Truncate long labels
+        if (( ${#label} > 60 )); then
+            label="${label[1,57]}..."
         fi
 
-        # Build suffix: hook attribution + delay annotation
-        local suffix=""
-        if [[ "$hook" != "?" ]]; then
-            suffix+="← $hook"
-        fi
+        # ── Annotations ──────────────────────────────────────────────────
+        local -a marks=()
         if (( delay > 0 )); then
-            local delay_str="+${delay}s ⚠"
-            if [[ -n "$suffix" ]]; then
-                suffix+="  $delay_str"
-            else
-                suffix="$delay_str"
-            fi
-        fi
-        if [[ ${_ZDOT_HOOK_DEFER_ARGS[$hook]+set} == set ]]; then
-            if [[ -n "$suffix" ]]; then
-                suffix+="  [noquiet]"
-            else
-                suffix="[noquiet]"
-            fi
+            marks+=("%F{yellow}+${delay}s%f")
         fi
 
-        local line
-        printf -v line "  [defer #%-2d] %-50s" "$task_num" "$label"
-        if [[ -n "$suffix" ]]; then
-            line+="  $suffix"
+        local marks_str=""
+        if (( ${#marks} > 0 )); then
+            marks_str=" ${(j: :)marks}"
         fi
-        zdot_info "$line"
+
+        # ── Print ────────────────────────────────────────────────────────
+        zdot_info "    %F{green}${task_num}.%f ${label}${marks_str}"
     done
 
     zdot_info ""
-    zdot_report "Total: $task_num deferred task(s) + $sentinel_num sentinel(s)"
+    zdot_info "  %F{cyan}${task_num}%f task(s), %F{240}${sentinel_num}%f sentinel(s)"
 }

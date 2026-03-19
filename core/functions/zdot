@@ -4,7 +4,7 @@
 #
 # Nouns and verbs:
 #   cache   status | invalidate | compile
-#   hook    list [--verbose|-v] [--all|-a] [--ordered|-o] | plan
+#   hook    list [--verbose|-v] [--all|-a] [--ordered|-o] | plan | status | defer-queue
 #   phase   list [--context <ctx>]
 #   plugin  list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone
 #   module  list | clone <name>
@@ -37,8 +37,9 @@ function zdot() {
         zdot_info "    -v, --verbose            Show full hook metadata"
         zdot_info "    -a, --all                Include unexecuted hooks"
         zdot_info "    -o, --ordered            Show hooks in execution-plan order"
-        zdot_info "  zdot hook plan            Print the full execution plan"
-        zdot_info "  zdot hook status          Show per-hook run status from last startup"
+        zdot_info "  zdot hook plan               Print the full execution plan"
+        zdot_info "  zdot hook status             Show per-hook run status from last startup"
+        zdot_info "  zdot hook defer-queue        Show deferred task submission order"
     }
 
     function _zdot_help_plugin() {
@@ -149,7 +150,7 @@ function zdot() {
         zdot_info "Usage: zdot <noun> <verb> [options]"
         zdot_info ""
         zdot_info "  cache      status | invalidate | compile"
-        zdot_info "  hook       list [-v] [-a] [-o] | plan | status"
+        zdot_info "  hook       list [-v] [-a] [-o] | plan | status | defer-queue"
         zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
         zdot_info "  module     list | clone <name>"
@@ -187,13 +188,14 @@ function zdot() {
         # ── hook ──────────────────────────────────────────────────────────
         hook)
             case "$verb" in
-                list)   zdot_hooks_list "${@:3}" ;;
-                plan)   zdot_show_plan ;;
-                status) zdot_hooks_status ;;
+                list)        zdot_hooks_list "${@:3}" ;;
+                plan)        zdot_show_plan ;;
+                status)      zdot_hooks_status ;;
+                defer-queue) zdot_show_defer_queue ;;
                 help|--help|-h) _zdot_help_hook ;;
                 *)
                     zdot_error "zdot hook: unknown verb '${verb}'"
-                    zdot_info "  verbs: list | plan | status"
+                    zdot_info "  verbs: list | plan | status | defer-queue"
                     return 1
                     ;;
             esac
