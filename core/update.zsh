@@ -12,6 +12,13 @@
 #   zstyle ':zdot:update' subtree-remote      ""         # "remote branch" for git subtree pull
 #   zstyle ':zdot:update' link-tree           true       # false to skip link-tree unpacking
 #   zstyle ':zdot:dotfiler' scripts-dir       ""         # auto-detected if empty
+#   zstyle ':zdot:update' release-channel     tags       # tags|any
+#
+# release-channel controls which commits are considered as update targets
+# (Phase 2 / self-directed checks only — Phase 1 dotfiles-directed is unaffected):
+#   tags (default) — only advance to commits reachable from a semver tag
+#                    matching v<N>.<N>.<N>[...].  No qualifying tag = no update.
+#   any            — advance to the branch tip (previous behaviour).
 #
 # Deployment scenarios:
 #   standalone   — ZDOT_DIR is its own git root; zdot does git pull + apply

@@ -181,13 +181,16 @@ _zdot_update_hook_check() {
 
     case $_topology in
         subtree)
-            _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url"
+            # scope ':zdot:update': apply release-channel constraint (default: tags).
+            _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url" \
+                ':zdot:update'
             return $?
             ;;
         standalone|submodule)
             # Compare zdot's own HEAD against remote.
             # allow_diverged=1: warn and proceed rather than treating diverged as error.
-            _update_core_is_available "$ZDOT_REPO" "" 1
+            # scope ':zdot:update': apply release-channel constraint (default: tags).
+            _update_core_is_available "$ZDOT_REPO" "" 1 ':zdot:update'
             return $?
             ;;
         subdir|none|*)
@@ -256,7 +259,8 @@ _zdot_update_hook_plan() {
             _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
         fi
         _update_core_component_tip_range \
-            "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" || return 0
+            "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" \
+            --scope ':zdot:update' || return 0
         if [[ -z "$REPLY" ]]; then
             zdot_info "zdot: up to date"
             return 0

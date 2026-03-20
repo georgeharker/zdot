@@ -3,3 +3,6 @@
 
 # Documentation only — everything else in zdot is installed.
 docs/
+
+# CI / GitHub metadata
+.github/

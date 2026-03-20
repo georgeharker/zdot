@@ -140,11 +140,16 @@ when `mode` is `disabled`.
 | `in-tree-commit` | string | `none` | How to handle in-tree (non-submodule) commits: `none` \| `prompt` \| `auto`. |
 | `subtree-remote` | string | _(empty)_ | `"remote branch"` string for `git subtree pull` (subtree topology only). |
 | `subtree-url` | string | _(empty)_ | Remote URL override for subtree pulls. |
+| `release-channel` | string | `tags` | Controls which commits are considered as update targets in **self-directed (Phase 2) checks** only. `tags` — only advance to commits reachable from a semver tag matching `v<N>.<N>.<N>[…]`; no qualifying tag means no update. `any` — advance to the branch tip (pre-v0.x behaviour). Phase 1 (dotfiles-directed) is unaffected by this setting. |
 
 **Example:**
 ```zsh
-zstyle ':zdot:update' mode      auto
-zstyle ':zdot:update' frequency 7200   # check every 2 hours
+zstyle ':zdot:update' mode            prompt
+zstyle ':zdot:update' frequency       7200    # check every 2 hours
+zstyle ':zdot:update' release-channel tags    # default — only update on new releases
+
+# To track every commit pushed to main (developers / testers):
+zstyle ':zdot:update' release-channel any
 ```
 
 ---
