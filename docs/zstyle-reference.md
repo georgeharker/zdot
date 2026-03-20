@@ -1,4 +1,5 @@
 # zstyle Configuration Reference
+<!-- v0.8.0 -->
 
 All `zstyle` options recognised by zdot, grouped by subsystem. Set these in
 your `.zshrc` **before** sourcing `zdot.zsh` (or before the relevant module is
