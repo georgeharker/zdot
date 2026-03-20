@@ -262,15 +262,26 @@ _zdot_update_hook_plan() {
             "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" \
             --scope ':zdot:update' || return 0
         if [[ -z "$REPLY" ]]; then
-            zdot_info "zdot: up to date"
-            return 0
+            if (( ! ${_force:-0} )); then
+                zdot_info "zdot: up to date"
+                return 0
+            fi
+            zdot_verbose "zdot hook plan: up to date but force active — populating plan vars"
+            _new="$_old"
+        else
+            _old="${REPLY%%..*}"
+            _new="${REPLY#*..}"
         fi
-        _old="${REPLY%%..*}"
-        _new="${REPLY#*..}"
     else
         # Phase dotfiles but no hint — dotfiles has no zdot change recorded.
-        # Nothing for zdot to do in this phase.
-        return 0
+        if (( ! ${_force:-0} )); then
+            # Nothing for zdot to do in this phase.
+            return 0
+        fi
+        zdot_verbose "zdot hook plan: no hint but force active — populating plan vars"
+        _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
+        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+        _new="$_old"
     fi
 
     # Always populate topology/remote/branch so pull knows what it's
@@ -292,9 +303,12 @@ _zdot_update_hook_plan() {
 
     # Nothing changed — topology is set but range stays empty.
     if [[ "$_old" == "$_new" ]]; then
-        zdot_log_debug "zdot hook plan: topology=${_topology}, nothing to do (${_old[1,12]})"
-        _dotfiler_plan_zdot_range=""
-        return 0
+        if (( ! ${_force:-0} )); then
+            zdot_log_debug "zdot hook plan: topology=${_topology}, nothing to do (${_old[1,12]})"
+            _dotfiler_plan_zdot_range=""
+            return 0
+        fi
+        zdot_log_debug "zdot hook plan: old==new (${_old[1,12]}) but force active"
     fi
 
     zdot_verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
@@ -426,7 +440,7 @@ _zdot_update_hook_unpack() {
     fi
 
     local _repo_dir="${_dotfiler_plan_zdot_repo_dir:-$ZDOT_REPO}"
-    local _link_dest="${_dotfiler_plan_zdot_link_dest}"
+    local _link_dest="${_dotfiler_plan_zdot_link_dest:-${XDG_CONFIG_HOME:-$HOME/.config}/zdot}"
     local -a _to_unpack=("${_dotfiler_plan_zdot_to_unpack[@]}")
     local -a _to_remove=("${_dotfiler_plan_zdot_to_remove[@]}")
 
