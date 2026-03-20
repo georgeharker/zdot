@@ -181,7 +181,7 @@ _zdot_update_hook_check() {
 
     case $_topology in
         subtree)
-            # scope ':zdot:update': apply release-channel constraint (default: tags).
+            # scope ':zdot:update': apply release-channel constraint (default: release).
             _update_core_is_available_subtree "$ZDOT_REPO" "$_subtree_spec" "$_subtree_url" \
                 ':zdot:update'
             return $?
@@ -189,7 +189,7 @@ _zdot_update_hook_check() {
         standalone|submodule)
             # Compare zdot's own HEAD against remote.
             # allow_diverged=1: warn and proceed rather than treating diverged as error.
-            # scope ':zdot:update': apply release-channel constraint (default: tags).
+            # scope ':zdot:update': apply release-channel constraint (default: release).
             _update_core_is_available "$ZDOT_REPO" "" 1 ':zdot:update'
             return $?
             ;;
