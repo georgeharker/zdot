@@ -15,7 +15,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | Noun | Verbs |
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
-| `hook` | `list [-v] [-a]`, `plan` |
+| `hook` | `list [-v] [-a]`, `plan`, `graph [--depends\|--uses\|--all]` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
 | `module` | `list`, `clone <name>` |
 | `completion` | `refresh` |
@@ -54,9 +54,13 @@ zdot hook list [-v] [-a]   # List registered hooks
   -a, --all                 Include hooks from all contexts (not just current)
 
 zdot hook plan             # Print the full execution plan in dependency order
+
+zdot hook graph --depends <name>   # ASCII tree: what <name> requires (recursive)
+zdot hook graph --uses <name>      # ASCII tree: what depends on <name> (recursive)
+zdot hook graph --all              # Full dependency graph for all hooks
 ```
 
-**Implementation**: delegates to `zdot_hooks_list` and `zdot_show_plan` (core/hooks.zsh).
+**Implementation**: delegates to `zdot_hooks_list`, `zdot_show_plan`, and `zdot_hooks_graph` (core/hooks.zsh).
 
 ---
 
