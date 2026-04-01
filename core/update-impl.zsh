@@ -313,9 +313,12 @@ _zdot_update_hook_plan() {
 
     zdot_verbose "zdot hook plan: topology=${_topology} old=${_old[1,12]} new=${_new[1,12]}"
 
-    # Build file lists using the shared update_core helper
+    # Build file lists using the shared update_core helper.
+    # Pass --excludes so zdot's exclude file (docs/, .github/, etc.) controls
+    # what is included.  Without this the old hardcoded '.*' filter would
+    # silently drop all zdot paths (modules/*, core/*, etc.).
     typeset -gaU _update_core_files_to_unpack _update_core_files_to_remove
-    _update_core_build_file_lists "$ZDOT_REPO" "${_old}..${_new}" || \
+    _update_core_build_file_lists --excludes "${ZDOT_REPO}/zdot_exclude" "$ZDOT_REPO" "${_old}..${_new}" || \
         zdot_warn "zdot: file list unavailable — unpack may be incomplete"
 
     local _nu=${#_update_core_files_to_unpack[@]}
