@@ -15,7 +15,7 @@ copy a built-in module to your user directory as a starting point.
 The rough loading order imposed by dependencies:
 
 ```
-xdg  →  env, sudo, shell, secrets
+xdg  →  env, sudo, history, secrets
          secrets  →  dotfiler, local_rc, uv (optional)
          xdg      →  brew / apt
                    →  omp-prompt | starship-prompt | omz-prompt  (provides prompt-ready)
@@ -74,18 +74,27 @@ in normal shells.
 
 ---
 
-### `shell`
+### `history`
 
 Configures zsh history: creates the XDG history directory (migrating
-`~/.zsh_history` if it exists), sets `HISTFILE` and `HISTORY_BASE`, and
-enables `share_history`.
+`~/.zsh_history` if it exists), sets `HISTFILE` and `SAVEHIST`, and
+enables `share_history`. Optionally enables per-directory history via the
+`jimhester/per-directory-history` plugin (enabled by default; opt out with
+`zstyle ':zdot:history' per-dir false`).
 
 | | |
 |---|---|
 | **Provides** | — |
 | **Requires** | — |
 | **Context** | interactive + noninteractive |
-| **zstyle** | none |
+
+**zstyle options:**
+
+| Key | Default | Description |
+|---|---|---|
+| `':zdot:history' size` | `50000` | `HISTSIZE` — maximum number of history entries in memory |
+| `':zdot:history' save-size` | `50000` | `SAVEHIST` — maximum number of history entries saved to disk |
+| `':zdot:history' per-dir` | *(enabled)* | Set to `false`, `no`, or `0` to disable per-directory history |
 
 ---
 

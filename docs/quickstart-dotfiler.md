@@ -76,7 +76,7 @@ source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
 # Load the modules you want — start minimal, add more later
 zdot_load_module xdg
-zdot_load_module shell
+zdot_load_module history
 zdot_load_module brew         # macOS only
 zdot_load_module completions
 

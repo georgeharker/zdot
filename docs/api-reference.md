@@ -55,7 +55,7 @@ orchestration function directly.
 source "${XDG_CONFIG_HOME}/zdot/zdot.zsh"
 
 zdot_load_module xdg
-zdot_load_module shell
+zdot_load_module history
 zdot_load_module brew
 zdot_load_module plugins
 
@@ -322,7 +322,7 @@ a no-op).
 ```zsh
 zdot_load_module xdg
 zdot_load_module brew
-zdot_load_module shell
+zdot_load_module history
 ```
 
 ---
