@@ -16,7 +16,7 @@ if [[ "${_pdh_enabled_early}" != (false|no|0) ]]; then
 fi
 
 _history_init() {
-    # --- per-directory history ---
+    # --- optional per-directory history ---
     local _pdh_enabled
     zstyle -s ':zdot:history' per-dir _pdh_enabled
     if [[ "${_pdh_enabled}" != (false|no|0) ]]; then
