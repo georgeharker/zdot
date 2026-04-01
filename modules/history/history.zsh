@@ -43,6 +43,8 @@ _history_init() {
 
     # --- shell options ---
     setopt SHARE_HISTORY
+    setopt HIST_IGNORE_SPACE
+    setopt HIST_REDUCE_BLANKS
 }
 
 # Register hook - requires XDG paths for history directory
