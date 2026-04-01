@@ -1,0 +1,459 @@
+#!/usr/bin/env zsh
+# Show ASCII dependency-tree graph for the zdot hook system
+# Usage: zdot_hooks_graph [--depends <name>] [--uses <name>] [--all]
+# Options:
+#   --depends <name>   Show dependency tree for a hook (what it requires, recursively)
+#   --uses <name>      Show what depends on a hook (what requires it, recursively)
+#   --all              Show full dependency graph for all hooks
+
+function zdot_hooks_graph() {
+    local mode=""
+    local target_name=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --depends)
+                mode="depends"
+                target_name="$2"
+                shift 2
+                ;;
+            --uses)
+                mode="uses"
+                target_name="$2"
+                shift 2
+                ;;
+            --all)
+                mode="all"
+                shift
+                ;;
+            --help|-h)
+                zdot_info "zdot hook graph — ASCII dependency-tree graph"
+                zdot_info ""
+                zdot_info "  --depends <name>   Show what a hook requires (recursive)"
+                zdot_info "  --uses <name>      Show what depends on a hook (recursive)"
+                zdot_info "  --all              Show full graph for all hooks"
+                return 0
+                ;;
+            *)
+                zdot_error "zdot hook graph: unknown option '$1'"
+                zdot_info "  usage: zdot hook graph --depends <name> | --uses <name> | --all"
+                return 1
+                ;;
+        esac
+    done
+
+    if [[ -z "$mode" ]]; then
+        zdot_error "zdot hook graph: no mode specified"
+        zdot_info "  usage: zdot hook graph --depends <name> | --uses <name> | --all"
+        return 1
+    fi
+
+    # ── helper: resolve hook_id from a name or function name ──────────────────
+    # Sets REPLY to the hook_id, or empty string if not found.
+    function _zdot_graph_resolve_id() {
+        local name="$1"
+        REPLY=""
+
+        # Try by --name label first
+        if [[ -n "${_ZDOT_HOOK_BY_NAME[$name]}" ]]; then
+            REPLY="${_ZDOT_HOOK_BY_NAME[$name]}"
+            return 0
+        fi
+
+        # Try by function name
+        local hid
+        for hid in ${(k)_ZDOT_HOOKS}; do
+            if [[ "${_ZDOT_HOOKS[$hid]}" == "$name" ]]; then
+                REPLY="$hid"
+                return 0
+            fi
+        done
+
+        return 1
+    }
+
+    # ── helper: get display name for a hook_id ─────────────────────────────────
+    function _zdot_graph_display_name() {
+        local hid="$1"
+        local label="${_ZDOT_HOOK_NAMES[$hid]:-}"
+        local func="${_ZDOT_HOOKS[$hid]:-$hid}"
+        if [[ -n "$label" && "$label" != "$func" ]]; then
+            print "${func} (${label})"
+        else
+            print "$func"
+        fi
+    }
+
+    # ── helper: find all contexts to use for phase lookups ────────────────────
+    # Returns a list of the active contexts (or all if show_all).
+    function _zdot_graph_all_contexts() {
+        local -a ctxs=()
+        local hid
+        for hid in ${(k)_ZDOT_HOOKS}; do
+            local c
+            for c in ${=_ZDOT_HOOK_CONTEXTS[$hid]}; do
+                if [[ -z "${ctxs[(r)$c]}" ]]; then
+                    ctxs+=("$c")
+                fi
+            done
+        done
+        print "${ctxs[@]}"
+    }
+
+    # Build list of all known contexts
+    local -a _all_ctx
+    _all_ctx=( ${(f)"$(_zdot_graph_all_contexts)"} )
+
+    # ── helper: find hook_id that provides a given phase ──────────────────────
+    # Searches all known contexts. Returns first match via REPLY.
+    function _zdot_graph_provider_for_phase() {
+        local phase="$1"
+        REPLY=""
+        local ctx
+        for ctx in "${_all_ctx[@]}"; do
+            local key="${ctx}:${phase}"
+            if [[ -n "${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$key]}" ]]; then
+                REPLY="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$key]}"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    # ── helper: build reverse map: hook_id -> space-separated hook_ids that require it
+    # Stored in assoc array _zdot_graph_reverse_map (caller must declare it)
+    function _zdot_graph_build_reverse_map() {
+        local hid phase provider_id
+        for hid in ${(k)_ZDOT_HOOKS}; do
+            local requires="${_ZDOT_HOOK_REQUIRES[$hid]:-}"
+            [[ -z "$requires" ]] && continue
+            for phase in ${=requires}; do
+                _zdot_graph_provider_for_phase "$phase"
+                provider_id="$REPLY"
+                [[ -z "$provider_id" ]] && continue
+                [[ "$provider_id" == "$hid" ]] && continue
+                if [[ -z "${_zdot_graph_reverse_map[$provider_id]}" ]]; then
+                    _zdot_graph_reverse_map[$provider_id]="$hid"
+                else
+                    _zdot_graph_reverse_map[$provider_id]+=" $hid"
+                fi
+            done
+        done
+    }
+
+    # ── recursive tree printer ────────────────────────────────────────────────
+    # _zdot_graph_print_depends <hook_id> <prefix> <is_last> <visited_set_name>
+    # visited_set_name is the name of an associative array in the caller's scope.
+    function _zdot_graph_print_depends() {
+        local hid="$1"
+        local prefix="$2"
+        local is_last="$3"
+
+        local connector
+        local child_prefix
+        if [[ "$is_last" == "1" ]]; then
+            connector="└── "
+            child_prefix="${prefix}    "
+        else
+            connector="├── "
+            child_prefix="${prefix}│   "
+        fi
+
+        local display
+        display="$(_zdot_graph_display_name "$hid")"
+
+        # Mark visited (use global to avoid subshell issues)
+        if [[ -n "${_zdot_graph_visited[$hid]}" ]]; then
+            zdot_info "${prefix}${connector}${display} [cycle]"
+            return
+        fi
+        _zdot_graph_visited[$hid]=1
+
+        zdot_info "${prefix}${connector}${display}"
+
+        # Recurse into dependencies
+        local requires="${_ZDOT_HOOK_REQUIRES[$hid]:-}"
+        if [[ -z "$requires" ]]; then
+            unset "_zdot_graph_visited[$hid]"
+            return
+        fi
+
+        local -a dep_phases=( ${=requires} )
+        local -a child_ids=()
+        local phase provider_id
+        for phase in "${dep_phases[@]}"; do
+            _zdot_graph_provider_for_phase "$phase"
+            provider_id="$REPLY"
+            if [[ -n "$provider_id" && "$provider_id" != "$hid" ]]; then
+                # Deduplicate
+                if [[ -z "${child_ids[(r)$provider_id]}" ]]; then
+                    child_ids+=("$provider_id")
+                fi
+            else
+                # Phase has no provider — show as a dangling phase node
+                if [[ -z "${child_ids[(r)phase:$phase]}" ]]; then
+                    child_ids+=("phase:$phase")
+                fi
+            fi
+        done
+
+        local i total="${#child_ids[@]}"
+        for (( i=1; i<=total; i++ )); do
+            local cid="${child_ids[$i]}"
+            local c_is_last=0
+            [[ $i -eq $total ]] && c_is_last=1
+            if [[ "$cid" == phase:* ]]; then
+                local phase_name="${cid#phase:}"
+                local c_conn
+                if [[ "$c_is_last" == "1" ]]; then
+                    c_conn="└── "
+                else
+                    c_conn="├── "
+                fi
+                zdot_info "${child_prefix}${c_conn}[phase: ${phase_name}] (no provider)"
+            else
+                _zdot_graph_print_depends "$cid" "$child_prefix" "$c_is_last"
+            fi
+        done
+
+        unset "_zdot_graph_visited[$hid]"
+    }
+
+    # _zdot_graph_print_uses <hook_id> <prefix> <is_last>
+    function _zdot_graph_print_uses() {
+        local hid="$1"
+        local prefix="$2"
+        local is_last="$3"
+
+        local connector
+        local child_prefix
+        if [[ "$is_last" == "1" ]]; then
+            connector="└── "
+            child_prefix="${prefix}    "
+        else
+            connector="├── "
+            child_prefix="${prefix}│   "
+        fi
+
+        local display
+        display="$(_zdot_graph_display_name "$hid")"
+
+        if [[ -n "${_zdot_graph_visited[$hid]}" ]]; then
+            zdot_info "${prefix}${connector}${display} [cycle]"
+            return
+        fi
+        _zdot_graph_visited[$hid]=1
+
+        zdot_info "${prefix}${connector}${display}"
+
+        local dependents="${_zdot_graph_reverse_map[$hid]:-}"
+        if [[ -z "$dependents" ]]; then
+            unset "_zdot_graph_visited[$hid]"
+            return
+        fi
+
+        local -a dep_ids=( ${=dependents} )
+        local total="${#dep_ids[@]}"
+        local i
+        for (( i=1; i<=total; i++ )); do
+            local did="${dep_ids[$i]}"
+            local c_is_last=0
+            [[ $i -eq $total ]] && c_is_last=1
+            _zdot_graph_print_uses "$did" "$child_prefix" "$c_is_last"
+        done
+
+        unset "_zdot_graph_visited[$hid]"
+    }
+
+    # ── mode: --depends ────────────────────────────────────────────────────────
+    if [[ "$mode" == "depends" ]]; then
+        if [[ -z "$target_name" ]]; then
+            zdot_error "zdot hook graph --depends: requires a hook name"
+            return 1
+        fi
+
+        _zdot_graph_resolve_id "$target_name"
+        local root_id="$REPLY"
+        if [[ -z "$root_id" ]]; then
+            zdot_error "zdot hook graph --depends: no hook found for '${target_name}'"
+            return 1
+        fi
+
+        local root_display
+        root_display="$(_zdot_graph_display_name "$root_id")"
+        zdot_info "$root_display"
+
+        local requires="${_ZDOT_HOOK_REQUIRES[$root_id]:-}"
+        if [[ -z "$requires" ]]; then
+            zdot_info "  (no dependencies)"
+            return 0
+        fi
+
+        # Build child list
+        local -a dep_phases=( ${=requires} )
+        local -a child_ids=()
+        local phase provider_id
+        for phase in "${dep_phases[@]}"; do
+            _zdot_graph_provider_for_phase "$phase"
+            provider_id="$REPLY"
+            if [[ -n "$provider_id" && "$provider_id" != "$root_id" ]]; then
+                if [[ -z "${child_ids[(r)$provider_id]}" ]]; then
+                    child_ids+=("$provider_id")
+                fi
+            else
+                if [[ -z "${child_ids[(r)phase:$phase]}" ]]; then
+                    child_ids+=("phase:$phase")
+                fi
+            fi
+        done
+
+        typeset -gA _zdot_graph_visited=()
+        _zdot_graph_visited[$root_id]=1
+
+        local i total="${#child_ids[@]}"
+        for (( i=1; i<=total; i++ )); do
+            local cid="${child_ids[$i]}"
+            local c_is_last=0
+            [[ $i -eq $total ]] && c_is_last=1
+            if [[ "$cid" == phase:* ]]; then
+                local phase_name="${cid#phase:}"
+                local c_conn
+                if [[ "$c_is_last" == "1" ]]; then
+                    c_conn="└── "
+                else
+                    c_conn="├── "
+                fi
+                zdot_info "${c_conn}[phase: ${phase_name}] (no provider)"
+            else
+                _zdot_graph_print_depends "$cid" "" "$c_is_last"
+            fi
+        done
+
+        unset _zdot_graph_visited
+        return 0
+    fi
+
+    # ── mode: --uses ───────────────────────────────────────────────────────────
+    if [[ "$mode" == "uses" ]]; then
+        if [[ -z "$target_name" ]]; then
+            zdot_error "zdot hook graph --uses: requires a hook name"
+            return 1
+        fi
+
+        _zdot_graph_resolve_id "$target_name"
+        local root_id="$REPLY"
+        if [[ -z "$root_id" ]]; then
+            zdot_error "zdot hook graph --uses: no hook found for '${target_name}'"
+            return 1
+        fi
+
+        typeset -gA _zdot_graph_reverse_map=()
+        _zdot_graph_build_reverse_map
+
+        local root_display
+        root_display="$(_zdot_graph_display_name "$root_id")"
+        zdot_info "$root_display"
+
+        local dependents="${_zdot_graph_reverse_map[$root_id]:-}"
+        if [[ -z "$dependents" ]]; then
+            zdot_info "  (nothing depends on this hook)"
+            unset _zdot_graph_reverse_map
+            return 0
+        fi
+
+        local -a dep_ids=( ${=dependents} )
+        local total="${#dep_ids[@]}"
+        typeset -gA _zdot_graph_visited=()
+        _zdot_graph_visited[$root_id]=1
+
+        local i
+        for (( i=1; i<=total; i++ )); do
+            local did="${dep_ids[$i]}"
+            local c_is_last=0
+            [[ $i -eq $total ]] && c_is_last=1
+            _zdot_graph_print_uses "$did" "" "$c_is_last"
+        done
+
+        unset _zdot_graph_visited
+        unset _zdot_graph_reverse_map
+        return 0
+    fi
+
+    # ── mode: --all ────────────────────────────────────────────────────────────
+    if [[ "$mode" == "all" ]]; then
+        typeset -gA _zdot_graph_reverse_map=()
+        _zdot_graph_build_reverse_map
+
+        # Find root hooks: those that nothing depends on (no entry in reverse map
+        # as a dependent) — i.e. hooks not appearing as a value in any reverse entry.
+        local -A _is_dependent=()
+        local hid deps dep
+        for hid in ${(k)_zdot_graph_reverse_map}; do
+            for dep in ${=_zdot_graph_reverse_map[$hid]}; do
+                _is_dependent[$dep]=1
+            done
+        done
+
+        # Collect roots: hooks in the execution plan that are not dependents
+        local -a roots=()
+        local pid
+        for pid in "${_ZDOT_EXECUTION_PLAN[@]}" "${_ZDOT_EXECUTION_PLAN_DEFERRED[@]}"; do
+            [[ -n "${_is_dependent[$pid]}" ]] && continue
+            if [[ -z "${roots[(r)$pid]}" ]]; then
+                roots+=("$pid")
+            fi
+        done
+
+        # Any registered hook not yet in roots and not a dependent is also a root
+        for hid in ${(k)_ZDOT_HOOKS}; do
+            [[ -n "${_is_dependent[$hid]}" ]] && continue
+            if [[ -z "${roots[(r)$hid]}" ]]; then
+                roots+=("$hid")
+            fi
+        done
+
+        if [[ ${#roots[@]} -eq 0 ]]; then
+            zdot_info "(no hooks registered)"
+            unset _zdot_graph_reverse_map
+            return 0
+        fi
+
+        zdot_info "Hook dependency graph (uses direction: roots have no dependents):"
+        zdot_info ""
+
+        typeset -gA _zdot_graph_visited=()
+
+        local i total="${#roots[@]}"
+        for (( i=1; i<=total; i++ )); do
+            local root="${roots[$i]}"
+            local c_is_last=0
+            [[ $i -eq $total ]] && c_is_last=1
+
+            local root_display
+            root_display="$(_zdot_graph_display_name "$root")"
+            zdot_info "$root_display"
+
+            local dependents="${_zdot_graph_reverse_map[$root]:-}"
+            if [[ -n "$dependents" ]]; then
+                local -a dep_ids=( ${=dependents} )
+                local dtotal="${#dep_ids[@]}"
+                local j
+                _zdot_graph_visited[$root]=1
+                for (( j=1; j<=dtotal; j++ )); do
+                    local did="${dep_ids[$j]}"
+                    local dc_is_last=0
+                    [[ $j -eq $dtotal ]] && dc_is_last=1
+                    _zdot_graph_print_uses "$did" "" "$dc_is_last"
+                done
+                unset "_zdot_graph_visited[$root]"
+            fi
+
+            zdot_info ""
+        done
+
+        unset _zdot_graph_visited
+        unset _zdot_graph_reverse_map
+        return 0
+    fi
+}

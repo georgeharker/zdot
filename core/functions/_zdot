@@ -35,6 +35,7 @@ function _zdot() {
         'plan:print the full execution plan'
         'status:show per-hook run status from last startup'
         'defer-queue:show deferred task submission order'
+        'graph:show ASCII dependency-tree graph'
         'help:show help for hook'
     )
 
@@ -91,7 +92,7 @@ function _zdot() {
 
     # ── flags per noun+verb ──────────────────────────────────────────────────
 
-    local -a flags_hook_list flags_plugin_list flags_plugin_clean \
+    local -a flags_hook_list flags_hook_graph flags_plugin_list flags_plugin_clean \
              flags_update_check flags_update_apply flags_phase_list
 
     flags_hook_list=(
@@ -101,6 +102,12 @@ function _zdot() {
         '--all[show all contexts]'
         '-o[show hooks in execution-plan order]'
         '--ordered[show hooks in execution-plan order]'
+    )
+
+    flags_hook_graph=(
+        '--depends[show dependency tree for a named hook]:hook name:'
+        '--uses[show what depends on a named hook]:hook name:'
+        '--all[show full dependency graph for all hooks]'
     )
 
     flags_plugin_list=(
@@ -155,6 +162,7 @@ function _zdot() {
         *)
             case "${noun}:${verb}" in
                 hook:list)              _arguments -s "${flags_hook_list[@]}" ;;
+                hook:graph)             _arguments -s "${flags_hook_graph[@]}" ;;
                 phase:list)             _arguments -s "${flags_phase_list[@]}" ;;
                 plugin:list)            _arguments -s "${flags_plugin_list[@]}" ;;
                 plugin:clean)           _arguments -s "${flags_plugin_clean[@]}" ;;

@@ -40,6 +40,10 @@ function zdot() {
         zdot_info "  zdot hook plan               Print the full execution plan"
         zdot_info "  zdot hook status             Show per-hook run status from last startup"
         zdot_info "  zdot hook defer-queue        Show deferred task submission order"
+        zdot_info "  zdot hook graph              Show ASCII dependency-tree graph"
+        zdot_info "    --depends <name>         Show what a hook requires (recursive)"
+        zdot_info "    --uses <name>            Show what depends on a hook (recursive)"
+        zdot_info "    --all                    Show full graph for all hooks"
     }
 
     function _zdot_help_plugin() {
@@ -150,7 +154,7 @@ function zdot() {
         zdot_info "Usage: zdot <noun> <verb> [options]"
         zdot_info ""
         zdot_info "  cache      status | invalidate | compile"
-        zdot_info "  hook       list [-v] [-a] [-o] | plan | status | defer-queue"
+        zdot_info "  hook       list [-v] [-a] [-o] | plan | status | defer-queue | graph [--depends <name>|--uses <name>|--all]"
         zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec] | clean [--dry-run] [--remove-unused] | reclone"
         zdot_info "  module     list | clone <name>"
@@ -192,10 +196,11 @@ function zdot() {
                 plan)        zdot_show_plan ;;
                 status)      zdot_hooks_status ;;
                 defer-queue) zdot_show_defer_queue ;;
+                graph)       zdot_hooks_graph "${@:3}" ;;
                 help|--help|-h) _zdot_help_hook ;;
                 *)
                     zdot_error "zdot hook: unknown verb '${verb}'"
-                    zdot_info "  verbs: list | plan | status | defer-queue"
+                    zdot_info "  verbs: list | plan | status | defer-queue | graph"
                     return 1
                     ;;
             esac
