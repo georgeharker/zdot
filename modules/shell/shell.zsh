@@ -2,7 +2,11 @@
 # Shell configuration module
 # History settings and shell options
 
+zdot_use_plugin jimhester/per-directory-history
+
 _shell_init() {
+    zdot_load_plugin jimhester/per-directory-history
+
     # Setup history directory
     if [[ ! -d ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history ]]; then
         mkdir -p ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history
@@ -14,7 +18,8 @@ _shell_init() {
     HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/
 
     # Shell options
-    setopt share_history
+    setopt INC_APPEND_HISTORY
+    setopt SHARE_HISTORY
 }
 
 # Register hook - requires XDG paths for history directory
