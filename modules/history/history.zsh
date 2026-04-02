@@ -2,26 +2,28 @@
 # Shell configuration module
 # History settings and shell options
 
-# zstyle ':zdot:history' size    <n>         # HISTSIZE (default: 50000)
-# zstyle ':zdot:history' save-size   <n>     # SAVEHIST (default: 100000)
-# zstyle ':zdot:history' per-dir     false   # set to false/no/0 to disable per-directory history
+# zstyle ':zdot:history' size           <n>     # HISTSIZE (default: 50000)
+# zstyle ':zdot:history' save-size      <n>     # SAVEHIST (default: 100000)
+# zstyle ':zdot:history' per-dir        true    # set to false/no/0 to disable per-directory history
+# zstyle ':zdot:history' start-global   true    # set to false/no/0 to disable per-directory history
+# zstyle ':zdot:history' per-dir-key    '^G'    # set key to toggle global
 
 # Conditionally declare per-directory-history plugin only when it is enabled.
 # We must do this at module-load time (before the hook runs) so that
 # zdot_load_plugin can find it in the declared-plugin registry.
-local _pdh_enabled_early
-zstyle -s ':zdot:history' per-dir _pdh_enabled_early
-if [[ "${_pdh_enabled_early}" != (false|no|0) ]]; then
+if zstyle -T ':zdot:history' per-dir; then
     zdot_use_plugin jimhester/per-directory-history
 fi
 
 _history_init() {
     # --- optional per-directory history ---
-    local _pdh_enabled
-    zstyle -s ':zdot:history' per-dir _pdh_enabled
-    if [[ "${_pdh_enabled}" != (false|no|0) ]]; then
+    if zstyle -T ':zdot:history' per-dir; then
         zdot_load_plugin jimhester/per-directory-history
         HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/
+        zstyle -T ':zdot:history' start-global HISTORY_START_WITH_GLOBAL; then
+        if ! zstyle -s ':zdot:history' per-dir-key PER_DIRECTORY_HISTORY_TOGGLE; then
+            PER_DIRECTORY_HISTORY_TOGGLE='^G'
+        fi
     fi
 
     # --- history file ---
