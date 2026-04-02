@@ -20,7 +20,7 @@ _history_init() {
     if zstyle -T ':zdot:history' per-dir; then
         zdot_load_plugin jimhester/per-directory-history
         HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/
-        zstyle -T ':zdot:history' start-global HISTORY_START_WITH_GLOBAL; then
+        zstyle -T ':zdot:history' start-global HISTORY_START_WITH_GLOBAL
         if ! zstyle -s ':zdot:history' per-dir-key PER_DIRECTORY_HISTORY_TOGGLE; then
             PER_DIRECTORY_HISTORY_TOGGLE='^G'
         fi
