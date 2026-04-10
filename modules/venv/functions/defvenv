@@ -1,8 +1,8 @@
 #!/usr/bin/env zsh
 # Activate virtual environment
 
-avenv() {
-    local venv=${1:-.venv}
+defvenv() {
+    local venv=$HOME/.venv
     if [[ -d .venv ]] ; then
         source ${venv}/bin/activate
     else

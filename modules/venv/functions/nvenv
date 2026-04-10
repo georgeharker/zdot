@@ -9,5 +9,6 @@ nvenv() {
         uv venv -p ${python_version} --system-site-packages --seed ${venv}
     else
         echo "Venv ${venv} already exists"
+        return 1
     fi
 }
