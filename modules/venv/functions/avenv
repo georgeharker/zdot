@@ -3,7 +3,7 @@
 
 avenv() {
     local venv=${1:-.venv}
-    if [[ -d .venv ]] ; then
+    if [[ -d "${venv}" ]] ; then
         source ${venv}/bin/activate
     else
         echo "No venv (${venv}) found"

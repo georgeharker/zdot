@@ -4,7 +4,7 @@
 rvenv() {
     local python_version=${1:-$DEFAULT_PYTHON_VERSION}
     local venv=${2:-.venv}
-    if [[ -d ${venv} ]]; then
+    if [[ -d "${venv}" ]]; then
         local datestring=`date "+%Y-%m-%d.%H.%M"`
         avenv ${venv}
         local requirements="/tmp/requirements.${datestring}.txt"
