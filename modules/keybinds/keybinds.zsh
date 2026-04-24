@@ -11,6 +11,8 @@ _keybinds_init() {
     bindkey '\e[F' end-of-line
     bindkey '\e[5~' history-search-backward
     bindkey '\e[6~' history-search-forward
+    
+    bindkey '\e[1;3A' history-search-backward
 }
 
 # Register hook: requires plugins to be loaded and post-configured

@@ -425,11 +425,65 @@ Additionally, `zdot_register_hook` deduplicates by name -- if a module file is
 sourced twice, the second registration is silently skipped. Between these two
 guards, the file can be sourced any number of times safely.
 
+#### The ordering problem: `.zshenv` runs before `/etc/zprofile`
+
+zdot's re-entry guard is sufficient to prevent double execution, but there is a
+subtler issue with running the full interactive setup at `.zshenv` time.
+
+Zsh's startup file order for an interactive login shell is:
+
+```
+/etc/zshenv  →  ~/.zshenv
+/etc/zprofile  →  ~/.zprofile
+/etc/zshrc  →  ~/.zshrc
+```
+
+System files like `/etc/zprofile` run **between** `.zshenv` and `.zshrc`. On
+macOS, `/etc/zprofile` calls `/usr/libexec/path_helper` to set up the base
+`PATH` (including Homebrew's prefix). If your interactive setup -- and zdot's
+`brew` module -- runs at `.zshenv` time, it executes before `path_helper` has
+had a chance to run, so `brew` may not be on `PATH` yet.
+
+The zdot guard solves double-execution but does not help here: once interactive
+init has run at `.zshenv` time, the `.zshrc` source is a no-op and
+`/etc/zprofile`'s additions arrive too late.
+
+#### Recommended pattern: defer interactive init to `.zshrc`
+
+Add this guard **before** the zdot boilerplate in your shared `.zshrc`/`.zshenv`
+file:
+
+```zsh
+# When interactive, only initialize from .zshrc — not .zshenv.
+# This lets /etc/zprofile (Homebrew PATH, path_helper, etc.) run first.
+[[ -o interactive ]] && [[ "${${(%):-%x}:t}" == ".zshenv" ]] && return
+```
+
+`${(%):-%x}` is zsh's prompt-expansion equivalent of `BASH_SOURCE[0]`: it
+expands to the name of the file currently being read. Combined with `:t` (tail /
+basename), it returns `.zshenv` or `.zshrc` depending on which symlink zsh
+opened.
+
+With this guard in place:
+
+- **Interactive shell, sourced as `.zshenv`** — returns immediately; waits for
+  `.zshrc` to trigger zdot.
+- **Interactive shell, sourced as `.zshrc`** — runs the full interactive setup,
+  after `/etc/zprofile` has already executed.
+- **Non-interactive shell, sourced as `.zshenv`** — `-o interactive` is false,
+  guard is skipped, zdot runs the noninteractive plan as normal.
+
 #### Putting it together
 
 ```zsh
 # This file is both ~/.zshenv AND ~/.zshrc (via symlink).
-# zdot handles the rest.
+
+# Interactive shells: wait for .zshrc so /etc/zprofile runs first.
+[[ -o interactive ]] && [[ "${${(%):-%x}:t}" == ".zshenv" ]] && return
+
+# Run-once guard (defensive; zdot_init is also internally guarded).
+[[ -n "$_ZDOT_INITIALIZED" ]] && return
+_ZDOT_INITIALIZED=1
 
 source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
@@ -448,23 +502,25 @@ zdot_load_module starship-prompt  # prompt theme (interactive only)
 zdot_load_module completions   # tab completion (interactive only)
 zdot_load_module local_rc      # source ~/.zshrc.local (interactive only)
 
-zdot_init   # guarded -- safe to call from both .zshenv and .zshrc
+zdot_init
 ```
 
-When sourced as `.zshenv` (noninteractive):
-- Context: `noninteractive nonlogin`
+When sourced as `.zshenv` (noninteractive, e.g. a script):
+- Guard passes (not interactive).
+- Context: `noninteractive nonlogin`.
 - Only hooks registered for `noninteractive` run: `PATH` setup, environment
-  variables, tool availability. Interactive-only modules like `fzf`, `keybinds`,
-  and `starship-prompt` are skipped entirely.
+  variables, tool availability. Interactive-only modules are skipped entirely.
 
-When sourced again as `.zshrc` (interactive):
-- `_ZDOT_INIT_DONE` is already set -- `zdot_init` returns immediately.
-- Nothing runs twice. The first pass already executed the full interactive plan.
+When sourced as `.zshenv` for an interactive shell:
+- Guard fires; file returns immediately.
+- `/etc/zprofile` (Homebrew, `path_helper`) runs next.
+- Then `.zshrc` is sourced and zdot runs the full interactive plan with a
+  correctly populated `PATH`.
 
-When sourced as `.zshenv` for an interactive login shell:
-- Context: `interactive login`
-- All interactive hooks run: plugins, prompts, keybinds, deferred loading.
-- The `.zshrc` source is a no-op thanks to the guard.
+When sourced as `.zshrc` (interactive):
+- Guard passes (filename is `.zshrc`).
+- `_ZDOT_INITIALIZED` not yet set; full init proceeds.
+- On subsequent subshells that re-source `.zshrc`, the run-once guard fires.
 
 ### Variants
 
