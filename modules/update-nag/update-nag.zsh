@@ -1,4 +1,3 @@
-
 #!/usr/bin/env zsh
 # Update nagging
 # Reminder updates for installers
