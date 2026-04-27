@@ -68,4 +68,4 @@ zdot_define_module autocomplete \
 
 zdot_register_hook zdot_compinit_defer interactive \
     --name compinit-defer --deferred \
-    --requires autosuggest-abbr-ready fast-abbr-ready --provides compinit-done
+    --requires autosuggest-abbr-ready --provides compinit-done
