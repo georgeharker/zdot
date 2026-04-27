@@ -9,6 +9,10 @@
 #
 # Configuration is handled via ~/.config/zsh-patina/config.toml.
 
+# requires
+zstyle ':zdot:brew' verify-tools zsh-patina
+zstyle ':zdot:apt' verify-tools zsh-patina
+
 _patina_init() {
     command -v zsh-patina &>/dev/null || {
         zdot_verbose "patina: zsh-patina not found, skipping"
