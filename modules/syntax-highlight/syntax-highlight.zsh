@@ -23,11 +23,13 @@ _syntax_highlight_configure() {
 # Deferred plugins (bespoke dependency DAG)
 zdot_use_plugin zdharma-continuum/fast-syntax-highlighting defer \
     --name fsh-load --provides fsh-ready \
-    --requires syntax-highlight-loaded prompt-ready
+    --requires syntax-highlight-loaded \
+    --requires prompt-ready
 
 zdot_use_plugin 5A6F65/fast-abbr-highlighting defer \
     --name fast-abbr-load --provides fast-abbr-ready \
-    --requires fsh-ready abbr-ready
+    --requires fsh-ready \
+    --requires abbr-ready
 
 # ============================================================================
 # Post-Load Setup
