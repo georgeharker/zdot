@@ -51,9 +51,12 @@ _autocomplete_plugins_load() {
 # Module Definition
 # ============================================================================
 
+_autocomplete_plugins_post_init() { :; }
+
 zdot_define_module autocomplete \
     --configure _autocomplete_plugins_configure \
     --load _autocomplete_plugins_load \
+    --post-init _autocomplete_plugins_post_init \
     --group omz-plugins \
     --requires plugins-cloned omz-bundle-initialized \
     --post-init-requires autosuggest-abbr-ready \
