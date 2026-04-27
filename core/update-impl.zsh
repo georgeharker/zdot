@@ -518,6 +518,8 @@ _zdot_update_hook_post() {
 
     local _new="${_range#*..}"
 
+    _update_core_announce_breaking_changes "zdot" "$_repo_dir" "$_range"
+
     case "$_topology" in
         submodule|subtree|standalone)
             local _parent
