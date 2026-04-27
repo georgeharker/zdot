@@ -56,7 +56,6 @@ _autocomplete_plugins_post_init() { :; }
 zdot_define_module autocomplete \
     --configure _autocomplete_plugins_configure \
     --load _autocomplete_plugins_load \
-    --post-init _autocomplete_plugins_post_init \
     --group omz-plugins \
     --requires plugins-cloned omz-bundle-initialized \
     --post-init-requires autosuggest-abbr-ready \
@@ -68,4 +67,4 @@ zdot_define_module autocomplete \
 
 zdot_register_hook zdot_compinit_defer interactive \
     --name compinit-defer --deferred \
-    --requires autosuggest-abbr-ready --provides compinit-done
+    --requires autosuggest-abbr-ready fast-abbr-ready --provides compinit-done
