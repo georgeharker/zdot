@@ -29,3 +29,5 @@ zdot_register_hook _patina_init interactive \
     --requires-tool zsh-patina \
     --provides patina-ready \
     --optional
+
+zdot_register_completion_file "zsh-patina" "zsh-patina completion"
