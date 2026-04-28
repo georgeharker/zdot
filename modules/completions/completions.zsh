@@ -32,8 +32,10 @@ _completions_init() {
     zdot_register_completion_file "sharedserver" "sharedserver completion zsh"
 }
 
-# Phase 2: Run live completions after tools are available
+# Phase 2: Run live completions and lazy-refresh file completions after tools are available
 _completions_finalize() {
+    lazy_refresh_completions
+
     for func in "${_ZDOT_COMPLETION_LIVE[@]}"; do
         if typeset -f "$func" > /dev/null; then
             "$func"

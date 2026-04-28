@@ -1,0 +1,23 @@
+#!/usr/bin/env zsh
+# Autoloadable function: Regenerate stale registered completions only.
+# Called automatically from _completions_finalize at shell startup.
+# Regenerates a completion file when the resolved command binary is newer
+# than the completion file, or the completion file is missing.
+
+lazy_refresh_completions() {
+    local cmd gen_cmd dest_dir comp_file _cmd_real
+    for cmd in "${_ZDOT_COMPLETION_CMDS[@]}"; do
+        gen_cmd="${_ZDOT_COMPLETION_GEN[$cmd]}"
+        dest_dir="${_ZDOT_COMPLETION_DEST[$cmd]}"
+
+        command -v "$cmd" &>/dev/null || continue
+
+        mkdir -p "$dest_dir"
+        comp_file="${dest_dir}/_${cmd}"
+        _cmd_real="${$(command -v "$cmd"):A}"
+
+        if zdot_is_newer_or_missing "$_cmd_real" "$comp_file"; then
+            eval "$gen_cmd" > "$comp_file"
+        fi
+    done
+}
