@@ -67,7 +67,10 @@ function zdot() {
     function _zdot_help_completion() {
         zdot_info "zdot completion — shell completion management"
         zdot_info ""
-        zdot_info "  zdot completion refresh  Regenerate completion files for registered tools"
+        zdot_info "  zdot completion refresh [--force]"
+        zdot_info "      Regenerate completion files for registered tools."
+        zdot_info "      Default: lazy — skips files newer than the resolved binary."
+        zdot_info "      --force: regenerate all; warn if a command is not found."
     }
 
     function _zdot_help_secret() {
@@ -310,7 +313,7 @@ function zdot() {
         # ── completion ────────────────────────────────────────────────────
         completion)
             case "$verb" in
-                refresh) refresh_completions ;;
+                refresh) refresh_completions "${@:3}" ;;
                 help|--help|-h) _zdot_help_completion ;;
                 *)
                     zdot_error "zdot completion: unknown verb '${verb}'"

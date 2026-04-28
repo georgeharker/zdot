@@ -116,10 +116,14 @@ in `core/functions/zdot`.
 Shell completion management.
 
 ```
-zdot completion refresh   # Regenerate completion files for all registered tools
+zdot completion refresh           # Lazy: regenerate only stale or missing completions
+zdot completion refresh --force   # Force: regenerate all completions unconditionally
 ```
 
-**Implementation**: delegates to `refresh_completions` (core/completions.zsh).
+Default (lazy) mode skips tools whose completion file is newer than the resolved binary.
+`--force` always regenerates and warns if any registered command is not found.
+
+**Implementation**: delegates to `refresh_completions` (`modules/completions/functions/refresh_completions`).
 
 ---
 

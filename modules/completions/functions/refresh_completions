@@ -1,20 +1,26 @@
 #!/usr/bin/env zsh
-# Autoloadable function: Generate shell completions for various tools
-# Uses registered completions from zdot_completion_register_file
+# Autoloadable function: Generate shell completions for registered tools.
+# Default (lazy): only regenerates when the binary is newer than the completion file or the file is missing.
+# --force: regenerates all completions unconditionally; warns if a command is not found.
 
 refresh_completions() {
-    # Process all registered completions in order
+    local cmd gen_cmd dest_dir comp_file _cmd_real force=0
+    [[ "${1-}" == "--force" ]] && force=1
+
     for cmd in "${_ZDOT_COMPLETION_CMDS[@]}"; do
-        local gen_cmd="${_ZDOT_COMPLETION_GEN[$cmd]}"
-        local dest_dir="${_ZDOT_COMPLETION_DEST[$cmd]}"
+        gen_cmd="${_ZDOT_COMPLETION_GEN[$cmd]}"
+        dest_dir="${_ZDOT_COMPLETION_DEST[$cmd]}"
 
-        # Ensure destination directory exists
+        if ! command -v "$cmd" &>/dev/null; then
+            (( force )) && zdot_warn "refresh_completions: command not found: $cmd"
+            continue
+        fi
+
         mkdir -p "$dest_dir"
+        comp_file="${dest_dir}/_${cmd}"
+        _cmd_real="${$(command -v "$cmd"):A}"
 
-        local comp_file="$dest_dir/_${cmd}"
-
-        # Generate if command exists and completion doesn't
-        if command -v "$cmd" &> /dev/null && [[ ! -f "$comp_file" ]]; then
+        if (( force )) || zdot_is_newer_or_missing "$_cmd_real" "$comp_file"; then
             eval "$gen_cmd" > "$comp_file"
         fi
     done
