@@ -11,4 +11,4 @@ _update_nag_init() {
 }
 
 # Register hook - requires XDG paths for tool configurations
-zdot_simple_hook update_nag
+zdot_simple_hook update_nag --context interactive
