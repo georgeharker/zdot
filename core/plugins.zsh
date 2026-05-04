@@ -175,7 +175,7 @@ zdot_use_plugin() {
     case ${1:-} in
         hook|defer|defer-prompt) subcommand=$1; shift ;;
         # Legacy positional kind argument
-        normal|defer|fpath|path) subcommand=_legacy_$1; shift ;;
+        normal|fpath|path) subcommand=_legacy_$1; shift ;;
         '') subcommand=_legacy_normal ;;
         *) zdot_error "zdot_use_plugin: unknown subcommand: $1"; return 1 ;;
     esac
