@@ -738,7 +738,7 @@ zdot_build_execution_plan() {
     for hook_id in ${(k)in_degree}; do
         if [[ ${in_degree[$hook_id]} -gt 0 ]]; then
             # Check if hook is already in execution_order (including promised phase hooks)
-            if [[ ! " ${execution_order[*]} " =~ " ${hook_id} " ]]; then
+            if (( ! ${execution_order[(Ie)${hook_id}]} )); then
                 cyclic_hooks+=("${_ZDOT_HOOKS[$hook_id]}")
             fi
         fi
@@ -1635,7 +1635,7 @@ _zdot_ran_deferred_mark() {
     local _id
     for _id in "$@"; do
         local _f="${_ZDOT_HOOKS[$_id]}"
-        [[ " ${_ZDOT_DEFER_HOOKS[@]} " =~ " ${_f} " ]] && _rd=1 && break
+        (( ${_ZDOT_DEFER_HOOKS[(Ie)${_f}]} )) && _rd=1 && break
     done
     defer_mark=""
     [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"
