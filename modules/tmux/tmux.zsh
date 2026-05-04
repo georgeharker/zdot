@@ -8,7 +8,7 @@ _tmux_configure() {
     # Auto-start tmux on SSH connections, unless already inside a multiplexer
     # or the user has opted out via ~/.notmux
     if [[ -n "${SSH_CONNECTION}" ]]; then
-        if [[ "${TERM}" =~ "^screen-.*" || "${TERM}" =~ "^tmux-.*" || -f ~/.notmux ]]; then
+        if [[ "${TERM}" =~ ^screen-.* || "${TERM}" =~ ^tmux-.* || -f ~/.notmux ]]; then
             ZSH_TMUX_AUTOSTART="false"
             ZSH_TMUX_AUTOQUIT="false"
         else
