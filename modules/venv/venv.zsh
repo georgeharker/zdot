@@ -29,7 +29,7 @@ _venv_init() {
         export UV_NO_MANAGED_PYTHON=1
     else
         zstyle -s ':zdot:venv' python-version-linux DEFAULT_PYTHON_VERSION \
-            || DEFAULT_PYTHON_VERSION='cpython@3.14.0'
+            || DEFAULT_PYTHON_VERSION='cpython@3.14.0'  # shuck: ignore=C001
         export UV_MANAGED_PYTHON=1
     fi
 

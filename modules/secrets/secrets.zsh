@@ -118,7 +118,7 @@ _op_init() {
     local -a op_config
     local op_config_dir
     op_config_dir=$(op_get_config_dir)
-    op_config=("${(@f)$(op_get_config_args)}")
+    op_config=("${(@f)$(op_get_config_args)}")  # shuck: ignore=C001
 
     # Check if config exists - set flag accordingly
     if [[ ! -f "${op_config_dir}/config" ]]; then

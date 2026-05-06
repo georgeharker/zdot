@@ -74,4 +74,4 @@ autoload -Uz _zdot
 unset zdot_core_dir core_functions_dir
 
 # Mark zdot as loaded
-_ZDOT_MODULES_LOADED[zdot]=1
+_ZDOT_MODULES_LOADED[zdot]=1  # shuck: ignore=C006

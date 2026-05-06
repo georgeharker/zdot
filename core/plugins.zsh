@@ -124,7 +124,7 @@ zdot_register_bundle() {
     # Avoid duplicates
     local h
     for h in $_ZDOT_BUNDLE_HANDLERS; do
-        [[ $h == $name ]] && return 0
+        [[ $h == "$name" ]] && return 0
     done
     _ZDOT_BUNDLE_HANDLERS+=( "$name" )
 
@@ -256,7 +256,7 @@ zdot_use_plugin() {
     # pattern triggers SIGTTOU and stops the subshell.
     local _config_body=""
     if [[ -n "$opt_config" ]]; then
-        _config_body='zdot_plugin_path "\$_spec" && '"${opt_config}"' "\$REPLY" "\$_spec"'
+        _config_body='zdot_plugin_path "\$_spec" && '"${opt_config}"' "\$REPLY" "\$_spec"'  # shuck: ignore=C005
     fi
     eval "${loader_name}() {
         local _spec=${(q)spec}

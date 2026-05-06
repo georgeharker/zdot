@@ -3,18 +3,18 @@
 
 _tmux_configure() {
     # Unicode support always on
-    ZSH_TMUX_UNICODE="true"
+    ZSH_TMUX_UNICODE="true"  # shuck: ignore=C001
 
     # Auto-start tmux on SSH connections, unless already inside a multiplexer
     # or the user has opted out via ~/.notmux
     if [[ -n "${SSH_CONNECTION}" ]]; then
         if [[ "${TERM}" =~ ^screen-.* || "${TERM}" =~ ^tmux-.* || -f ~/.notmux ]]; then
-            ZSH_TMUX_AUTOSTART="false"
-            ZSH_TMUX_AUTOQUIT="false"
+            ZSH_TMUX_AUTOSTART="false"  # shuck: ignore=C001
+            ZSH_TMUX_AUTOQUIT="false"  # shuck: ignore=C001
         else
-            ZSH_TMUX_AUTOSTART="true"
-            ZSH_TMUX_AUTOSTART_ONCE="true"
-            ZSH_TMUX_AUTOCONNECT="true"
+            ZSH_TMUX_AUTOSTART="true"  # shuck: ignore=C001
+            ZSH_TMUX_AUTOSTART_ONCE="true"  # shuck: ignore=C001
+            ZSH_TMUX_AUTOCONNECT="true"  # shuck: ignore=C001
         fi
     fi
 }

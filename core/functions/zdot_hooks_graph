@@ -388,7 +388,7 @@ function zdot_hooks_graph() {
         # Find root hooks: those that nothing depends on (no entry in reverse map
         # as a dependent) — i.e. hooks not appearing as a value in any reverse entry.
         local -A _is_dependent=()
-        local hid deps dep
+        local hid dep
         for hid in ${(k)_zdot_graph_reverse_map}; do
             for dep in ${=_zdot_graph_reverse_map[$hid]}; do
                 _is_dependent[$dep]=1

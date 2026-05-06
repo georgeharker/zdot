@@ -1638,6 +1638,6 @@ _zdot_ran_deferred_mark() {
         (( ${_ZDOT_DEFER_HOOKS[(Ie)${_f}]} )) && _rd=1 && break
     done
     defer_mark=""
-    [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"
+    [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"  # shuck: ignore=C001
 }
 

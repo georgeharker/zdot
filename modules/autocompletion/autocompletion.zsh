@@ -7,14 +7,14 @@
 
 _autocomplete_plugins_configure() {
     # Zsh-autosuggest
-    ZSH_AUTOSUGGEST_STRATEGY=(match_prev_cmd abbreviations completion)
+    ZSH_AUTOSUGGEST_STRATEGY=(match_prev_cmd abbreviations completion)  # shuck: ignore=C001
 
     # Zsh-abbr
-    ABBR_AUTOLOAD=1
-    ABBR_SET_EXPANSION_CURSOR=1
-    ABBR_SET_LINE_CURSOR=1
-    ABBR_GET_AVAILABLE_ABBREVIATION=1
-    ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations
+    ABBR_AUTOLOAD=1  # shuck: ignore=C001
+    ABBR_SET_EXPANSION_CURSOR=1  # shuck: ignore=C001
+    ABBR_SET_LINE_CURSOR=1  # shuck: ignore=C001
+    ABBR_GET_AVAILABLE_ABBREVIATION=1  # shuck: ignore=C001
+    ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations  # shuck: ignore=C001
 }
 
 # ============================================================================

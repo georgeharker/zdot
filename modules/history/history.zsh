@@ -18,14 +18,14 @@ fi
 _history_init() {
     # --- optional per-directory history ---
     if zstyle -T ':zdot:history' per-dir; then
-        HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/
+        HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/  # shuck: ignore=C001
         if zstyle -T ':zdot:history' start-global; then
-            HISTORY_START_WITH_GLOBAL=true
+            HISTORY_START_WITH_GLOBAL=true  # shuck: ignore=C001
         else
-            HISTORY_START_WITH_GLOBAL=false
+            HISTORY_START_WITH_GLOBAL=false  # shuck: ignore=C001
         fi
         if ! zstyle -s ':zdot:history' per-dir-key PER_DIRECTORY_HISTORY_TOGGLE; then
-            PER_DIRECTORY_HISTORY_TOGGLE='^G'
+            PER_DIRECTORY_HISTORY_TOGGLE='^G'  # shuck: ignore=C001
         fi
         zdot_load_plugin jimhester/per-directory-history
     fi

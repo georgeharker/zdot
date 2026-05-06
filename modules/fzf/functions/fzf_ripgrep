@@ -6,6 +6,7 @@ fzf_ripgrep() {
     local enter_bind=${1:-"enter:accept"}
     RG_PREFIX="rg --column --line-number --no-heading --color=always --smart-case "
     INITIAL_QUERY="${@[2,-1]:-}"
+    # shuck: disable=C005
     fzf --ansi --disabled --query "$INITIAL_QUERY" \
         --bind "start:reload:$RG_PREFIX {q}" \
         --bind "change:reload:sleep 0.1; $RG_PREFIX {q} || true" \

@@ -42,7 +42,7 @@ _fzf_init() {
     # Only registered if ZOXIDE_CMD_OVERRIDE is set (the completion target name varies).
     if [[ -n "${ZOXIDE_CMD_OVERRIDE}" ]]; then
         # $realpath is set by fzf-tab at preview time — single quotes are intentional
-        zstyle ":fzf-tab:complete:${ZOXIDE_CMD_OVERRIDE}:*" fzf-preview 'eza -1 --color=always --icons $realpath'
+        zstyle ":fzf-tab:complete:${ZOXIDE_CMD_OVERRIDE}:*" fzf-preview 'eza -1 --color=always --icons $realpath'  # shuck: ignore=C005
     fi
 
     # custom fzf flags

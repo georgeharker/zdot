@@ -61,6 +61,7 @@ zdot_update_plugin() {
             local omz_path="$cache/ohmyzsh/ohmyzsh"
             zdot_action "  Updating ohmyzsh..."
             if [[ -d "$omz_path/.git" ]]; then
+                # shuck: disable=C010
                 (cd "$omz_path" && command git pull --quiet) 2>/dev/null && zdot_info "    ohmyzsh updated" || zdot_error "    ohmyzsh failed"
                 ((updated++))
             fi
@@ -90,6 +91,7 @@ zdot_update_plugin() {
                     (cd "$plugin_path" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null
                 else
                     zdot_action "  Updating $spec..."
+                    # shuck: disable=C010
                     (cd "$plugin_path" && command git pull --quiet) 2>/dev/null && zdot_info "    updated" || zdot_error "    failed"
                 fi
                 ((updated++))

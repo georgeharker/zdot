@@ -25,7 +25,7 @@ _omz_prompt_init() {
         return 1
     }
 
-    ZSH_THEME="$_theme"
+    ZSH_THEME="$_theme"  # shuck: ignore=C001
     local _theme_file="${ZSH}/themes/${_theme}.zsh-theme"
     [[ -f "$_theme_file" ]] || _theme_file="${ZSH_CUSTOM:-$ZSH/custom}/themes/${_theme}.zsh-theme"
 
