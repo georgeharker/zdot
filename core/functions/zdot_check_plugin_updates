@@ -1,0 +1,76 @@
+#!/usr/bin/env zsh
+# zdot_check_plugin_updates: Report plugins with available updates.
+# Performs git fetch but never modifies plugin worktrees. Prints one line
+# per plugin that is behind upstream; silent for up-to-date or pinned plugins.
+# Bundle-aware via zdot_plugin_repo.
+
+zdot_check_plugin_updates() {
+    local -a specs
+    if (( $# )); then
+        specs=( "$@" )
+    else
+        specs=( "${_ZDOT_PLUGINS_ORDER[@]}" "${_ZDOT_BUNDLE_REPOS[@]}" )
+    fi
+
+    local -A seen
+    local spec bare version repo_dir label
+    local local_sha upstream_sha behind
+
+    for spec in "${specs[@]}"; do
+        bare=$spec
+        version=""
+        if [[ $bare == *@* ]]; then
+            version=${bare##*@}
+            bare=${bare%@*}
+        fi
+        if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
+            version=${_ZDOT_PLUGINS_VERSION[$bare]}
+        fi
+
+        # Bundles without a backing repo can't be checked; the corresponding
+        # `update` call surfaces the warning, so stay silent here.
+        if ! zdot_plugin_repo "$bare"; then
+            continue
+        fi
+        repo_dir=$REPLY
+        zdot_plugin_name "$bare"
+        label=$REPLY
+
+        if (( ${+seen[$repo_dir]} )); then
+            continue
+        fi
+        seen[$repo_dir]=1
+
+        # Pinned: skip silently — at a fixed ref by design.
+        if [[ -n "$version" ]]; then
+            continue
+        fi
+
+        if [[ ! -d "$repo_dir" ]]; then
+            zdot_info "  $label: not installed"
+            continue
+        fi
+
+        if [[ ! -d "$repo_dir/.git" ]]; then
+            zdot_info "  $label: not a git repo"
+            continue
+        fi
+
+        (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
+
+        local_sha=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
+        upstream_sha=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)
+
+        if [[ -z "$upstream_sha" ]]; then
+            zdot_info "  $label: no upstream tracked"
+            continue
+        fi
+
+        if [[ "$local_sha" == "$upstream_sha" ]]; then
+            continue
+        fi
+
+        behind=$(cd "$repo_dir" && command git rev-list --count "HEAD..@{u}" 2>/dev/null)
+        zdot_info "  $label: $behind behind ($local_sha -> $upstream_sha)"
+    done
+}
