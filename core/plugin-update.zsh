@@ -1,0 +1,462 @@
+# core/plugin-update.zsh
+# Background-mode update reminders for plugins zdot manages.
+#
+# Sourced unconditionally from zdot.zsh so the file gets compiled to .zwc
+# alongside the rest of core. The file defines functions only — NO hook
+# registration, NO zstyle reads, NO state-dir creation at source time.
+# modules/plugins/plugins.zsh is responsible for wiring this into the
+# hook system (and any module that wants a similar nag UI for its own
+# updates can register the same engine functions on its own cadence).
+#
+# Distinct from core/update.zsh (zdot self-update):
+#   - core/update.zsh tracks ZDOT_REPO itself (and dotfiler integration).
+#   - This file scans every git-backed plugin in _ZDOT_PLUGINS_PATH on its
+#     own cadence and prompts the user to fast-forward those that have a
+#     new upstream HEAD. Reuses zdot_check_plugin_updates' primitives
+#     (zdot_plugin_repo / zdot_plugin_name) for bundle-aware dedupe and
+#     delegates the apply step to zdot_update_plugin.
+#
+# Opt-in. Default mode is 'disabled' — zero overhead until configured.
+#
+# zstyle reference:
+#   zstyle ':zdot:plugin-update' mode        disabled  # disabled | reminder | prompt
+#   zstyle ':zdot:plugin-update' frequency   14400     # seconds between checks (4h)
+#   zstyle ':zdot:plugin-update' ssh         0         # 1 to opt in under SSH
+#
+# The flow mirrors zsh-pkg-update-nag's deferred mode:
+#   1. _zdot_plugin_update_main_deferred runs in the interactive 'finally'
+#      hook group. If due and not locked, it forks a background subshell
+#      that runs the scan and writes results atomically to a pending file,
+#      then registers a precmd hook in the parent and returns immediately.
+#   2. _zdot_plugin_update_precmd fires before each prompt. While the scan
+#      is in flight it prints a one-shot dim notice; once the pending file
+#      lands it consumes it and either does nothing (no updates), logs an
+#      error, or pops the y/n prompt.
+#   3. _zdot_plugin_update_prompt_and_upgrade renders the summary, gates on
+#      _zdot_plugin_update_has_typed_input (auto-skips as 'n' if the user
+#      is mid-typing), and on Y runs git pull --ff-only per plugin.
+
+# ============================================================================
+# State paths and config
+# ============================================================================
+
+_zdot_plugin_update_state_dir() {
+    print -r -- "${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugin-update"
+}
+_zdot_plugin_update_pending_path() { print -r -- "$(_zdot_plugin_update_state_dir)/pending" }
+_zdot_plugin_update_stamp_path()   { print -r -- "$(_zdot_plugin_update_state_dir)/last_check" }
+_zdot_plugin_update_lock_path()    { print -r -- "$(_zdot_plugin_update_state_dir)/lock.d" }
+
+_zdot_plugin_update_mode() {
+    local m
+    zstyle -s ':zdot:plugin-update' mode m
+    print -r -- "${m:-disabled}"
+}
+
+_zdot_plugin_update_frequency() {
+    local f
+    zstyle -s ':zdot:plugin-update' frequency f
+    print -r -- "${f:-14400}"
+}
+
+_zdot_plugin_update_mtime() {
+    local target=$1 result
+    if result=$(stat -f %m "$target" 2>/dev/null) && [[ -n $result ]]; then
+        print -r -- "$result"; return
+    fi
+    if result=$(stat -c %Y "$target" 2>/dev/null) && [[ -n $result ]]; then
+        print -r -- "$result"; return
+    fi
+    print -r -- 0
+}
+
+# ============================================================================
+# Guards / rate limit / lock
+# ============================================================================
+
+_zdot_plugin_update_should_run() {
+    emulate -L zsh
+    setopt local_options
+    [[ "$(_zdot_plugin_update_mode)" != disabled ]] || return 1
+    [[ -o interactive ]] || return 1
+    [[ -t 0 && -t 1 ]] || return 1
+    [[ $TERM != dumb ]] || return 1
+    [[ -z $CI ]] || return 1
+    [[ -z $INSIDE_EMACS ]] || return 1
+    if [[ -n $SSH_CONNECTION || -n $SSH_CLIENT ]]; then
+        local ssh_opt
+        zstyle -s ':zdot:plugin-update' ssh ssh_opt
+        [[ "${ssh_opt:-0}" == 1 ]] || return 1
+    fi
+    return 0
+}
+
+_zdot_plugin_update_is_due() {
+    emulate -L zsh
+    setopt local_options
+    local stamp=$(_zdot_plugin_update_stamp_path)
+    [[ -e $stamp ]] || return 0
+    local interval=$(_zdot_plugin_update_frequency)
+    local now=$(date +%s)
+    local mtime=$(_zdot_plugin_update_mtime "$stamp")
+    (( now - mtime >= interval ))
+}
+
+_zdot_plugin_update_stamp() {
+    emulate -L zsh
+    setopt local_options
+    local stamp=$(_zdot_plugin_update_stamp_path)
+    local dir=${stamp:h}
+    [[ -d $dir ]] || mkdir -p "$dir" 2>/dev/null
+    : > "$stamp" 2>/dev/null
+}
+
+_zdot_plugin_update_acquire_lock() {
+    emulate -L zsh
+    setopt local_options
+    local lock=$(_zdot_plugin_update_lock_path)
+    local dir=${lock:h}
+    [[ -d $dir ]] || mkdir -p "$dir" 2>/dev/null
+    if [[ -d $lock ]]; then
+        local mtime=$(_zdot_plugin_update_mtime "$lock")
+        local now=$(date +%s)
+        (( now - mtime > 300 )) && rmdir "$lock" 2>/dev/null
+    fi
+    mkdir "$lock" 2>/dev/null
+}
+
+_zdot_plugin_update_release_lock() {
+    rmdir "$(_zdot_plugin_update_lock_path)" 2>/dev/null
+}
+
+# ============================================================================
+# Scan: per-plugin upstream-HEAD comparison
+# ============================================================================
+
+# _zdot_plugin_update_collect — emit one TSV row per outdated plugin:
+#   spec<TAB>label<TAB>current_short_sha<TAB>upstream_short_sha
+#
+# Mirrors zdot_check_plugin_updates' primitives so we stay bundle-aware:
+# both _ZDOT_PLUGINS_ORDER and _ZDOT_BUNDLE_REPOS are walked, dedupe is by
+# physical repo dir (zdot_plugin_repo), display name is zdot_plugin_name.
+# git fetch primes the eventual pull (via zdot_update_plugin) with no
+# extra network round-trip.
+#
+# Skips silently:
+#   - Bundles with no backing repo (zdot_plugin_repo returns 1).
+#   - Pinned plugins (version set inline or via _ZDOT_PLUGINS_VERSION) —
+#     the user explicitly chose that ref.
+#   - Missing repos, non-git dirs, no upstream tracked, fetch failures.
+_zdot_plugin_update_collect() {
+    emulate -L zsh
+    setopt local_options
+
+    local -a specs=( "${_ZDOT_PLUGINS_ORDER[@]}" "${_ZDOT_BUNDLE_REPOS[@]}" )
+    local -A seen
+    local spec bare version repo_dir label current upstream
+
+    for spec in "${specs[@]}"; do
+        bare=$spec
+        version=""
+        if [[ $bare == *@* ]]; then
+            version=${bare##*@}
+            bare=${bare%@*}
+        fi
+        if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
+            version=${_ZDOT_PLUGINS_VERSION[$bare]}
+        fi
+        [[ -z "$version" ]] || continue
+
+        zdot_plugin_repo "$bare" 2>/dev/null || continue
+        repo_dir=$REPLY
+        zdot_plugin_name "$bare"
+        label=$REPLY
+
+        (( ${+seen[$repo_dir]} )) && continue
+        seen[$repo_dir]=1
+
+        [[ -d "$repo_dir/.git" ]] || continue
+
+        (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
+        current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
+        upstream=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)
+        [[ -n $current && -n $upstream ]] || continue
+        [[ $current != $upstream ]] || continue
+
+        print -r -- "${bare}"$'\t'"${label}"$'\t'"${current}"$'\t'"${upstream}"
+    done
+}
+
+# ============================================================================
+# Typed-input guard (zselect-based stdin poll)
+# Pattern from dotfiler's _update_core_has_typed_input, which credits
+# Philippe Troin: https://zsh.org/mla/users/2022/msg00062.html
+# ============================================================================
+
+_zdot_plugin_update_has_typed_input() {
+    emulate -L zsh
+    setopt local_options
+    [[ -t 0 ]] || return 1
+    zmodload zsh/zselect 2>/dev/null || return 1
+    local saved
+    saved=$(stty -g 2>/dev/null) || return 1
+    {
+        stty -icanon
+        zselect -t 0 -r 0
+        return $?
+    } always {
+        stty "$saved"
+    }
+}
+
+# ============================================================================
+# p10k instant-prompt awareness
+# ============================================================================
+
+_zdot_plugin_update_p10k_active() {
+    case ${POWERLEVEL9K_INSTANT_PROMPT:-} in
+        ''|off) return 1 ;;
+        *)      return 0 ;;
+    esac
+}
+
+# ============================================================================
+# UI: render summary and the y/n prompt
+# ============================================================================
+
+_zdot_plugin_update_color_enabled() {
+    [[ -z ${NO_COLOR-} ]] || return 1
+    [[ -t 1 ]] || return 1
+    [[ $TERM != dumb ]] || return 1
+    return 0
+}
+
+_zdot_plugin_update_render_summary() {
+    emulate -L zsh
+    setopt local_options
+    local -a lines=( "$@" )
+    local n=${#lines}
+
+    if _zdot_plugin_update_color_enabled; then
+        print -P -- "%B%F{cyan}▲ ${n} plugin update$( (( n == 1 )) || print s ) available%f%b"
+    else
+        print -- "▲ ${n} plugin update$( (( n == 1 )) || print s ) available"
+    fi
+    print
+
+    local line label cur up
+    local max_label=0
+    for line in "${lines[@]}"; do
+        label=${${(s:	:)line}[2]}
+        (( ${#label} > max_label )) && max_label=${#label}
+    done
+    (( max_label = max_label < 8 ? 8 : max_label ))
+
+    local pad spaces
+    for line in "${lines[@]}"; do
+        label=${${(s:	:)line}[2]}
+        cur=${${(s:	:)line}[3]}
+        up=${${(s:	:)line}[4]}
+        pad=$(( max_label - ${#label} ))
+        (( pad < 0 )) && pad=0
+        spaces=${(l:$pad:: :)}
+        if _zdot_plugin_update_color_enabled; then
+            print -P -- "    %F{default}${label//\%/%%}%f${spaces}  %F{yellow}${cur}%f %F{244}→%f %F{green}${up}%f"
+        else
+            print -- "    ${label}${spaces}  ${cur} → ${up}"
+        fi
+    done
+    print
+}
+
+# Read one keypress from stdin in cbreak mode. Returns the key (lowercased)
+# on stdout; default if read fails or the key isn't in $valid.
+_zdot_plugin_update_read_key() {
+    emulate -L zsh
+    setopt local_options
+    local valid=$1 default=$2 key
+    local saved_tty
+    if [[ -t 0 ]]; then
+        saved_tty=$(stty -g 2>/dev/null)
+        [[ -n $saved_tty ]] && stty -icanon echo min 1 time 0 2>/dev/null
+        trap "[[ -n '$saved_tty' ]] && stty '$saved_tty' 2>/dev/null" EXIT
+    fi
+    if ! read -k 1 -u 0 key; then
+        print -r -- "$default"; return
+    fi
+    print >&2
+    if [[ -z $key || $key == $'\n' || $key == $'\r' ]]; then
+        key=$default
+    elif [[ $key == $'\033' ]]; then
+        # ESC = skip
+        [[ $valid == *n* ]] && key=n || key=$default
+    fi
+    key=${key:l}
+    [[ $valid == *$key* ]] || key=$default
+    print -r -- "$key"
+}
+
+_zdot_plugin_update_prompt_and_upgrade() {
+    emulate -L zsh
+    setopt local_options
+    local -a lines=( "$@" )
+
+    _zdot_plugin_update_render_summary "${lines[@]}"
+
+    # Reminder mode: show the summary and stop. No prompt, no pull.
+    if [[ "$(_zdot_plugin_update_mode)" == reminder ]]; then
+        zdot_info "Run 'zdot plugin update' to apply." 2>/dev/null \
+            || print -- "Run 'zdot plugin update' to apply."
+        return 0
+    fi
+
+    local choice
+    if _zdot_plugin_update_has_typed_input; then
+        # User is mid-typing — render the prompt line as auto-dismissed
+        # and treat as 'n'. Don't consume a pre-typed key as the answer.
+        if _zdot_plugin_update_color_enabled; then
+            print -P -- "  %F{cyan}Update all? [Y/n] ›%f n  %F{244}(skipped — typed input detected)%f"
+        else
+            print -- "  Update all? [Y/n] › n  (skipped — typed input detected)"
+        fi
+        choice=n
+    else
+        if _zdot_plugin_update_color_enabled; then
+            print -nP -- "  %F{cyan}Update all? [Y/n] ›%f " >&2
+        else
+            print -n -- "  Update all? [Y/n] › " >&2
+        fi
+        choice=$(_zdot_plugin_update_read_key "yn" "y")
+    fi
+
+    case $choice in
+        y) _zdot_plugin_update_run_all "${lines[@]}" ;;
+        n) zdot_info "Skipped. Next check in $(_zdot_plugin_update_frequency)s." 2>/dev/null \
+            || print -- "Skipped." ;;
+    esac
+}
+
+# ============================================================================
+# Apply: delegate to the existing CLI function.
+# ============================================================================
+# zdot_update_plugin (autoloaded from core/functions/) already handles
+# bundle-aware dedupe, version pins, error reporting, and the summary
+# line. We just hand it the list of bare specs the scan flagged.
+
+_zdot_plugin_update_run_all() {
+    emulate -L zsh
+    setopt local_options
+    local -a lines=( "$@" )
+    local -a specs
+    local line
+    for line in "${lines[@]}"; do
+        specs+=( ${${(s:	:)line}[1]} )
+    done
+    (( ${#specs} )) || return 0
+    zdot_update_plugin "${specs[@]}"
+}
+
+# ============================================================================
+# Background scan + precmd hook
+# ============================================================================
+
+# _zdot_plugin_update_precmd — first-prompt result handler. Identical shape
+# to zsh-pkg-update-nag's _zpun_precmd_nag: print a one-shot "(checking…)"
+# notice while the scan is in flight, defer one precmd under p10k instant-
+# prompt, then consume the pending file and dispatch.
+_zdot_plugin_update_precmd() {
+    emulate -L zsh
+    setopt local_options
+
+    local pending=$(_zdot_plugin_update_pending_path)
+
+    local first_call=0
+    if (( ${+_ZDOT_PLUGIN_UPDATE_ANNOUNCED} )); then
+        first_call=1
+        unset _ZDOT_PLUGIN_UPDATE_ANNOUNCED
+    fi
+
+    if [[ ! -e $pending ]]; then
+        if (( first_call )) && ! _zdot_plugin_update_p10k_active; then
+            zdot_info "(checking for plugin updates in the background…)" 2>/dev/null \
+                || print -- "(checking for plugin updates in the background…)"
+        fi
+        return 0
+    fi
+
+    # Defer one precmd under p10k instant-prompt so output doesn't corrupt
+    # p10k's pre-prompt buffer.
+    if (( first_call )) && _zdot_plugin_update_p10k_active; then
+        return 0
+    fi
+
+    precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} )
+
+    local content
+    content=$(<"$pending")
+    rm -f "$pending"
+
+    case ${content%%$'\n'*} in
+        ok)
+            # Silent — no need to announce "no plugin updates".
+            ;;
+        err)
+            zdot_log_debug "plugin-update: background scan failed" 2>/dev/null
+            ;;
+        *)
+            local -a outdated
+            outdated=( ${(f)content} )
+            outdated=( ${outdated:#} )
+            (( ${#outdated} )) && _zdot_plugin_update_prompt_and_upgrade "${outdated[@]}"
+            ;;
+    esac
+}
+
+# _zdot_plugin_update_main_deferred — hook entry point. Forks a background
+# subshell to run the scan; the subshell writes results atomically to the
+# pending file. The parent registers a precmd hook to display them.
+_zdot_plugin_update_main_deferred() {
+    emulate -L zsh
+    setopt local_options
+
+    _zdot_plugin_update_should_run || return 0
+
+    # If a previous shell's scan left orphaned results, register the hook
+    # to display them even if our own rate limit isn't due.
+    local pending=$(_zdot_plugin_update_pending_path)
+    if [[ -e $pending ]]; then
+        typeset -g _ZDOT_PLUGIN_UPDATE_ANNOUNCED=1
+        precmd_functions+=(_zdot_plugin_update_precmd)
+        return 0
+    fi
+
+    _zdot_plugin_update_is_due || return 0
+    _zdot_plugin_update_acquire_lock || return 0
+
+    (
+        local _pending=$(_zdot_plugin_update_pending_path)
+        local _tmp="${_pending}.tmp"
+        local _state_dir=$(_zdot_plugin_update_state_dir)
+        [[ -d $_state_dir ]] || mkdir -p "$_state_dir" 2>/dev/null
+
+        # Trap is the exit invariant: pending MUST exist by subshell exit
+        # so the precmd has a reliable "done" signal. Happy-path mv'd it
+        # already; the trap is the fallback.
+        trap '_zdot_plugin_update_release_lock; [[ -e "$_pending" ]] || print -r -- "err" > "$_pending"; rm -f "$_tmp"' INT TERM EXIT
+
+        local results
+        results=$(_zdot_plugin_update_collect)
+        if [[ -n $results ]]; then
+            printf '%s' "$results" > "$_tmp"
+        else
+            print -r -- "ok" > "$_tmp"
+        fi
+        mv "$_tmp" "$_pending"
+
+        _zdot_plugin_update_stamp
+        _zdot_plugin_update_release_lock
+    ) 2>/dev/null &!
+
+    typeset -g _ZDOT_PLUGIN_UPDATE_ANNOUNCED=1
+    precmd_functions+=(_zdot_plugin_update_precmd)
+}

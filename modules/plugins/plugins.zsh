@@ -15,3 +15,21 @@ zdot_register_hook _omz_configure_update interactive noninteractive \
     --group omz-configure
 
 zdot_use_plugin omz:lib
+
+# ============================================================================
+# Background plugin-update reminders (opt-in)
+# ============================================================================
+# Engine lives in core/plugin-update.zsh (sourced by zdot.zsh; gets
+# compiled with the rest of core). Default mode is 'disabled', so the
+# hook below short-circuits in _zdot_plugin_update_should_run for users
+# who don't opt in.
+#
+# Activate from .zshrc:
+#   zstyle ':zdot:plugin-update' mode      prompt   # disabled | reminder | prompt
+#   zstyle ':zdot:plugin-update' frequency 14400    # seconds; default 4h
+#   zstyle ':zdot:plugin-update' ssh       0        # 1 to opt in under SSH
+
+zdot_register_hook _zdot_plugin_update_main_deferred interactive \
+    --name plugin-update \
+    --deferred \
+    --group finally
