@@ -12,22 +12,27 @@
 # We must do this at module-load time (before the hook runs) so that
 # zdot_load_plugin can find it in the declared-plugin registry.
 if zstyle -T ':zdot:history' per-dir; then
-    zdot_use_plugin jimhester/per-directory-history
+    zdot_use_plugin georgeharker/zsh-contextual-history
 fi
 
 _history_init() {
     # --- optional per-directory history ---
     if zstyle -T ':zdot:history' per-dir; then
-        HISTORY_BASE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/  # shuck: ignore=C001
+      zstyle ':contextual-history:*' history-base "${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/"
         if zstyle -T ':zdot:history' start-global; then
-            HISTORY_START_WITH_GLOBAL=true  # shuck: ignore=C001
+          zstyle ':contextual-history:*' start-with-global true
         else
-            HISTORY_START_WITH_GLOBAL=false  # shuck: ignore=C001
-        fi
-        if ! zstyle -s ':zdot:history' per-dir-key PER_DIRECTORY_HISTORY_TOGGLE; then
-            PER_DIRECTORY_HISTORY_TOGGLE='^G'  # shuck: ignore=C001
-        fi
-        zdot_load_plugin jimhester/per-directory-history
+          zstyle ':contextual-history:*' start-with-global false
+      fi
+      zstyle ':contextual-history:*' group-by .git .histbase
+      # zstyle ':contextual-history:*' refresh-on-nav false
+      # zstyle ':contextual-history:*' debug true
+      if ! zstyle -s ':zdot:history' per-dir-key _ch_toggle; then
+          _ch_toggle='^G'
+      fi
+      zstyle ':contextual-history:*' toggle-key "$_ch_toggle"
+      unset _ch_toggle
+      zdot_load_plugin georgeharker/zsh-contextual-history
     fi
 
     # --- history file ---
