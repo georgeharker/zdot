@@ -271,7 +271,7 @@ _zdot_load_omz_lib() {
         "$0" "$@"
     }
 
-    _ZDOT_PLUGINS_LOADED[omz:lib]=1
+    _ZDOT_PLUGINS_LOADED[omz:lib]=1  # shuck: ignore=C006
 }
 
 zdot_load_omz_lib() {

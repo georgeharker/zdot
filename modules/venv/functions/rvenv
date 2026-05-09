@@ -26,6 +26,6 @@ rvenv() {
         uv pip install -r ${requirements}
     else
         echo "Venv ${venv} does not exist, creating..."
-        nvenv ${python} ${venv}
+        nvenv ${python_version} ${venv}
     fi
 }

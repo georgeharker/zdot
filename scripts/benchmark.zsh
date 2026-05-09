@@ -79,7 +79,7 @@ _mean() {
 
 _stddev() {
     local -a vals=("$@")
-    local n=${#vals}
+    local n=${#vals}  # shuck: ignore=C001
     local mean=$(_mean "$@")
     local sumsq=0
     for v in $vals; do sumsq=$(( sumsq + (v - mean) * (v - mean) )); done
@@ -133,7 +133,7 @@ _bench_variant() {
         # Suppress child stdout and stderr so they don't contaminate the capture.
         # time writes TIMEFMT output to the enclosing shell's stderr, which the
         # outer { } 2>&1 then captures into $raw.
-        raw=$( { TIMEFMT="%E"; time "${cmd[@]}" >/dev/null 2>/dev/null } 2>&1 )
+        raw=$( { TIMEFMT="%E"; time "${cmd[@]}" >/dev/null 2>/dev/null } 2>&1 )  # shuck: ignore=C001
         elapsed=$(_parse_time "$raw")
         _bench_samples+=($elapsed)
         printf "."

@@ -224,7 +224,7 @@ function zdot_hooks_list() {
             matches_context=1
         else
             for ctx in ${=contexts}; do
-                if [[ " ${contexts_to_show[@]} " =~ " ${ctx} " ]]; then
+                if (( ${contexts_to_show[(Ie)${ctx}]} )); then
                     matches_context=1
                     break
                 fi

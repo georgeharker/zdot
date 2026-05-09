@@ -13,7 +13,7 @@
 # ============================================================================
 
 _syntax_highlight_configure() {
-    FAST_WORK_DIR=XDG:fast-syntax-highlighting
+    FAST_WORK_DIR=XDG:fast-syntax-highlighting  # shuck: ignore=C001
 }
 
 # ============================================================================

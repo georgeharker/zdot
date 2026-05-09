@@ -374,7 +374,7 @@ _zdot_update_hook_pull() {
                 return 1
             }
             _dotfiler_plan_zdot_pull_outcome=$REPLY
-            (( ${_dry_run:-0} )) && zdot_info "zdot: [dry-run] pull skipped" || zdot_info "zdot: updated"
+            if (( ${_dry_run:-0} )); then zdot_info "zdot: [dry-run] pull skipped"; else zdot_info "zdot: updated"; fi
             ;;
         submodule)
             local _parent
@@ -388,7 +388,7 @@ _zdot_update_hook_pull() {
                 return 1
             }
             _dotfiler_plan_zdot_pull_outcome=$REPLY
-            (( ${_dry_run:-0} )) && zdot_info "zdot: [dry-run] pull skipped" || zdot_info "zdot: updated"
+            if (( ${_dry_run:-0} )); then zdot_info "zdot: [dry-run] pull skipped"; else zdot_info "zdot: updated"; fi
             ;;
         subtree)
             local _parent
@@ -402,7 +402,7 @@ _zdot_update_hook_pull() {
                 return 1
             }
             _dotfiler_plan_zdot_pull_outcome=$REPLY
-            (( ${_dry_run:-0} )) && zdot_info "zdot: [dry-run] pull skipped" || zdot_info "zdot: updated"
+            if (( ${_dry_run:-0} )); then zdot_info "zdot: [dry-run] pull skipped"; else zdot_info "zdot: updated"; fi
             ;;
         subdir)
             zdot_verbose "zdot: subdir topology — parent repo manages updates"

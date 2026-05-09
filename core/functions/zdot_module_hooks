@@ -51,7 +51,7 @@ zdot_module_hooks() {
             # Find hook_id for this function
             local hook_id=""
             for hid in ${(k)_ZDOT_HOOKS}; do
-                if [[ ${_ZDOT_HOOKS[$hid]} == $func ]]; then
+                if [[ ${_ZDOT_HOOKS[$hid]} == "$func" ]]; then
                     hook_id=$hid
                     break
                 fi

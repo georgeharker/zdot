@@ -30,17 +30,17 @@ _plugins_init() {
     fi
 
     # Fast-syntax-highlighting
-    FAST_WORK_DIR=XDG:fast-syntax-highlighting
+    FAST_WORK_DIR=XDG:fast-syntax-highlighting  # shuck: ignore=C001
 
     # Zsh-autosuggest
-    ZSH_AUTOSUGGEST_STRATEGY=(match_prev_cmd abbreviations completion)
+    ZSH_AUTOSUGGEST_STRATEGY=(match_prev_cmd abbreviations completion)  # shuck: ignore=C001
 
     # Zsh-abbr
-    ABBR_AUTOLOAD=1
-    ABBR_SET_EXPANSION_CURSOR=1
-    ABBR_SET_LINE_CURSOR=1
-    ABBR_GET_AVAILABLE_ABBREVIATION=1
-    ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations
+    ABBR_AUTOLOAD=1  # shuck: ignore=C001
+    ABBR_SET_EXPANSION_CURSOR=1  # shuck: ignore=C001
+    ABBR_SET_LINE_CURSOR=1  # shuck: ignore=C001
+    ABBR_GET_AVAILABLE_ABBREVIATION=1  # shuck: ignore=C001
+    ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations  # shuck: ignore=C001
 }
 
 _antidote_load() {
@@ -73,7 +73,7 @@ _antidote_load() {
         # Custom plugins may be added to $ZSH_CUSTOM/plugins/
         # Example format: plugins=(rails git textmate ruby lighthouse)
         # Add wisely, as too many plugins slow down shell startup.
-        plugins=(git tmux fzf nvm per-directory-history zsh-autosuggestions fzf-tab zoxide)
+        plugins=(git tmux fzf nvm per-directory-history zsh-autosuggestions fzf-tab zoxide)  # shuck: ignore=C001
 
         source "${ZSH}/oh-my-zsh.sh"
     fi

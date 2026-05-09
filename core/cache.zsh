@@ -453,7 +453,6 @@ load_cache() {
     _zdot_cache_context_suffix
     local context_suffix="$REPLY"
     local plan_file="${_ZDOT_CACHE_DIR}/plans/execution_plan_${context_suffix}.zsh"
-    local compiled_plan="${plan_file}.zwc"
 
     # Check if plan file exists
     if [[ ! -f "$plan_file" ]]; then

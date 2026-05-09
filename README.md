@@ -633,3 +633,7 @@ zdot debug
 | [docs/plugin-implementation.md](docs/plugin-implementation.md) | Plugin system internals |
 | [docs/caching-implementation.md](docs/caching-implementation.md) | Bytecode compilation and plan caching internals |
 | [docs/compinit.md](docs/compinit.md) | Completion system (`compinit`) and compaudit controls |
+
+## Acknowledgements
+
+Linting throughout this codebase is checked with [shuck](https://github.com/ewhauser/shuck) — a fast shell linter with first-class zsh support. Thanks to the shuck project for catching the bugs that bash-targeted linters miss.

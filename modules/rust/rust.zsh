@@ -4,11 +4,8 @@
 
 _rust_init() {
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+    zdot_register_completion_file "rustup" "rustup completions zsh"
+    zdot_register_completion_file "cargo" "rustup completions zsh cargo"
 }
 
-# Register hooks
 zdot_simple_hook rust --provides rust-ready
-
-# Register completions
-zdot_register_completion_file "rustup" "rustup completions zsh > $(zdot_get_completions_dir)/_rustup"
-zdot_register_completion_file "cargo" "rustup completions zsh cargo > $(zdot_get_completions_dir)/_cargo"
