@@ -315,14 +315,18 @@ _zdot_plugin_update_read_key() {
         print -r -- "$default"; return
     fi
     print >&2
+    # Enter / empty → take the default (e.g. Y for [Y/n]).
+    # ESC or any other unrecognised key → decline (n if 'n' is valid,
+    # otherwise fall back to default). Only an explicit valid key bypasses
+    # the decline path — pressing 'w' must NOT accept a Y/n prompt.
     if [[ -z $key || $key == $'\n' || $key == $'\r' ]]; then
         key=$default
-    elif [[ $key == $'\033' ]]; then
-        # ESC = skip
-        [[ $valid == *n* ]] && key=n || key=$default
+    else
+        key=${key:l}
+        if [[ $valid != *$key* ]]; then
+            [[ $valid == *n* ]] && key=n || key=$default
+        fi
     fi
-    key=${key:l}
-    [[ $valid == *$key* ]] || key=$default
     print -r -- "$key"
 }
 
