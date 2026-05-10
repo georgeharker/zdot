@@ -403,7 +403,7 @@ _zdot_plugin_update_precmd() {
 
     if [[ ! -e $pending ]]; then
         if (( first_call )) && ! _zdot_plugin_update_p10k_active; then
-            zdot_info "%F{244}(checking for plugin updates in the background…)%f"
+            zdot_info "%F{244}(checking for zdot plugin updates in the background…)%f"
         fi
         return 0
     fi
@@ -422,7 +422,7 @@ _zdot_plugin_update_precmd() {
 
     case ${content%%$'\n'*} in
         ok)
-            zdot_info "%F{244}(no plugin updates available)%f"
+            zdot_info "%F{244}(no zdot plugin updates available)%f"
             ;;
         err)
             zdot_warn "plugin-update: background scan failed"
