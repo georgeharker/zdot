@@ -22,15 +22,17 @@
 #   zstyle ':zdot:plugin-update' mode        disabled  # disabled | reminder | prompt
 #   zstyle ':zdot:plugin-update' frequency   14400     # seconds between checks (4h)
 #
-# The flow mirrors zsh-pkg-update-nag's deferred mode:
-#   1. _zdot_plugin_update_main_deferred runs in the interactive 'finally'
-#      hook group. If due and not locked, it forks a background subshell
-#      that runs the scan and writes results atomically to a pending file,
-#      then registers a precmd hook in the parent and returns immediately.
+# Flow:
+#   1. _zdot_plugin_update_main runs as a regular (non-deferred) interactive
+#      hook. The actual network I/O is isolated in a `&!` background subshell,
+#      so the parent shell never blocks on git fetch — there's no need for
+#      hook-level defer too. If due and not locked, it forks the scan, which
+#      writes results atomically to a pending file. The parent registers a
+#      precmd hook to surface them and returns immediately.
 #   2. _zdot_plugin_update_precmd fires before each prompt. While the scan
-#      is in flight it prints a one-shot dim notice; once the pending file
-#      lands it consumes it and either does nothing (no updates), logs an
-#      error, or pops the y/n prompt.
+#      is in flight it prints a one-shot faded "checking…" notice; once the
+#      pending file lands it consumes it and either prints a faded
+#      "no plugin updates" line, logs an error, or pops the y/n prompt.
 #   3. _zdot_plugin_update_prompt_and_upgrade renders the summary, gates on
 #      _zdot_plugin_update_has_typed_input (auto-skips as 'n' if the user
 #      is mid-typing), and on Y runs git pull --ff-only per plugin.
@@ -401,8 +403,7 @@ _zdot_plugin_update_precmd() {
 
     if [[ ! -e $pending ]]; then
         if (( first_call )) && ! _zdot_plugin_update_p10k_active; then
-            zdot_info "(checking for plugin updates in the background…)" 2>/dev/null \
-                || print -- "(checking for plugin updates in the background…)"
+            zdot_info "%F{244}(checking for plugin updates in the background…)%f"
         fi
         return 0
     fi
@@ -421,10 +422,10 @@ _zdot_plugin_update_precmd() {
 
     case ${content%%$'\n'*} in
         ok)
-            # Silent — no need to announce "no plugin updates".
+            zdot_info "%F{244}(no plugin updates available)%f"
             ;;
         err)
-            zdot_log_debug "plugin-update: background scan failed" 2>/dev/null
+            zdot_warn "plugin-update: background scan failed"
             ;;
         *)
             local -a outdated
@@ -435,10 +436,10 @@ _zdot_plugin_update_precmd() {
     esac
 }
 
-# _zdot_plugin_update_main_deferred — hook entry point. Forks a background
+# _zdot_plugin_update_main — hook entry point. Forks a background
 # subshell to run the scan; the subshell writes results atomically to the
 # pending file. The parent registers a precmd hook to display them.
-_zdot_plugin_update_main_deferred() {
+_zdot_plugin_update_main() {
     emulate -L zsh
     setopt local_options
 

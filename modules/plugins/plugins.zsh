@@ -28,6 +28,5 @@ zdot_use_plugin omz:lib
 #   zstyle ':zdot:plugin-update' mode      prompt   # disabled | reminder | prompt
 #   zstyle ':zdot:plugin-update' frequency 14400    # seconds; default 4h
 
-zdot_register_hook _zdot_plugin_update_main_deferred interactive \
-    --name plugin-update \
-    --deferred
+zdot_register_hook _zdot_plugin_update_main interactive \
+    --name plugin-update
