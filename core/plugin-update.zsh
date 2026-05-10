@@ -21,7 +21,6 @@
 # zstyle reference:
 #   zstyle ':zdot:plugin-update' mode        disabled  # disabled | reminder | prompt
 #   zstyle ':zdot:plugin-update' frequency   14400     # seconds between checks (4h)
-#   zstyle ':zdot:plugin-update' ssh         0         # 1 to opt in under SSH
 #
 # The flow mirrors zsh-pkg-update-nag's deferred mode:
 #   1. _zdot_plugin_update_main_deferred runs in the interactive 'finally'
@@ -46,6 +45,13 @@ _zdot_plugin_update_state_dir() {
 _zdot_plugin_update_pending_path() { print -r -- "$(_zdot_plugin_update_state_dir)/pending" }
 _zdot_plugin_update_stamp_path()   { print -r -- "$(_zdot_plugin_update_state_dir)/last_check" }
 _zdot_plugin_update_lock_path()    { print -r -- "$(_zdot_plugin_update_state_dir)/lock.d" }
+
+# Ensure the state directory exists. Cheap and idempotent; safe to call
+# at every entry point that may read or write a state file.
+_zdot_plugin_update_ensure_state_dir() {
+    local dir=$(_zdot_plugin_update_state_dir)
+    [[ -d $dir ]] || mkdir -p "$dir" 2>/dev/null
+}
 
 _zdot_plugin_update_mode() {
     local m
@@ -78,16 +84,10 @@ _zdot_plugin_update_should_run() {
     emulate -L zsh
     setopt local_options
     [[ "$(_zdot_plugin_update_mode)" != disabled ]] || return 1
-    [[ -o interactive ]] || return 1
-    [[ -t 0 && -t 1 ]] || return 1
+    zdot_interactive || return 1
+    zdot_has_tty || return 1
+    [[ -t 0 ]] || return 1
     [[ $TERM != dumb ]] || return 1
-    [[ -z $CI ]] || return 1
-    [[ -z $INSIDE_EMACS ]] || return 1
-    if [[ -n $SSH_CONNECTION || -n $SSH_CLIENT ]]; then
-        local ssh_opt
-        zstyle -s ':zdot:plugin-update' ssh ssh_opt
-        [[ "${ssh_opt:-0}" == 1 ]] || return 1
-    fi
     return 0
 }
 
@@ -118,7 +118,7 @@ _zdot_plugin_update_write_timestamp() {
     setopt local_options
     local _exit_status=${1:-} _error=${2:-}
     local _ts=$(_zdot_plugin_update_stamp_path)
-    mkdir -p "${_ts:h}" 2>/dev/null
+    _zdot_plugin_update_ensure_state_dir
     {
         print -- "LAST_EPOCH=$(date +%s)"
         if [[ -n "$_exit_status" ]]; then
@@ -134,9 +134,8 @@ _zdot_plugin_update_write_timestamp() {
 _zdot_plugin_update_acquire_lock() {
     emulate -L zsh
     setopt local_options
+    _zdot_plugin_update_ensure_state_dir
     local lock=$(_zdot_plugin_update_lock_path)
-    local dir=${lock:h}
-    [[ -d $dir ]] || mkdir -p "$dir" 2>/dev/null
     if [[ -d $lock ]]; then
         local mtime=$(_zdot_plugin_update_mtime "$lock")
         local now=$(date +%s)
@@ -193,6 +192,7 @@ _zdot_plugin_update_collect() {
         label=$REPLY
 
         (( ${+seen[$repo_dir]} )) && continue
+        # shuck: disable=C001
         seen[$repo_dir]=1
 
         [[ -d "$repo_dir/.git" ]] || continue
@@ -200,8 +200,8 @@ _zdot_plugin_update_collect() {
         (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
         current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
         upstream=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)
-        [[ -n $current && -n $upstream ]] || continue
-        [[ $current != $upstream ]] || continue
+        [[ -n "$current" && -n "$upstream" ]] || continue
+        [[ "$current" != "$upstream" ]] || continue
 
         print -r -- "${bare}"$'\t'"${label}"$'\t'"${current}"$'\t'"${upstream}"
     done
@@ -299,6 +299,7 @@ _zdot_plugin_update_read_key() {
     if [[ -t 0 ]]; then
         saved_tty=$(stty -g 2>/dev/null)
         [[ -n $saved_tty ]] && stty -icanon echo min 1 time 0 2>/dev/null
+        # shuck: disable=C008
         trap "[[ -n '$saved_tty' ]] && stty '$saved_tty' 2>/dev/null" EXIT
     fi
     if ! read -k 1 -u 0 key; then
@@ -441,6 +442,11 @@ _zdot_plugin_update_main_deferred() {
 
     _zdot_plugin_update_should_run || return 0
 
+    # Make sure the state dir exists before any state-file access. The
+    # stamp file may legitimately not exist (fresh install — is_due treats
+    # that as "due"), but acquire_lock and the bg subshell both write here.
+    _zdot_plugin_update_ensure_state_dir
+
     # If a previous shell's scan left orphaned results, register the hook
     # to display them even if our own rate limit isn't due.
     local pending=$(_zdot_plugin_update_pending_path)
@@ -456,8 +462,6 @@ _zdot_plugin_update_main_deferred() {
     (
         local _pending=$(_zdot_plugin_update_pending_path)
         local _tmp="${_pending}.tmp"
-        local _state_dir=$(_zdot_plugin_update_state_dir)
-        [[ -d $_state_dir ]] || mkdir -p "$_state_dir" 2>/dev/null
 
         # Trap is the exit invariant: pending MUST exist by subshell exit
         # so the precmd has a reliable "done" signal. Happy-path writes it

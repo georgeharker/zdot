@@ -27,9 +27,7 @@ zdot_use_plugin omz:lib
 # Activate from .zshrc:
 #   zstyle ':zdot:plugin-update' mode      prompt   # disabled | reminder | prompt
 #   zstyle ':zdot:plugin-update' frequency 14400    # seconds; default 4h
-#   zstyle ':zdot:plugin-update' ssh       0        # 1 to opt in under SSH
 
 zdot_register_hook _zdot_plugin_update_main_deferred interactive \
     --name plugin-update \
-    --deferred \
-    --group finally
+    --deferred
