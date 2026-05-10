@@ -16,7 +16,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
 | `hook` | `list [-v] [-a]`, `plan`, `graph [--depends\|--uses\|--all]` |
-| `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
+| `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
 | `module` | `list`, `clone <name>` |
 | `completion` | `refresh` |
 | `secret` | `refresh` |
@@ -75,10 +75,18 @@ zdot plugin list [--loaded|--installed|--declared]
   # --installed  Show only plugins with a local directory on disk
   # --declared   Show only plugins registered via zdot_use_plugin
 
-zdot plugin update [spec]
-  # Update one or all plugins.
-  # spec: optional plugin spec (e.g. "zsh-users/zsh-syntax-highlighting")
+zdot plugin update [spec...]
+  # Update one, several, or all plugins.
+  # spec: zero or more plugin specs (e.g. "zsh-users/zsh-syntax-highlighting")
   # No spec: updates all declared plugins.
+  # omz:* specs share a single ohmyzsh/ohmyzsh repo and are deduplicated.
+  # Prints a summary line at the end ("Done (X updated, Y failed)").
+
+zdot plugin check-updates [spec...]
+  # Report plugins with available updates without applying them.
+  # spec: zero or more plugin specs; no spec checks all declared plugins.
+  # Performs git fetch in each plugin and compares HEAD to upstream.
+  # One line per plugin that's behind; silent for up-to-date or pinned plugins.
 
 zdot plugin clean [--dry-run] [--remove-unused]
   # Remove stale plugin directories.
@@ -89,7 +97,7 @@ zdot plugin reclone
   # Delete and re-clone all declared plugins from scratch.
 ```
 
-**Implementation**: delegates to `zdot_list_plugins`, `zdot_update_plugin`, `zdot_clean_plugins`, `zdot_reclone_plugins` (core/plugins.zsh).
+**Implementation**: delegates to `zdot_list_plugins`, `zdot_update_plugin`, `zdot_check_plugin_updates`, `zdot_clean_plugins`, `zdot_reclone_plugins` (core/plugins.zsh).
 
 ---
 

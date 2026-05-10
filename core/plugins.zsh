@@ -102,9 +102,21 @@ _zdot_plugins_init() {
 # Register a bundle handler by name.
 # The handler must implement:
 #   zdot_bundle_<name>_match <spec>   -> return 0 if this handler owns spec
-#   zdot_bundle_<name>_path  <spec>   -> print filesystem path for spec
+#   zdot_bundle_<name>_path  <spec>   -> set REPLY to per-spec filesystem path
 #   zdot_bundle_<name>_clone <spec>   -> ensure plugin is on disk
 #   zdot_bundle_<name>_load  <spec>   -> source/activate the plugin
+# Optional:
+#   zdot_bundle_<name>_repo  <spec>   -> set REPLY to the backing git working
+#                                        directory (for fetch/pull). Required
+#                                        for `zdot plugin update|check-updates`
+#                                        to operate on this bundle's specs.
+#   zdot_bundle_<name>_url   <spec>   -> set REPLY to the upstream clone URL.
+#                                        Used by `zdot_plugin_clone` and any
+#                                        caller that needs to talk to the
+#                                        remote without a local checkout.
+#   zdot_bundle_<name>_name  <spec>   -> set REPLY to a friendly display label
+#                                        for the bundle. Defaults to the
+#                                        handler name (e.g. "omz", "pz").
 # Usage: zdot_register_bundle <name>
 zdot_register_bundle() {
     local name=$1
@@ -295,14 +307,31 @@ zdot_use_bundle() {
 }
 
 # ============================================================================
-# Path Resolution
+# Plugin Resource Resolution
 # ============================================================================
+#
+# Public API:
+#   zdot_plugin_path <spec>  -> set REPLY to the spec's on-disk path (subdir
+#                               for bundle sub-specs, repo root for plain specs)
+#   zdot_plugin_repo <spec>  -> set REPLY to the git working directory used
+#                               for fetch/pull. Returns 1 if the bundle owns
+#                               the spec but exposes no _repo hook.
+#   zdot_plugin_url  <spec>  -> set REPLY to the upstream clone URL. Returns 1
+#                               if the bundle owns the spec but exposes no
+#                               _url hook.
+#   zdot_plugin_name <spec>  -> set REPLY to a human-readable label suitable
+#                               for output. Defaults to the bundle handler
+#                               name for bundle specs, and to the spec itself
+#                               for plain user/repo specs.
+#
+# Each dispatches to the matching bundle handler hook
+# (zdot_bundle_<name>_{path,repo,url,name}) when a bundle owns the spec;
+# otherwise the plain user/repo defaults below apply.
 
 zdot_plugin_path() {
     local spec=$1
     local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
 
-    # Delegate to bundle handler if one is registered for this spec
     local handler
     _zdot_bundle_handler_for "$spec" && handler=$REPLY && {
         zdot_bundle_${handler}_path "$spec"
@@ -310,6 +339,50 @@ zdot_plugin_path() {
     }
 
     REPLY="$cache/$spec"
+}
+
+zdot_plugin_repo() {
+    local spec=$1
+    local handler
+    if _zdot_bundle_handler_for "$spec"; then
+        handler=$REPLY
+        if (( ${+functions[zdot_bundle_${handler}_repo]} )); then
+            zdot_bundle_${handler}_repo "$spec"
+            return 0
+        fi
+        return 1
+    fi
+    local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
+    REPLY="$cache/$spec"
+}
+
+zdot_plugin_url() {
+    local spec=$1
+    local handler
+    if _zdot_bundle_handler_for "$spec"; then
+        handler=$REPLY
+        if (( ${+functions[zdot_bundle_${handler}_url]} )); then
+            zdot_bundle_${handler}_url "$spec"
+            return 0
+        fi
+        return 1
+    fi
+    REPLY="https://github.com/$spec"
+}
+
+zdot_plugin_name() {
+    local spec=$1
+    local handler
+    if _zdot_bundle_handler_for "$spec"; then
+        handler=$REPLY
+        if (( ${+functions[zdot_bundle_${handler}_name]} )); then
+            zdot_bundle_${handler}_name "$spec"
+            return 0
+        fi
+        REPLY=$handler
+        return 0
+    fi
+    REPLY=$spec
 }
 
 # ============================================================================
@@ -337,8 +410,11 @@ zdot_plugin_clone() {
 
     [[ -d "$dest" ]] && return 0
 
+    zdot_plugin_url "$spec"
+    local url=$REPLY
+
     print "zdot-plugins: cloning $repo..." >&2
-    git clone --quiet --recurse-submodules "https://github.com/$repo" "$dest"
+    git clone --quiet --recurse-submodules "$url" "$dest"
 
     # Check out specific version if specified
     if [[ -n "$version" ]]; then

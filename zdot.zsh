@@ -30,6 +30,7 @@ source "${zdot_core_dir}/utils.zsh"
 source "${zdot_core_dir}/plugins.zsh"
 source "${zdot_core_dir}/init.zsh"
 source "${zdot_core_dir}/update.zsh"
+source "${zdot_core_dir}/plugin-update.zsh"
 
 # Source plugin bundles
 source "${zdot_core_dir}/compinit.zsh"              # shared compinit (before any bundle)

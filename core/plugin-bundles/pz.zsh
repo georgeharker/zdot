@@ -15,11 +15,13 @@ local _zdot_pz_enabled
 zstyle -b ':zdot:plugins' pz _zdot_pz_enabled
 
 if [[ "$_zdot_pz_enabled" == yes ]]; then
-    # Ensure cache dir is initialized before we use _ZDOT_PLUGINS_CACHE
+    # Ensure cache dir is initialized before resolver calls touch it
     _zdot_plugins_init
 
-    # Set ZPREZTODIR early so pz.zsh internals can reference it
-    typeset -g ZPREZTODIR="${_ZDOT_PLUGINS_CACHE}/sorin-ionescu/prezto"
+    # Set ZPREZTODIR early — Prezto's own init.zsh and the .zpreztorc stub
+    # both expect this variable to point at the Prezto checkout root.
+    zdot_plugin_path sorin-ionescu/prezto
+    typeset -g ZPREZTODIR=$REPLY
 
     # Clone Prezto (--recurse-submodules handled by zdot_plugin_clone)
     zdot_plugin_clone sorin-ionescu/prezto
@@ -34,20 +36,31 @@ zdot_bundle_pz_match() {
     [[ $1 == pz:* ]]
 }
 
-# Path: print filesystem path for a pz: spec
-# pz:modules/git -> $ZPREZTODIR/modules/git
+# Repo and URL resolution: every pz:* spec is backed by a single Prezto
+# checkout. Delegate to the public plugin resolvers so the cache path and
+# GitHub URL conventions stay in one place.
+zdot_bundle_pz_repo() {
+    zdot_plugin_path sorin-ionescu/prezto
+}
+
+zdot_bundle_pz_url() {
+    zdot_plugin_url sorin-ionescu/prezto
+}
+
+# Path: filesystem path for a pz: spec.
+#   pz:modules/git -> <repo>/modules/git
 zdot_bundle_pz_path() {
-    local spec=$1
-    local relpath=${spec#pz:}   # e.g. "modules/git"
-    REPLY="${ZPREZTODIR}/${relpath}"
+    local relpath=${1#pz:}
+    zdot_bundle_pz_repo
+    REPLY="$REPLY/$relpath"
 }
 
 # Clone: no-op — Prezto is cloned at file-source time above.
 # Populate _ZDOT_PLUGINS_PATH so the core fast-path sentinel can find it.
 zdot_bundle_pz_clone() {
     local spec=$1
-    local relpath=${spec#pz:}
-    _ZDOT_PLUGINS_PATH[$spec]="${ZPREZTODIR}/${relpath}"
+    zdot_bundle_pz_path "$spec"
+    _ZDOT_PLUGINS_PATH[$spec]=$REPLY
     return 0
 }
 

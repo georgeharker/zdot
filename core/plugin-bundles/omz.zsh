@@ -48,7 +48,8 @@ autoload -Uz is-at-least
 # ============================================================================
 
 zdot_omz_check_for_upgrade() {
-    local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+    zdot_plugin_path ohmyzsh/ohmyzsh
+    local cache=$REPLY
     [[ -f "$cache/tools/check_for_upgrade.sh" ]] && source "$cache/tools/check_for_upgrade.sh"
 }
 
@@ -59,7 +60,8 @@ zdot_omz_check_for_upgrade() {
 
 zdot_load_omz_theme() {
     local theme_name="${1:-$ZSH_THEME}"
-    local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+    zdot_plugin_path ohmyzsh/ohmyzsh
+    local cache=$REPLY
     local custom="$ZSH_CUSTOM"
 
     local theme_file
@@ -91,7 +93,8 @@ zdot_set_theme_during_precmd() {
 
     [[ -n "$ZSH_THEME" ]] || return 0
 
-    local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+    zdot_plugin_path ohmyzsh/ohmyzsh
+    local cache=$REPLY
 
     local -A aliases_pre
     local key
@@ -153,7 +156,8 @@ _zdot_load_omz_lib() {
 
     zdot_omz_lazy_load_lib() {
         local lib=$1
-        local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+        zdot_plugin_path ohmyzsh/ohmyzsh
+        local cache=$REPLY
         [[ -f "$cache/lib/$lib.zsh" ]] && source "$cache/lib/$lib.zsh"
     }
 
@@ -291,8 +295,8 @@ zdot_load_omz_lib() {
 zdot_bundle_omz_clone() {
     local spec=$1
     # Populate path cache so zdot_load_deferred_plugins avoids a subshell
-    local relpath=${spec#omz:}
-    _ZDOT_PLUGINS_PATH[$spec]="${_ZDOT_PLUGINS_CACHE}/ohmyzsh/ohmyzsh/${relpath}"
+    zdot_bundle_omz_path "$spec"
+    _ZDOT_PLUGINS_PATH[$spec]=$REPLY
     return 0
 }
 
@@ -300,15 +304,24 @@ zdot_bundle_omz_clone() {
 # OMZ Plugin Loading (delegated from core/plugins.zsh)
 # ============================================================================
 
-# Path resolution for OMZ specs
-zdot_bundle_omz_path() {
-    local spec=$1
-    local cache=$_ZDOT_PLUGINS_CACHE
+# Repo and URL resolution: every omz:* spec is backed by a single
+# ohmyzsh/ohmyzsh checkout. Delegate to the public plugin resolvers so
+# the cache path and GitHub URL conventions stay in one place.
+zdot_bundle_omz_repo() {
+    zdot_plugin_path ohmyzsh/ohmyzsh
+}
 
-    # omz:lib -> ohmyzsh/ohmyzsh/lib
-    # omz:plugins/git -> ohmyzsh/ohmyzsh/plugins/git
-    local relpath=${spec#omz:}  # "lib" or "plugins/git"
-    REPLY="$cache/ohmyzsh/ohmyzsh/$relpath"
+zdot_bundle_omz_url() {
+    zdot_plugin_url ohmyzsh/ohmyzsh
+}
+
+# Path resolution for omz:* specs.
+#   omz:lib          -> <repo>/lib
+#   omz:plugins/git  -> <repo>/plugins/git
+zdot_bundle_omz_path() {
+    local relpath=${1#omz:}
+    zdot_bundle_omz_repo
+    REPLY="$REPLY/$relpath"
 }
 
 # Load OMZ plugin (handles both lib and plugins/*)
@@ -389,7 +402,10 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
         fi
 
         # Set ZSH to the OMZ installation directory (required by OMZ plugins/themes)
-        [[ -n "$ZSH" ]] || ZSH="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+        if [[ -z "$ZSH" ]]; then
+            zdot_plugin_path ohmyzsh/ohmyzsh
+            ZSH=$REPLY
+        fi
 
         # Set ZSH_CUSTOM to the path where custom config files and plugins exist
         [[ -n "$ZSH_CUSTOM" ]] || ZSH_CUSTOM="$ZSH/custom"
@@ -443,7 +459,8 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     # Bundle-specific compdump stamp: OMZ git HEAD revision.
     # Overrides the default stub in core/compinit.zsh.
     _zdot_compdump_bundle_stamp() {
-        local cache="$_ZDOT_PLUGINS_CACHE/ohmyzsh/ohmyzsh"
+        zdot_plugin_path ohmyzsh/ohmyzsh
+        local cache=$REPLY
         cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null
     }
 
