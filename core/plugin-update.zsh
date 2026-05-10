@@ -91,24 +91,44 @@ _zdot_plugin_update_should_run() {
     return 0
 }
 
+# _zdot_plugin_update_is_due — true if at least $frequency seconds have
+# elapsed since the last LAST_EPOCH stored in the timestamp file. Returns
+# 0 (true) when the file is missing or unreadable so a fresh install
+# checks immediately rather than deferring four hours.
 _zdot_plugin_update_is_due() {
     emulate -L zsh
     setopt local_options
     local stamp=$(_zdot_plugin_update_stamp_path)
-    [[ -e $stamp ]] || return 0
+    [[ -f $stamp ]] || return 0
+    local LAST_EPOCH=0
+    source "$stamp" 2>/dev/null
     local interval=$(_zdot_plugin_update_frequency)
     local now=$(date +%s)
-    local mtime=$(_zdot_plugin_update_mtime "$stamp")
-    (( now - mtime >= interval ))
+    (( now - LAST_EPOCH >= interval ))
 }
 
-_zdot_plugin_update_stamp() {
+# _zdot_plugin_update_write_timestamp [exit_status [error]]
+# Content-based stamp file matching dotfiler/zdot self-update style. Writes
+# LAST_EPOCH always; EXIT_STATUS and ERROR only when the args are non-empty.
+# The bg subshell's happy path calls this with status=0; the trap calls it
+# with status=1 if the scan was interrupted before pending was written, so
+# subsequent shells in the same rate-limit window don't re-pound the network.
+_zdot_plugin_update_write_timestamp() {
     emulate -L zsh
     setopt local_options
-    local stamp=$(_zdot_plugin_update_stamp_path)
-    local dir=${stamp:h}
-    [[ -d $dir ]] || mkdir -p "$dir" 2>/dev/null
-    : > "$stamp" 2>/dev/null
+    local _exit_status=${1:-} _error=${2:-}
+    local _ts=$(_zdot_plugin_update_stamp_path)
+    mkdir -p "${_ts:h}" 2>/dev/null
+    {
+        print -- "LAST_EPOCH=$(date +%s)"
+        if [[ -n "$_exit_status" ]]; then
+            print -- "EXIT_STATUS=$_exit_status"
+        fi
+        if [[ -n "$_error" ]]; then
+            print -- "ERROR=${_error//\'/\'\\\'\'}"
+        fi
+    } >| "$_ts" 2>/dev/null
+    return 0
 }
 
 _zdot_plugin_update_acquire_lock() {
@@ -440,9 +460,12 @@ _zdot_plugin_update_main_deferred() {
         [[ -d $_state_dir ]] || mkdir -p "$_state_dir" 2>/dev/null
 
         # Trap is the exit invariant: pending MUST exist by subshell exit
-        # so the precmd has a reliable "done" signal. Happy-path mv'd it
-        # already; the trap is the fallback.
-        trap '_zdot_plugin_update_release_lock; [[ -e "$_pending" ]] || print -r -- "err" > "$_pending"; rm -f "$_tmp"' INT TERM EXIT
+        # so the precmd has a reliable "done" signal. Happy-path writes it
+        # plus a status=0 timestamp; the trap is the fallback for signal
+        # interrupts and writes status=1 so the rate limit still applies
+        # — we don't pound the network on every prompt while the user
+        # repeatedly Ctrl-Cs the bg scan.
+        trap '_zdot_plugin_update_release_lock; [[ -e "$_pending" ]] || { print -r -- "err" > "$_pending"; _zdot_plugin_update_write_timestamp 1 "scan interrupted"; }; rm -f "$_tmp"' INT TERM EXIT
 
         local results
         results=$(_zdot_plugin_update_collect)
@@ -453,7 +476,7 @@ _zdot_plugin_update_main_deferred() {
         fi
         mv "$_tmp" "$_pending"
 
-        _zdot_plugin_update_stamp
+        _zdot_plugin_update_write_timestamp 0
         _zdot_plugin_update_release_lock
     ) 2>/dev/null &!
 
