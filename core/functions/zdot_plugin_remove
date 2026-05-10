@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 # zdot_plugin_remove: Remove a previously-cloned plugin repo from disk.
 # Usage: zdot_plugin_remove <user/repo>
-# Resolves the destination via _ZDOT_PLUGINS_CACHE.  Verifies the directory
+# Resolves the destination via zdot_plugin_path.  Verifies the directory
 # looks like a git repo (.git present) before running rm -rf, so that we never
 # blindly delete an arbitrary path.  Also removes the sentinel file so that
 # zdot_plugins_clone_all re-evaluates the full plugin set on next startup.
@@ -18,7 +18,8 @@ zdot_plugin_remove() {
     fi
 
     _zdot_plugins_init
-    local dest="${_ZDOT_PLUGINS_CACHE}/${spec}"
+    zdot_plugin_path "$spec"
+    local dest=$REPLY
 
     if [[ ! -d "$dest" ]]; then
         return 0
