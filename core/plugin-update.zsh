@@ -85,9 +85,11 @@ _zdot_plugin_update_should_run() {
     setopt local_options
     [[ "$(_zdot_plugin_update_mode)" != disabled ]] || return 1
     zdot_interactive || return 1
-    zdot_has_tty || return 1
-    [[ -t 0 ]] || return 1
     [[ $TERM != dumb ]] || return 1
+    # Note: no -t 0 / -t 1 checks here. We're called from a deferred-dispatch
+    # context (zsh-defer) where stdin is redirected so it doesn't race with
+    # zle for input. The bg fetch doesn't need a TTY; the y/n prompt path
+    # checks for one independently before reading a key.
     return 0
 }
 
