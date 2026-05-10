@@ -18,7 +18,7 @@ fi
 _history_init() {
     # --- optional per-directory history ---
     if zstyle -T ':zdot:history' per-dir; then
-      zstyle ':contextual-history:*' history-base "${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-directory-history/"
+      zstyle ':contextual-history:*' history-base "${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-context-history/"
         if zstyle -T ':zdot:history' start-global; then
           zstyle ':contextual-history:*' start-with-global true
         else
