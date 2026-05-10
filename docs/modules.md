@@ -20,6 +20,7 @@ xdg  →  env, sudo, history, secrets
          xdg      →  brew / apt
                    →  omp-prompt | starship-prompt | omz-prompt  (provides prompt-ready)
                    →  plugins     →  autocompletion, fzf, shell-extras, tmux, nodejs
+                              omz  (OMZ bundle defaults; load with plugins)
                    →  venv        →  completions
                                   →  rust, bun, uv
 ```
@@ -165,16 +166,80 @@ apt-installed tools are present.
 
 ### `plugins`
 
-Bootstraps the plugin management system. Registers the OMZ `omz:lib` bundle
-and sets the OMZ update mode. Must be loaded before any module that uses
-`--auto-bundle` or `--load-plugins`.
+Bootstraps the plugin management system and registers the bundle-aware
+background plugin-update reminder. Must be loaded before any module that
+uses `--auto-bundle` or `--load-plugins`.
+
+Bundle-specific modules (e.g. `omz`) live separately; load those alongside
+`plugins` to opt in.
+
+Ships a default-if-unset hook in the `plugins-configure` group:
+
+| zstyle | Shipped default | Engine fallback (if unset) |
+|---|---|---|
+| `':zdot:plugin-update' mode` | `prompt` | `disabled` |
+| `':zdot:plugin-update' frequency` | — | `14400` (4h) |
+
+Override anywhere in `.zshrc` with a plain `zstyle` line — the shipped
+default only applies if the style is unset. Or layer additional config via
+a hook in the group:
+
+```zsh
+_my_plugins_config() {
+    zstyle ':zdot:plugin-update' mode      reminder
+    zstyle ':zdot:plugin-update' frequency 7200
+}
+zdot_register_hook _my_plugins_config interactive noninteractive \
+    --group plugins-configure
+```
+
+`mode` values: `disabled` \| `reminder` \| `prompt`. Background scan walks
+every git-backed plugin and bundle repo; `reminder` prints the summary,
+`prompt` asks Y/n to fast-forward.
 
 | | |
 |---|---|
-| **Provides** | (group: `omz-configure`) |
-| **Requires** | — |
+| **Provides** | — |
+| **Requires** | group `plugins-configure` |
+| **Context** | interactive only (reminder hook); configure hook in both |
+| **zstyle** | see table above |
+
+---
+
+### `omz`
+
+Oh-My-Zsh bundle declaration. Declares `omz:lib` so OMZ appears in the
+clone manifest and update flow. Load alongside `plugins` when OMZ is your
+bundle.
+
+The bundle handler in `core/plugin-bundles/omz.zsh` is independently gated
+by `zstyle ':zdot:plugins' omz` (default: `yes`); set to `no` to skip
+cloning OMZ even with this module loaded.
+
+Ships a default-if-unset hook in the `omz-configure` group:
+
+| zstyle | Shipped default | OMZ behaviour if unset |
+|---|---|---|
+| `':omz:update' mode` | `prompt` | OMZ-internal default |
+
+Override anywhere in `.zshrc` with a plain `zstyle` line — the shipped
+default only applies if the style is unset. Or layer additional OMZ
+configuration via a hook in the group:
+
+```zsh
+_my_omz_config() {
+    zstyle ':omz:plugins:eza' dirs-first yes
+}
+zdot_register_hook _my_omz_config interactive noninteractive \
+    --group omz-configure
+```
+
+| | |
+|---|---|
+| **Provides** | — |
+| **Requires** | group `omz-configure` (waited on by the OMZ bundle handler) |
 | **Context** | interactive + noninteractive |
-| **zstyle** | none |
+| **zstyle** | see table above |
 
 ---
 

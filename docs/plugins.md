@@ -15,11 +15,14 @@ The plugin system works in phases:
 ### Declaring Plugins
 
 ```zsh
-# In your module files (e.g., modules/plugins/plugins.zsh)
+# In your module files (e.g., modules/<yourmod>/<yourmod>.zsh)
 zdot_use_plugin Aloxaf/fzf-tab
 zdot_use_plugin omz:plugins/git
 zdot_use_plugin omz:lib
 ```
+
+The shipped `omz` module already declares `omz:lib`; load it via
+`zdot_load_module omz` if you want the OMZ bundle.
 
 ### Plugin Kinds
 

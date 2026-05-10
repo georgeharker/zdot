@@ -214,6 +214,7 @@ zdot_load_module rust
 zdot_load_module fzf
 zdot_load_module keybinds
 zdot_load_module plugins          # third-party zsh plugins
+zdot_load_module omz              # Oh-My-Zsh bundle defaults
 zdot_load_module shell-extras     # git, eza, ssh plugins
 zdot_load_module completions
 zdot_load_module starship-prompt
@@ -498,6 +499,7 @@ zdot_load_module nodejs        # nvm (interactive: deferred; noninteractive: eag
 zdot_load_module fzf           # fuzzy finder (interactive only)
 zdot_load_module keybinds      # ZLE key bindings (interactive only)
 zdot_load_module plugins       # third-party plugins (interactive only)
+zdot_load_module omz           # Oh-My-Zsh bundle defaults
 zdot_load_module starship-prompt  # prompt theme (interactive only)
 zdot_load_module completions   # tab completion (interactive only)
 zdot_load_module local_rc      # source ~/.zshrc.local (interactive only)

@@ -1,32 +1,44 @@
 #!/usr/bin/env zsh
 # Plugins: zdot-plugins manager setup
 # Uses zdot-plugins for plugin management (now in core/plugins.zsh)
+#
+# Bundle-specific modules (e.g. `omz`) live separately. Load those
+# alongside `plugins` to opt in.
+#
+# Ships sensible defaults via hooks in the `plugins-configure` group. Each
+# default applies only if the zstyle is unset, so you can override anywhere
+# in .zshrc with a plain `zstyle ...` line — no ordering concerns. To layer
+# more plugin-side configuration, register your own hook in the group:
+#
+#   _my_plugins_config() {
+#       zstyle ':zdot:plugin-update' frequency 7200   # every 2h
+#   }
+#   zdot_register_hook _my_plugins_config interactive noninteractive \
+#       --group plugins-configure
+#
+# Defaults shipped here:
+#   :zdot:plugin-update mode -> prompt
+#     (background scan + Y/n upgrade prompt; flip to 'reminder' for
+#      print-only, or 'disabled' to opt out entirely)
 
 # ============================================================================
-# Plugin Configuration (zstyles for OMZ plugins)
-# ============================================================================
-
-_omz_configure_update() {
-    zstyle ':omz:update' mode prompt
-}
-
-zdot_register_hook _omz_configure_update interactive noninteractive \
-    --name omz-configure-update \
-    --group omz-configure
-
-zdot_use_plugin omz:lib
-
-# ============================================================================
-# Background plugin-update reminders (opt-in)
+# Background plugin-update reminders
 # ============================================================================
 # Engine lives in core/plugin-update.zsh (sourced by zdot.zsh; gets
-# compiled with the rest of core). Default mode is 'disabled', so the
-# hook below short-circuits in _zdot_plugin_update_should_run for users
-# who don't opt in.
-#
-# Activate from .zshrc:
-#   zstyle ':zdot:plugin-update' mode      prompt   # disabled | reminder | prompt
-#   zstyle ':zdot:plugin-update' frequency 14400    # seconds; default 4h
+# compiled with the rest of core). Bundle-aware: scans every git-backed
+# plugin in _ZDOT_PLUGINS_PATH and _ZDOT_BUNDLE_REPOS (covers OMZ, pz,
+# plain user/repo specs).
+
+_zdot_plugins_configure_default() {
+    local _m
+    zstyle -s ':zdot:plugin-update' mode _m \
+        || zstyle ':zdot:plugin-update' mode prompt
+}
+
+zdot_register_hook _zdot_plugins_configure_default interactive noninteractive \
+    --name plugins-configure-default \
+    --group plugins-configure
 
 zdot_register_hook _zdot_plugin_update_main interactive \
-    --name plugin-update
+    --name plugin-update \
+    --requires-group plugins-configure
