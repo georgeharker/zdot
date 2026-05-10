@@ -131,6 +131,25 @@ See also: [implementation.md](implementation.md)
 Self-update is **opt-in** — set `mode` to activate. All other keys are ignored
 when `mode` is `disabled`.
 
+### Phase 1 vs Phase 2
+
+When zdot is integrated with dotfiler, updates run in two phases:
+
+- **Phase 1 — dotfiles-directed**: dotfiler pulls the main dotfiles repo and
+  applies whatever submodule pointer / marker the upstream maintainer
+  recorded for zdot. Phase 1 follows that pointer faithfully (whatever
+  branch lineage the dotfiles maintainer chose, you get).
+- **Phase 2 — self-directed**: zdot fetches its own upstream and advances
+  to the branch tip. This is where `:zdot:update' branch` and
+  `release-channel` apply.
+
+Some keys (notably `branch` and `release-channel`) only affect Phase 2 —
+they don't override Phase 1's pointer trajectory.
+
+(Dotfiler's user docs call these "Round 1" and "Round 2"; the code uses
+`_phase` as the variable name. Same concept, different scope of
+description.)
+
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `mode` | string | `disabled` | Update mode: `disabled` \| `reminder` (print notice only) \| `prompt` (ask interactively) \| `auto` (update without asking). |
@@ -139,7 +158,8 @@ when `mode` is `disabled`.
 | `link-tree` | bool | `true` | Run link-tree unpacking after a pull. Set `false` to skip symlink management. |
 | `dotfiler-integration` | string | _(auto)_ | Force dotfiler integration on (`true`/`yes`/`on`/`1`) or off (`false`/`no`/`off`/`0`). Default: auto-detected from repo topology. |
 | `in-tree-commit` | string | `none` | How to handle in-tree (non-submodule) commits: `none` \| `prompt` \| `auto`. |
-| `subtree-remote` | string | _(empty)_ | `"remote branch"` string for `git subtree pull` (subtree topology only). |
+| `branch` | string | _(empty)_ | **Phase 2 only.** Explicit upstream branch override for the self-directed update. When set AND the worktree's current branch differs, Phase 2 actively `git checkout`s this branch before fast-forwarding. See [Branch overrides and switching](#branch-overrides-and-switching) below. |
+| `subtree-remote` | string | _(empty)_ | Subtree topology only. Either `"<remote>"` (branch resolved via the chain below) or `"<remote> <branch>"` (explicit branch). |
 | `subtree-url` | string | _(empty)_ | Remote URL override for subtree pulls. |
 | `release-channel` | string | `release` | Controls which commits are considered as update targets in **self-directed (Phase 2) checks** only. `release` — only advance to commits reachable from a semver tag matching `v<N>.<N>.<N>[…]`; no qualifying tag means no update. `any` — advance to the branch tip (pre-v0.x behaviour). Phase 1 (dotfiles-directed) is unaffected by this setting. |
 
@@ -152,6 +172,49 @@ zstyle ':zdot:update' release-channel release    # default — only update on ne
 # To track every commit pushed to main (developers / testers):
 zstyle ':zdot:update' release-channel any
 ```
+
+### Branch overrides and switching
+
+Phase 2 (the self-directed pull from zdot's own upstream) resolves the upstream
+branch via this chain (highest-priority first):
+
+1. `zstyle ':zdot:update' branch <name>`
+2. `.gitmodules` `submodule.<rel>.branch` *(submodule topology only)*
+3. `refs/remotes/<remote>/HEAD` *(local mirror of remote default)*
+4. `git remote show <remote>` HEAD branch
+5. `main` / `master` fallback
+
+**Switch behaviour.** When tier 1 or 2 produces a value (= the user
+**explicitly** picked a branch) and the worktree's current branch isn't
+that, Phase 2 actively `git checkout`s the configured branch — creating a
+local tracking branch from `<remote>/<branch>` if missing — and then
+fast-forwards. No rebase fallback: if local branch has commits ahead of
+remote, the pull fails loudly.
+
+If only tiers 3–5 produce a value (no explicit override; just inferred from
+git config), the pull runs the existing flow (`git pull --ff-only --autostash`
+for standalone, `git submodule update --remote` for submodule) on whatever
+branch is currently checked out. This avoids surprising users who have
+manually checked out a feature branch for ad-hoc testing — origin/HEAD
+isn't imposed on them.
+
+**Example: testing zdot's `dev` branch while dotfiles itself stays on main:**
+
+```zsh
+# In .zshrc
+zstyle ':zdot:update' branch dev
+```
+
+Or repo-level (committed in dotfiles, affects every clone):
+
+```sh
+git -C ~/.dotfiles config -f .gitmodules submodule..config/zdot.branch dev
+```
+
+**Subtree topology:** `subtree-remote 'zdot dev'` is still valid (explicit
+branch in the spec). `subtree-remote 'zdot'` plus `zstyle ':zdot:update' branch dev`
+is equivalent — the resolution chain fills in the branch when `subtree-remote`
+omits it.
 
 ---
 

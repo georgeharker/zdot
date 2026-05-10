@@ -238,7 +238,7 @@ _zdot_update_hook_plan() {
         zdot_verbose "zdot hook plan: phase=dotfiles, hint=${_dotfiler_hint_range_zdot}"
         # _old/_new come from the hint — we only need remote/branch for pull phase.
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
-        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote" ':zdot:update')
         # Fetch to materialise _new objects locally for build_file_lists.
         local _fetch_err
         _fetch_err=$(git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>&1 >/dev/null) || \
@@ -252,11 +252,11 @@ _zdot_update_hook_plan() {
         local _remote_url=""
         if [[ "$_topology" == subtree ]]; then
             _update_core_resolve_subtree_spec "$ZDOT_REPO" "$_subtree_spec" \
-                "$_subtree_url" || return 0
+                "$_subtree_url" ':zdot:update' || return 0
             _remote="${reply[1]}" _branch="${reply[2]}" _remote_url="${reply[3]}"
         else
             _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
-            _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+            _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote" ':zdot:update')
         fi
         _update_core_component_tip_range \
             "$ZDOT_REPO" "$_topology" "${_remote_url:-}" "${_branch:-}" \
@@ -280,7 +280,7 @@ _zdot_update_hook_plan() {
         fi
         zdot_verbose "zdot hook plan: no hint but force active — populating plan vars"
         _remote=$(_update_core_get_default_remote "$ZDOT_REPO")
-        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote")
+        _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote" ':zdot:update')
         _new="$_old"
     fi
 
@@ -369,7 +369,7 @@ _zdot_update_hook_pull() {
     case "$_topology" in
         standalone)
             _update_core_component_pull_standalone \
-                "$_repo_dir" "$_target_ref" "$_remote" "$_branch" "$_phase" || {
+                "$_repo_dir" "$_target_ref" "$_remote" "$_branch" "$_phase" ':zdot:update' || {
                 zdot_warn "zdot: pull failed"
                 return 1
             }
@@ -383,7 +383,7 @@ _zdot_update_hook_pull() {
             local _rel="${${_repo_dir:A}#${_parent:A}/}"
             zdot_log_debug "zdot: pull: parent=${_parent} target=${_target_ref}"
             _update_core_component_pull_submodule \
-                "$_parent" "$_rel" "$_target_ref" "$_phase" || {
+                "$_parent" "$_rel" "$_target_ref" "$_phase" ':zdot:update' || {
                 zdot_warn "zdot: submodule update failed"
                 return 1
             }

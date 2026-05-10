@@ -9,7 +9,8 @@
 #   zstyle ':zdot:update' frequency           3600       # seconds between checks
 #   zstyle ':zdot:update' destdir             "${XDG_CONFIG_HOME:-$HOME/.config}/zdot"
 #   zstyle ':zdot:update' in-tree-commit      none       # none|prompt|auto
-#   zstyle ':zdot:update' subtree-remote      ""         # "remote branch" for git subtree pull
+#   zstyle ':zdot:update' branch              ""         # explicit branch override (Phase 2 only)
+#   zstyle ':zdot:update' subtree-remote      ""         # "remote" or "remote branch"
 #   zstyle ':zdot:update' link-tree           true       # false to skip link-tree unpacking
 #   zstyle ':zdot:dotfiler' scripts-dir       ""         # auto-detected if empty
 #   zstyle ':zdot:update' release-channel     release    # release|any
@@ -19,6 +20,31 @@
 #   release (default) — only advance to commits reachable from a semver tag
 #                    matching v<N>.<N>.<N>[...].  No qualifying tag = no update.
 #   any            — advance to the branch tip (previous behaviour).
+#
+# branch (zstyle ':zdot:update' branch <name>) — overrides the upstream
+# branch tracked in Phase 2 (the self-directed check that advances zdot to
+# its own upstream tip). Use case: testing zdot on `dev` while the dotfiles
+# repo itself stays on main.
+#
+# Resolution precedence (highest first):
+#   1. zstyle ':zdot:update' branch <name>
+#   2. .gitmodules submodule.<rel>.branch          (submodule topology only)
+#   3. refs/remotes/<remote>/HEAD                   (local mirror of remote default)
+#   4. `git remote show <remote>` HEAD branch
+#   5. `main`, `master` fallback
+#
+# Switch behaviour: when an *explicit* override is set (tier 1 or 2) AND
+# the worktree's current branch differs from the configured one, Phase 2
+# actively `git checkout`s the configured branch (creating local tracking
+# from <remote>/<branch> if missing) before fast-forwarding. Without an
+# explicit override, the existing flow runs on whatever branch is checked
+# out — so manually checking out a feature branch for ad-hoc testing
+# doesn't get clobbered by origin/HEAD.
+#
+# subtree-remote — the value can be either "<remote-name>" or
+# "<remote-name> <branch>". When the branch part is omitted, the same
+# resolution chain above fills it in (so `subtree-remote 'zdot'` plus
+# `branch dev` is equivalent to `subtree-remote 'zdot dev'`).
 #
 # Deployment scenarios:
 #   standalone   — ZDOT_DIR is its own git root; zdot does git pull + apply
