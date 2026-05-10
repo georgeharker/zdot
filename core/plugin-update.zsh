@@ -236,6 +236,11 @@ _zdot_plugin_update_has_typed_input() {
 # ============================================================================
 # p10k instant-prompt awareness
 # ============================================================================
+#
+# p10k draws a synthetic "instant prompt" before zsh init finishes. Printing
+# during that window corrupts its screen buffer. Same mitigation as zsh-defer:
+# defer one precmd cycle when instant-prompt is active so we land after the
+# real prompt is drawn.
 
 _zdot_plugin_update_p10k_active() {
     case ${POWERLEVEL9K_INSTANT_PROMPT:-} in
@@ -385,10 +390,9 @@ _zdot_plugin_update_run_all() {
 # Background scan + precmd hook
 # ============================================================================
 
-# _zdot_plugin_update_precmd — first-prompt result handler. Identical shape
-# to zsh-pkg-update-nag's _zpun_precmd_nag: print a one-shot "(checking…)"
-# notice while the scan is in flight, defer one precmd under p10k instant-
-# prompt, then consume the pending file and dispatch.
+# _zdot_plugin_update_precmd — fires before each prompt. While the scan is
+# in flight it prints a one-shot faded "checking…" notice; once the pending
+# file lands it consumes it, deregisters itself, and dispatches.
 _zdot_plugin_update_precmd() {
     emulate -L zsh
     setopt local_options
@@ -409,11 +413,13 @@ _zdot_plugin_update_precmd() {
     fi
 
     # Defer one precmd under p10k instant-prompt so output doesn't corrupt
-    # p10k's pre-prompt buffer.
+    # p10k's pre-prompt buffer. We stay registered; the next precmd lands
+    # after the real prompt is drawn and proceeds to consume.
     if (( first_call )) && _zdot_plugin_update_p10k_active; then
         return 0
     fi
 
+    # Pending result has landed — deregister so this hook stops firing.
     precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} )
 
     local content
