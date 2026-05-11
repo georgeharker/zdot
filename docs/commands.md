@@ -15,7 +15,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | Noun | Verbs |
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
-| `hook` | `list [-v] [-a]`, `plan`, `graph [--depends\|--uses\|--all]` |
+| `hook` | `list [-v] [-a]`, `plan`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [-v]` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
 | `module` | `list`, `clone <name>` |
 | `completion` | `refresh` |
@@ -55,10 +55,34 @@ zdot hook list [-v] [-a]   # List registered hooks
 
 zdot hook plan             # Print the full execution plan in dependency order
 
-zdot hook graph --depends <name>   # ASCII tree: what <name> requires (recursive)
-zdot hook graph --uses <name>      # ASCII tree: what depends on <name> (recursive)
+zdot hook graph --depends <name>   # Tree: what <name> requires (recursive)
+zdot hook graph --uses <name>      # Tree: what depends on <name> (recursive)
 zdot hook graph --all              # Full dependency graph for all hooks
+
+# Layout flags (combine with any of the three modes above):
+  --ascii            Use ASCII glyphs (|-, `-) instead of Unicode box-drawing
+  --max-depth N      Cap recursion depth (children below get a trailing "…")
+  --show-internal    Include synthetic group-begin / group-end scaffolding hooks
+  -v, --verbose      Show "label  <func>" instead of just the label
 ```
+
+Output style is pstree-like:
+
+```
+_xdg_init─┬─_brew_init─┬─_op_init─┬─_dotfiler_init
+          │            │          ├─_local_rc_init
+          │            │          └─_uv_init───_completions_finalize
+          │            ├─omp-prompt───patina
+          │            └─patina ↑
+          ├─_env_init
+          └─fzf-configure───fzf-load───fzf-post-init
+```
+
+- Siblings sorted by display name (deterministic).
+- Single-child chains collapse onto one line: `A───B───C`.
+- Multiple children laid out with parent-width alignment under the `┬`.
+- DAG nodes printed once; later occurrences shown as `name ↑`.
+- Phase nodes with no provider appear as `[phase: foo] (no provider)`.
 
 **Implementation**: delegates to `zdot_hooks_list`, `zdot_show_plan`, and `zdot_hooks_graph` (core/hooks.zsh).
 

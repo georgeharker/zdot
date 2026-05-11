@@ -40,10 +40,14 @@ function zdot() {
         zdot_info "  zdot hook plan               Print the full execution plan"
         zdot_info "  zdot hook status             Show per-hook run status from last startup"
         zdot_info "  zdot hook defer-queue        Show deferred task submission order"
-        zdot_info "  zdot hook graph              Show ASCII dependency-tree graph"
+        zdot_info "  zdot hook graph              Show pstree-style dependency-tree graph"
         zdot_info "    --depends <name>         Show what a hook requires (recursive)"
         zdot_info "    --uses <name>            Show what depends on a hook (recursive)"
         zdot_info "    --all                    Show full graph for all hooks"
+        zdot_info "    --ascii                  ASCII glyphs instead of Unicode box-drawing"
+        zdot_info "    --max-depth N            Cap recursion depth"
+        zdot_info "    --show-internal          Include synthetic group hooks"
+        zdot_info "    -v, --verbose            Show 'label  <func>' instead of label"
     }
 
     function _zdot_help_plugin() {
