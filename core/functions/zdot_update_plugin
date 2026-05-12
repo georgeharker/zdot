@@ -14,7 +14,8 @@ zdot_update_plugin() {
 
     local -A seen
     local spec bare version repo_dir label
-    local updated=0 failed=0
+    local before after short_before short_after commit_count
+    local updated=0 unchanged=0 failed=0
 
     for spec in "${specs[@]}"; do
         bare=$spec
@@ -52,11 +53,22 @@ zdot_update_plugin() {
             continue
         fi
 
+        before=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+
         if [[ -n "$version" ]]; then
             zdot_action "  Checking out $version for $label..."
             if (cd "$repo_dir" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null; then
-                zdot_info "    $label@$version"
-                (( updated++ ))
+                after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+                if [[ "$before" == "$after" ]]; then
+                    zdot_info "    %F{244}already at $version%f"
+                    (( unchanged++ ))
+                else
+                    short_before=${before[1,7]}
+                    short_after=${after[1,7]}
+                    zdot_success "    checked out $version ($short_before → $short_after)"
+                    _zdot_update_plugin_show_changelog "$repo_dir" "$before" "$after"
+                    (( updated++ ))
+                fi
             else
                 zdot_error "    $label@$version failed"
                 (( failed++ ))
@@ -66,17 +78,47 @@ zdot_update_plugin() {
 
         zdot_action "  Updating $label..."
         if (cd "$repo_dir" && command git pull --quiet) 2>/dev/null; then
-            zdot_info "    updated"
-            (( updated++ ))
+            after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+            if [[ "$before" == "$after" ]]; then
+                zdot_info "    %F{244}already up to date%f"
+                (( unchanged++ ))
+            else
+                short_before=${before[1,7]}
+                short_after=${after[1,7]}
+                commit_count=$(cd "$repo_dir" && command git rev-list --count "$before..$after" 2>/dev/null)
+                zdot_success "    updated ($short_before → $short_after, ${commit_count:-?} commit$( (( commit_count == 1 )) || print s ))"
+                _zdot_update_plugin_show_changelog "$repo_dir" "$before" "$after"
+                (( updated++ ))
+            fi
         else
             zdot_error "    failed"
             (( failed++ ))
         fi
     done
 
-    if (( updated == 0 && failed == 0 )); then
+    if (( updated == 0 && unchanged == 0 && failed == 0 )); then
         zdot_info "No plugins to update"
     else
-        zdot_info "Done ($updated updated, $failed failed)"
+        zdot_info "Done ($updated updated, $unchanged already up to date, $failed failed)"
+    fi
+}
+
+# Print up to 3 commit subjects between $2 and $3 in $1, indented and faded.
+# Silent on any git error or empty range — purely cosmetic.
+_zdot_update_plugin_show_changelog() {
+    local repo=$1 from=$2 to=$3
+    local -a subjects
+    subjects=( "${(@f)$(cd "$repo" && command git log --no-merges --pretty=format:'%s' "$from..$to" 2>/dev/null)}" )
+    subjects=( ${subjects:#} )
+    (( ${#subjects} )) || return 0
+    local subj
+    local shown=0
+    for subj in "${subjects[@]}"; do
+        (( shown >= 3 )) && break
+        zdot_info "      %F{244}• ${subj//\%/%%}%f"
+        (( shown++ ))
+    done
+    if (( ${#subjects} > shown )); then
+        zdot_info "      %F{244}… and $(( ${#subjects} - shown )) more%f"
     fi
 }
