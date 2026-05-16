@@ -11,6 +11,7 @@ typeset -gA _ZDOT_PLUGINS               # plugin spec -> kind (normal/defer/fpat
 typeset -gA _ZDOT_PLUGINS_LOADED        # plugin spec -> 1 (already loaded)
 typeset -gA _ZDOT_PLUGIN_COMPILE_EXTRA  # plugin spec -> space-separated list of extra files to compile
 typeset -gA _ZDOT_PLUGINS_VERSION       # plugin spec -> version/rev (optional)
+typeset -gA _ZDOT_PLUGINS_PREV_VERSION  # plugin spec -> version/rev from prior sentinel (slow-path only)
 typeset -gA _ZDOT_PLUGINS_PATH          # plugin spec -> filesystem path (populated at clone time)
 typeset -gA _ZDOT_PLUGINS_FILE          # plugin spec -> *.plugin.zsh path (populated at load time)
 typeset -g  _ZDOT_PLUGINS_CACHE         # cache directory
@@ -389,6 +390,35 @@ zdot_plugin_name() {
 # Plugin Cloning
 # ============================================================================
 
+# Restore a cloned plugin to its remote's default branch.
+# Called on a pin→unpin transition: the user used to pin a ref but now no
+# longer does, so we move the working tree back to whatever `origin/HEAD`
+# points at. Tries the locally-recorded `origin/HEAD` first; if absent (e.g.
+# legacy clones that pre-date `git clone` recording it), falls back to a
+# single `git remote set-head origin --auto` to ask the remote.
+# Usage: _zdot_plugin_restore_default_branch <repo-label> <clone-dir>
+_zdot_plugin_restore_default_branch() {
+    local repo=$1 dest=$2
+    local default_ref
+    default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    default_ref=${default_ref#origin/}
+    if [[ -z "$default_ref" ]]; then
+        # origin/HEAD wasn't recorded at clone time — ask the remote
+        (cd "$dest" && git remote set-head origin --auto >/dev/null 2>&1)
+        default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+        default_ref=${default_ref#origin/}
+    fi
+    if [[ -z "$default_ref" ]]; then
+        print "zdot-plugins: warning: no default branch advertised by origin for $repo; leaving as-is" >&2
+        return 1
+    fi
+    print "zdot-plugins: restoring $repo to default branch ($default_ref)..." >&2
+    if ! (cd "$dest" && git fetch --quiet origin && git checkout --quiet "$default_ref"); then
+        print "zdot-plugins: warning: failed to restore $repo to $default_ref" >&2
+        return 1
+    fi
+}
+
 zdot_plugin_clone() {
     local spec=$1
     local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
@@ -408,7 +438,29 @@ zdot_plugin_clone() {
     # Cache path in global assoc array — no subshell needed for user/repo specs
     _ZDOT_PLUGINS_PATH[$spec]="$dest"
 
-    [[ -d "$dest" ]] && return 0
+    if [[ -d "$dest" ]]; then
+        # Already cloned. Act only on a *spec transition* — i.e. the user
+        # edited their spec for this plugin (added a pin, changed a pin, or
+        # removed a pin) since the last successful clone. Local hacking in the
+        # plugin dir (manual `git checkout` etc.) is preserved when the spec
+        # itself is unchanged.
+        if [[ -d "$dest/.git" ]] && (( ${+_ZDOT_PLUGINS_PREV_VERSION[$spec]} )); then
+            local prev_version=${_ZDOT_PLUGINS_PREV_VERSION[$spec]}
+            if [[ "$prev_version" != "$version" ]]; then
+                if [[ -n "$version" ]]; then
+                    # pin added or changed → fetch + checkout the new ref
+                    print "zdot-plugins: switching $repo to $version..." >&2
+                    if ! (cd "$dest" && git fetch --quiet origin && git checkout --quiet "$version"); then
+                        print "zdot-plugins: warning: failed to checkout $version for $repo" >&2
+                    fi
+                else
+                    # pin removed → restore the remote's default branch
+                    _zdot_plugin_restore_default_branch "$repo" "$dest"
+                fi
+            fi
+        fi
+        return 0
+    fi
 
     zdot_plugin_url "$spec"
     local url=$REPLY
@@ -436,10 +488,12 @@ zdot_plugin_clone() {
 # Slow path:
 #   Triggered when the sentinel string differs from the file (a spec was added,
 #   removed, or pinned to a different version) or when any plugin directory is
-#   missing (e.g. after a fresh checkout).  In the slow path, zdot_plugin_clone
-#   is called for each spec individually.  After all clones succeed, the sentinel
-#   file is rewritten with the current spec string so future runs hit the fast
-#   path again.
+#   missing (e.g. after a fresh checkout).  Before iterating, the previous
+#   sentinel is parsed into _ZDOT_PLUGINS_PREV_VERSION (per-spec last-applied
+#   pin) so that zdot_plugin_clone can detect *which* specs the user actually
+#   edited and act only on those (pin add / change / remove).  After all clones
+#   succeed, the sentinel file is rewritten with the current spec string so
+#   future runs hit the fast path again.
 #
 # The sentinel file is stored inside the plugins cache directory and is not
 # version-controlled — it is purely a local optimisation artefact.
@@ -463,9 +517,14 @@ zdot_plugins_clone_all() {
     done
     local current_specs="${(j: :)_sentinel_parts}"
 
+    # Read previous sentinel content once. Used for both fast-path comparison
+    # and (on the slow path) per-spec pin-transition detection.
+    local old_sentinel=''
+    [[ -f "$sentinel" ]] && old_sentinel=$(<$sentinel)
+
     # Fast path: if the sentinel records the exact same spec+version list, all
     # plugins are already on disk — skip all clone-checks entirely.
-    if [[ -f "$sentinel" && "$(<$sentinel)" == "$current_specs" ]]; then
+    if [[ "$old_sentinel" == "$current_specs" ]]; then
         # Populate _ZDOT_PLUGINS_PATH from cache dir without subshells so that
         # zdot_load_deferred_plugins can use it even on the fast path.
         local _fast_spec _fast_cache _fast_all_present=1
@@ -486,6 +545,27 @@ zdot_plugins_clone_all() {
         done
         [[ $_fast_all_present -eq 1 ]] && return 0
         # Fall through to slow path if any directory was missing.
+    fi
+
+    # Parse the previous sentinel into a per-spec map of the *last applied*
+    # version pin (empty if the spec was previously unpinned). zdot_plugin_clone
+    # uses this to decide whether the user has explicitly altered this spec's
+    # pin since the last clone — and only then reacts. Specs absent from the
+    # map were not present last time (newly added or sentinel missing).
+    typeset -gA _ZDOT_PLUGINS_PREV_VERSION
+    _ZDOT_PLUGINS_PREV_VERSION=()
+    if [[ -n "$old_sentinel" ]]; then
+        local _entry _entry_spec _entry_ver
+        for _entry in ${(z)old_sentinel}; do
+            if [[ $_entry == *@* ]]; then
+                _entry_spec=${_entry%@*}
+                _entry_ver=${_entry##*@}
+            else
+                _entry_spec=$_entry
+                _entry_ver=''
+            fi
+            _ZDOT_PLUGINS_PREV_VERSION[$_entry_spec]=$_entry_ver
+        done
     fi
 
     local spec
