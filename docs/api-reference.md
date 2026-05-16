@@ -339,6 +339,34 @@ Sets `REPLY` to the full path of `<name>/<name>.zsh`, or returns 1 if not found.
 
 ---
 
+### `zdot_module_loaded`
+
+Check whether a module has been loaded.
+
+```zsh
+zdot_module_loaded <module-name>
+```
+
+Returns 0 if the named module has been loaded via `zdot_load_module`, 1
+otherwise. Useful inside a module's configure/init hooks to vary behaviour based
+on which sibling modules the user has enabled.
+
+By the time configure and init hooks run, all `zdot_load_module` calls in
+`.zshrc` have completed, so the check reflects the user's full module selection
+regardless of load order.
+
+**Example:**
+
+```zsh
+# In modules/history/history.zsh — default the fzf ctrl-r binding on
+# only when the user has also enabled the fzf module.
+if zdot_module_loaded fzf; then
+    zstyle ':contextual-history:*' fzf-bind-ctrl-r true
+fi
+```
+
+---
+
 ### `zdot_module_list`
 
 List all loaded modules with their source directories.

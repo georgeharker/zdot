@@ -268,6 +268,7 @@ zdot_has_tty     || return 0    # skip when no terminal I/O available
 - Module loading with first-match search (`zdot_load_module`)
 - Deduplication and existence checking (`_zdot_load_module_file`)
 - Module path resolution across the search path (`zdot_module_path`)
+- Loaded-module status check (`zdot_module_loaded`)
 - Module listing with provenance (`zdot_module_list`)
 
 **Key Functions:**
@@ -287,6 +288,10 @@ Internal entry point for loading any module file. Handles deduplication (returns
 ##### `zdot_module_path()` (public)
 
 Searches the path for `<name>/<name>.zsh` and sets `REPLY` to the first match. Returns 1 if the module is not found anywhere in the path.
+
+##### `zdot_module_loaded()` (public)
+
+Returns 0 if `_ZDOT_MODULES_LOADED[$name]` is set, 1 otherwise. Intended for use inside configure/init hooks where module authors want to vary behaviour based on which sibling modules the user has enabled. Because all `zdot_load_module` calls run synchronously at `.zshrc` time (before any hook fires), the check reflects the complete user selection regardless of load order.
 
 ##### `zdot_module_list()` (public)
 
@@ -918,6 +923,7 @@ zdot module clone xdg
 |---|---|
 | `zdot_load_module <name>` | Load a module (search path, deduped) |
 | `zdot_module_path <name>` | Return the path to a module's main file (REPLY) |
+| `zdot_module_loaded <name>` | Return 0 if the named module has been loaded |
 | `zdot_module_list` | Print all loaded modules with source directory |
 
 #### CLI Reference

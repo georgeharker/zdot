@@ -107,6 +107,15 @@ zdot_load_module() {
     return 1
 }
 
+# Check whether a module has been loaded.
+# Usage: zdot_module_loaded <module-name>
+# Returns 0 if loaded, 1 otherwise.
+zdot_module_loaded() {
+    local module="$1"
+    [[ -z "$module" ]] && return 1
+    [[ -n "${_ZDOT_MODULES_LOADED[$module]}" ]]
+}
+
 # List all loaded modules with their source directory.
 # Modules from lib/ are labelled "(lib)"; others show their directory path.
 # Usage: zdot_module_list
