@@ -7,7 +7,17 @@
 
 _autocomplete_plugins_configure() {
     # Zsh-autosuggest
-    ZSH_AUTOSUGGEST_STRATEGY=(match_prev_cmd abbreviations completion)  # shuck: ignore=C001
+    # Prefer the contextual-history-aware port of match_prev_cmd when the
+    # history module is loaded with per-dir enabled (which is what causes
+    # georgeharker/zsh-contextual-history to actually load). It falls back to
+    # the upstream strategy behaviour when local-history mode is off, so it is
+    # a safe drop-in.
+    local _autosuggest_match_strategy=match_prev_cmd
+    if zdot_module_loaded history && zstyle -T ':zdot:history' per-dir; then
+        _autosuggest_match_strategy=contextual_match_prev_cmd
+    fi
+    ZSH_AUTOSUGGEST_STRATEGY=("$_autosuggest_match_strategy" abbreviations completion)  # shuck: ignore=C001
+    unset _autosuggest_match_strategy
 
     # Zsh-abbr
     ABBR_AUTOLOAD=1  # shuck: ignore=C001

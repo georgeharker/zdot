@@ -63,6 +63,13 @@ prefers commands that match the previous context, then abbreviation expansions,
 then plain completion. Override by setting `ZSH_AUTOSUGGEST_STRATEGY` before
 this module's configure phase runs.
 
+If the `history` module is also loaded (with `per-dir` enabled — the default),
+the `match_prev_cmd` slot is swapped for `contextual_match_prev_cmd`. That
+strategy ships in `georgeharker/zsh-contextual-history` and behaves identically
+to upstream `match_prev_cmd` when local-history mode is off; when local-history
+mode is toggled on (via the `local-toggle-key` bind) it restricts suggestions
+to commands this shell typed.
+
 ## Provides
 
 Phases via `zdot_define_module`: `autocomplete-configured`, `autocomplete-loaded`,
