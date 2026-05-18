@@ -19,6 +19,28 @@ if zstyle -T ':zdot:history' per-dir; then
 fi
 
 _history_init() {
+    # --- history file ---
+    if [[ ! -d ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history ]]; then
+        mkdir -p ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history
+        [[ -f ${HOME}/.zsh_history ]] && mv ${HOME}/.zsh_history ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history/history
+    fi
+    HISTFILE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history/history
+
+    # --- history size ---
+    local _hist_size
+    zstyle -s ':zdot:history' size _hist_size
+    : ${_hist_size:=50000}
+    HISTSIZE=${_hist_size}
+    local _save_hist_size
+    zstyle -s ':zdot:history' save-size _save_hist_size
+    : ${_save_hist_size:=50000}
+    SAVEHIST=${_save_hist_size}
+
+    # --- shell options ---
+    setopt SHARE_HISTORY
+    setopt HIST_IGNORE_SPACE
+    setopt HIST_REDUCE_BLANKS
+
     # --- optional per-directory history ---
     if zstyle -T ':zdot:history' per-dir; then
       zstyle ':contextual-history:*' history-base "${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-context-history/"
@@ -63,28 +85,6 @@ _history_init() {
 
       zdot_load_plugin georgeharker/zsh-contextual-history
     fi
-
-    # --- history file ---
-    if [[ ! -d ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history ]]; then
-        mkdir -p ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history
-        [[ -f ${HOME}/.zsh_history ]] && mv ${HOME}/.zsh_history ${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history/history
-    fi
-    HISTFILE=${XDG_DATA_HOME:-${HOME}/.local/share}/zsh-history/history
-
-    # --- history size ---
-    local _hist_size
-    zstyle -s ':zdot:history' size _hist_size
-    : ${_hist_size:=50000}
-    HISTSIZE=${_hist_size}
-    local _save_hist_size
-    zstyle -s ':zdot:history' save-size _save_hist_size
-    : ${_save_hist_size:=50000}
-    SAVEHIST=${_save_hist_size}
-
-    # --- shell options ---
-    setopt SHARE_HISTORY
-    setopt HIST_IGNORE_SPACE
-    setopt HIST_REDUCE_BLANKS
 }
 
 # Register hook - requires XDG paths for history directory
