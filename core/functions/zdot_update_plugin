@@ -122,3 +122,9 @@ _zdot_update_plugin_show_changelog() {
         zdot_info "      %F{244}… and $(( ${#subjects} - shown )) more%f"
     fi
 }
+
+# autoload -Uz uses ZSH style when the file contains more than one top-level
+# definition: the file's body becomes the function body, defining everything
+# but never calling the named function. Trailing call re-dispatches so the
+# first invocation actually runs the update.
+zdot_update_plugin "$@"
