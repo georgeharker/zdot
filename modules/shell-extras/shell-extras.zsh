@@ -30,4 +30,5 @@ zdot_define_module shell-extras \
     --configure _shell_extras_configure \
     --load _shell_extras_load \
     --group omz-plugins \
-    --requires plugins-cloned omz-bundle-initialized
+    --requires plugins-cloned omz-bundle-initialized \
+    --auto-configure-group

@@ -106,6 +106,7 @@ zdot_define_module fzf \
     --post-init _fzf_post_plugin \
     --group omz-plugins \
     --requires plugins-cloned omz-bundle-initialized \
+    --auto-configure-group \
     --provides-tool fzf
 
 # ============================================================================
@@ -119,7 +120,8 @@ _plugins_load_fzf_tab() {
 zdot_define_module fzf-tab \
     --load _plugins_load_fzf_tab \
     --requires autosuggest-abbr-ready fzf-configured \
-    --context interactive
+    --context interactive \
+    --auto-configure-group
 
 # Lazy load module functions
 zdot_module_autoload_funcs

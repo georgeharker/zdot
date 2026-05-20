@@ -1500,7 +1500,9 @@ zdot_execute_all() {
 #   --fn <name>                   Override the auto-derived function name
 #
 # All other flags (--provides-tool, --requires-tool, --optional, --name,
-# --group, --deferred, etc.) are passed through to zdot_register_hook.
+# --group, --requires-group, --deferred, etc.) are passed through to
+# zdot_register_hook. To expose a user-extension group, pass
+# `--requires-group <name>-configure` directly.
 zdot_simple_hook() {
     local name="$1"; shift
     local fn="_${name}_init"

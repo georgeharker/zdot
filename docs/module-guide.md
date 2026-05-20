@@ -11,6 +11,7 @@ quick start to complex plugin-loading lifecycles.
 - [zdot_simple_hook](#zdot_simple_hook)
 - [zdot_define_module](#zdot_define_module)
 - [Manual Hooks](#manual-hooks)
+- [User Extension Points](#user-extension-points)
 - [Common Patterns](#common-patterns)
 - [Registering in .zshrc](#registering-in-zshrc)
 - [API Reference](#api-reference)
@@ -113,7 +114,9 @@ one hook, standard dependencies.
 | Provides | `<name>-configured` | `--provides <token>` |
 | Contexts | `interactive noninteractive` | `--context <ctx...>` |
 
-All unrecognized flags pass through to `zdot_register_hook`.
+All unrecognized flags pass through to `zdot_register_hook`. To expose a
+user-extension group, pass `--requires-group <name>-configure` directly —
+see [User Extension Points](#user-extension-points).
 
 ### Examples
 
@@ -220,6 +223,7 @@ Each takes a function name (the function must be defined before calling
 | `--requires <phases...>` | Extra requires for the load phase |
 | `--group <name>` | Group for the load phase |
 | `--auto-bundle` | Auto-detect bundle groups from plugin specs |
+| `--auto-configure-group` | Expose the `<basename>-configure` extension group. The `--configure` fn (or `--load` fn, if no configure) becomes the group consumer via `--requires-group <basename>-configure` — it runs after all user hooks. See [User Extension Points](#user-extension-points). |
 | `--variant <name>` | Only register phases when this variant is active (repeatable) |
 | `--variant-exclude <name>` | Skip all phases when this variant is active |
 
@@ -394,6 +398,286 @@ zdot_register_hook _omz_configure_completion interactive noninteractive \
 
 Group hooks participate in barrier synchronization. All members of a group
 must complete before anything that `--requires-group <name>` can run.
+
+---
+
+## User Extension Points
+
+User-injected configuration lands at one of two layers, and the mechanism is
+different for each:
+
+| Layer | When | Mechanism | Use when |
+|---|---|---|---|
+| **Parse-time** | While the module's `.zsh` file is being sourced | `zdot_before_module` callback registry | The module reads zstyle / shell state at parse time (e.g. `zdot_provides_tool_args`, conditional `zdot_use_plugin`) |
+| **DAG-time** | While the resolved hook DAG is executing | `<name>-configure` group with `--requires-group` on the module's init fn | The module reads state inside an init/configure fn that runs during `zdot_init` |
+
+Both layers share the same idiom inside the module: read state with a
+backstop fallback (`zstyle -s ... || default`) so user-set values win, but
+sensible defaults apply when nothing is set.
+
+The rest of this section walks through DAG-time first (the common case),
+then parse-time.
+
+### DAG-time: zdot_simple_hook
+
+Pass `--requires-group <name>-configure` directly; it falls through to
+`zdot_register_hook`. The init fn is the consumer. User hooks attach with
+`--group <name>-configure` and run before it.
+
+```zsh
+_brew_init() {
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    local -a _tools
+    zstyle -a ':zdot:brew' verify-tools _tools \
+        || _tools=(op eza oh-my-posh gh)        # backstop default
+    zdot_verify_tools "${_tools[@]}"
+}
+
+zdot_simple_hook brew --provides brew-ready --requires-group brew-configure
+```
+
+```zsh
+# User override (in .zshrc or another module)
+_my_brew_overrides() {
+    zstyle ':zdot:brew' verify-tools op fd ripgrep
+}
+zdot_register_hook _my_brew_overrides interactive noninteractive \
+    --group brew-configure
+```
+
+Order: `user --group hooks` → `_brew_init`.
+
+### DAG-time: zdot_define_module
+
+`--auto-configure-group` does the wiring for you: the `--configure` fn (or
+the `--load` fn, if no configure is set) becomes the group consumer. User
+hooks attach with `--group <basename>-configure`.
+
+```zsh
+_node_configure() {
+    zstyle -t ':omz:plugins:nvm' lazy \
+        || zstyle ':omz:plugins:nvm' lazy yes   # backstop default
+}
+
+zdot_define_module node \
+    --configure _node_configure \
+    --load-plugins omz:plugins/nvm \
+    --auto-bundle \
+    --auto-configure-group
+```
+
+```zsh
+# User override (in .zshrc or another module)
+_my_node_overrides() {
+    zstyle ':omz:plugins:nvm' lazy no
+}
+zdot_register_hook _my_node_overrides interactive noninteractive \
+    --group node-configure
+```
+
+Resulting DAG:
+
+```
+xdg-configured
+      ↓
+  [ _my_node_overrides  ||  …other user hooks ]   ← group members
+      ↓
+  group end-barrier
+      ↓
+  _node_configure   ← consumer; reads zstyle, applies backstop defaults
+      ↓ provides node-configured
+  node-load
+```
+
+When there is no `--configure` fn, the `--load` fn takes the consumer
+role — there is just one phase that does both "read user state" and
+"do the work."
+
+### Parse-time: zdot_before_module
+
+Some modules read state *at parse time* — while the module file is being
+sourced, before any DAG hook runs. Examples:
+
+- `brew` / `apt` use `zdot_provides_tool_args ':zdot:brew' verify-tools …`
+  at parse time to seed `--provides-tool` arguments on the registered hook.
+- `history` gates a plugin declaration on `zstyle -T ':zdot:history' per-dir`
+  at parse time.
+- Any module that conditionally calls `zdot_use_plugin <spec>` based on
+  shell state.
+
+Setting these zstyles from a DAG-time configure-group hook is too late —
+the DAG isn't built yet. The simplest fix is to set the zstyle in `.zshrc`
+before `zdot_load_module`:
+
+```zsh
+zstyle ':zdot:brew' verify-tools op fd ripgrep
+zdot_load_module brew
+```
+
+That works and needs no new API. Reach for `zdot_before_module` when one of
+the following applies:
+
+- You want to group several settings for one module into a single callback
+- The setup has conditional logic (platform detection, env checks)
+- You want a per-module config file that self-registers, so source order
+  in `.zshrc` doesn't matter
+
+The function has two forms:
+
+```zsh
+# Light: schedule a single command to run when the module is loaded
+zdot_before_module brew --cmd zstyle ':zdot:brew' verify-tools op fd ripgrep
+
+# Heavy: register a named function (define it elsewhere)
+_my_brew_setup() {
+    zstyle ':zdot:brew' verify-tools op fd ripgrep
+    is-platform mac && zstyle ':zdot:brew' something-else yes
+}
+zdot_before_module brew --fn _my_brew_setup
+```
+
+Callbacks fire synchronously, in registration order, immediately before the
+module is sourced. Multiple `zdot_before_module` calls for the same module
+all run.
+
+```zsh
+# These accumulate; all three run in order before brew is sourced.
+zdot_before_module brew --cmd zstyle ':zdot:brew' verify-tools op fd ripgrep
+zdot_before_module brew --cmd export HOMEBREW_NO_AUTO_UPDATE=1
+zdot_before_module brew --fn _my_extra_brew_setup
+zdot_load_module brew
+```
+
+Per-module config files become self-registering:
+
+```zsh
+# ~/.config/zsh/modules-config/brew.zsh
+_my_brew_setup() {
+    zstyle ':zdot:brew' verify-tools op fd ripgrep
+    [[ -x /opt/homebrew/bin/brew ]] && zstyle ':zdot:brew' something yes
+}
+zdot_before_module brew --fn _my_brew_setup
+```
+
+```zsh
+# .zshrc
+source ~/.config/zsh/modules-config/brew.zsh   # registers itself
+zdot_load_module brew                          # callback fires here
+```
+
+Behaviour and edge cases:
+
+- `--fn` and `--cmd` are mutually exclusive; exactly one must be given.
+- `--fn` registrations are deduplicated by function name. `--cmd`
+  registrations are not (each call generates a distinct anonymous fn).
+- `--fn` accepts a function name that isn't defined yet — the framework
+  warns at drain time if it's still missing, then continues to the next
+  callback. Useful when registration precedes definition.
+- Registering after the module has already been loaded warns and the
+  callback does not run. Order matters: register before `zdot_load_module`.
+- A callback for a module that's never loaded silently never fires.
+
+#### Cross-module configuration
+
+`zdot_before_module` isn't restricted to `.zshrc` — any module can register
+parse-time callbacks for *other* modules. This is the parse-time analogue
+of one module setting zstyles a DAG hook will read.
+
+```zsh
+# Inside a user module ~/.config/zdot-modules/macos-defaults/macos-defaults.zsh
+zdot_before_module brew --cmd zstyle ':zdot:brew' verify-tools op eza fzf
+zdot_before_module brew --cmd zstyle ':zdot:brew' some-other-key yes
+zdot_before_module fzf  --fn  _macos_fzf_prepare
+
+_macos_fzf_prepare() {
+    zstyle ':zdot:fzf' theme "$HOME/.config/fzf/tokyonight.sh"
+}
+```
+
+```zsh
+# In .zshrc
+zdot_load_module xdg
+zdot_load_module macos-defaults    # registers callbacks for brew + fzf
+zdot_load_module brew              # macos-defaults' brew callbacks fire here
+zdot_load_module fzf               # _macos_fzf_prepare fires here
+```
+
+Registering for a module that never loads is a silent no-op, so a defaults
+module can offer setup for several optional targets and only the ones the
+user actually loads take effect.
+
+##### Ordering constraint
+
+`zdot_load_module` is a single-shot operation — it both declares and sources
+the module immediately, unlike `zdot_use_plugin` / `zdot_load_plugin` which
+split declaration from loading. That means **a module M can only configure
+module N via `zdot_before_module` if M is sourced before
+`zdot_load_module N`**.
+
+```zsh
+zdot_load_module xdg               # OK, runs before brew
+zdot_load_module macos-defaults    # OK, configures brew and fzf below
+
+zdot_load_module brew              # macos-defaults' brew callbacks ran
+zdot_load_module fzf               # macos-defaults' fzf callbacks ran
+
+zdot_load_module late-tweaker      # ❌ TOO LATE for brew and fzf;
+                                   # late registrations warn and skip
+```
+
+The DAG configure-group mechanism has no such constraint — those hooks
+register at parse time but execute at DAG time, so ordering between
+modules doesn't matter. `zdot_before_module` fires *immediately* on
+`zdot_load_module`, so source order does.
+
+In practice, "cross-module configurator" modules (defaults, themes,
+platform packs) want to load near the top of `.zshrc`, after foundation
+modules like `xdg` but before any target they aim to influence.
+
+### The backstop pattern
+
+The point of having the module's fn run *after* user hooks is to make
+override-via-zstyle natural. Users set state; the module reads it with a
+fallback (`zstyle -s ... || default`); load consumes the resolved state.
+Nothing has to know about ordering beyond the group.
+
+This means modules opting into `--auto-configure-group` should generally
+phrase their defaults as fallbacks rather than direct assignments. A
+direct `export NVM_DIR="…"` in the configure fn can't be overridden by
+a user group hook (the user's hook runs first, then the configure fn
+overwrites). Convert it to `: ${NVM_DIR:="…"}` or
+`zstyle -s ':zdot:node' nvm-dir NVM_DIR || NVM_DIR="…"` to make it
+override-friendly.
+
+If a module's configure logic isn't expressible as backstop defaults,
+users can still override it by registering a hook that runs *after* the
+configure fn with `--requires <basename>-configured`:
+
+```zsh
+zdot_register_hook _my_late_node_tweak interactive noninteractive \
+    --requires node-configured
+```
+
+This isn't a group hook — it's just a regular hook that depends on the
+module's configure phase. Use sparingly; the backstop idiom inside the
+module is preferred.
+
+### Naming
+
+The string `<basename>-configure` appears in two namespaces:
+- as a **hook name** (the configure-phase hook in `zdot_define_module`)
+- as a **group name** (the extension group when `--auto-configure-group` is set)
+
+These live in separate lookup tables and never collide. Users always address
+the group with `--group <basename>-configure`.
+
+### When to expose one
+
+Add `--auto-configure-group` to modules whose behaviour is reasonably tunable
+via `zstyle` (or other pre-init state). Skip it for foundation modules like
+`xdg` (nothing meaningful to configure before init), inherently user-specific
+modules like `local_rc`, and `zdot_define_module` calls that have neither
+`--configure` nor `--load` (the flag is ignored with a warning).
 
 ---
 

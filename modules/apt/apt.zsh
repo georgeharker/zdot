@@ -12,4 +12,5 @@ _apt_init() {
 # Tool list: override via zstyle ':zdot:apt' verify-tools <tool...>
 zdot_provides_tool_args ':zdot:apt' op eza oh-my-posh gh tailscale zoxide rg bat fd
 zdot_simple_hook apt --requires xdg-configured env-configured --provides apt-ready \
+    --requires-group apt-configure \
     "${reply[@]}"

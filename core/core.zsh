@@ -77,6 +77,13 @@ typeset -ga _ZDOT_MODULE_SEARCH_PATH
 # e.g. _ZDOT_MODULE_SOURCE_DIR["xdg"]="/Users/user/.config/zdot/modules/xdg"
 typeset -gA _ZDOT_MODULE_SOURCE_DIR
 
+# module_name -> space-separated list of callback functions, invoked
+# synchronously by _zdot_load_module_file just before the module is sourced.
+# Registered via zdot_before_module. See modules.zsh.
+typeset -gA _ZDOT_BEFORE_MODULE
+# Monotonic counter for generating unique fn names for --cmd registrations.
+typeset -g _ZDOT_BEFORE_MODULE_COUNTER=0
+
 # Context detection state (computed once at runtime)
 typeset -g _ZDOT_IS_INTERACTIVE   # Set to 1 if interactive shell, 0 otherwise
 typeset -g _ZDOT_IS_LOGIN         # Set to 1 if login shell, 0 otherwise

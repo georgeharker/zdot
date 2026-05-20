@@ -69,6 +69,7 @@ zdot_define_module autocomplete \
     --post-init _autocomplete_plugins_post_init \
     --group omz-plugins \
     --requires plugins-cloned omz-bundle-initialized \
+    --auto-configure-group \
     --post-init-requires autosuggest-abbr-ready \
     --post-init-context interactive
 

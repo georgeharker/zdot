@@ -46,9 +46,13 @@ _completions_finalize() {
 }
 
 # Register hooks
-# Phase 1: Early fpath setup (before compinit)
+# Phase 1: Early fpath setup (before compinit).
+# Exposes the `completions-configure` group so users / downstream modules can
+# register completion contributions before fpath is finalised:
+#   zdot_register_hook _my_completions interactive --group completions-configure
 zdot_register_hook _completions_init interactive \
     --requires xdg-configured \
+    --requires-group completions-configure \
     --provides completions-paths-ready
 
 # Phase 2: Late live completions (after tools available)
