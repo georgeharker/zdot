@@ -83,6 +83,11 @@ typeset -gA _ZDOT_MODULE_SOURCE_DIR
 typeset -gA _ZDOT_BEFORE_MODULE
 # Monotonic counter for generating unique fn names for --cmd registrations.
 typeset -g _ZDOT_BEFORE_MODULE_COUNTER=0
+# Introspection: "<module>::<fn>" -> origin string, for --fn registrations only.
+# Origin is "module:<basename>" when registered during another module's source
+# pass, or "<file>:<lineno>" when registered from .zshrc or any non-module
+# context. First writer wins (dedup'd --fn re-registrations don't overwrite).
+typeset -gA _ZDOT_BEFORE_MODULE_ORIGIN
 
 # Context detection state (computed once at runtime)
 typeset -g _ZDOT_IS_INTERACTIVE   # Set to 1 if interactive shell, 0 otherwise

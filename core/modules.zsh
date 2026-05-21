@@ -180,7 +180,8 @@ zdot_before_module() {
     fi
 
     # For --cmd, generate a unique callback fn name via the monotonic counter;
-    # define the fn body to run the captured command.
+    # define the fn body to run the captured command. The function body is the
+    # only stored copy of the command — introspection reads it via $functions[].
     if [[ "$mode" == "cmd" ]]; then
         fn="_zdot_before_${module}_${_ZDOT_BEFORE_MODULE_COUNTER}"
         _ZDOT_BEFORE_MODULE_COUNTER=$((_ZDOT_BEFORE_MODULE_COUNTER + 1))
@@ -193,6 +194,16 @@ zdot_before_module() {
         case " $existing " in
             *" $fn "*) return 0 ;;
         esac
+        # Capture origin for introspection. First writer wins (we only get
+        # here when fn is not already registered for this module).
+        local _origin
+        if [[ -n "$_ZDOT_CURRENT_MODULE_NAME" ]]; then
+            _origin="module:$_ZDOT_CURRENT_MODULE_NAME"
+        else
+            _origin="${funcfiletrace[1]:-unknown}"
+        fi
+        local _origin_key="${module}::${fn}"
+        _ZDOT_BEFORE_MODULE_ORIGIN[$_origin_key]="$_origin"
     fi
     _ZDOT_BEFORE_MODULE[$module]="${existing:+$existing }$fn"
 }
@@ -228,8 +239,19 @@ zdot_module_loaded() {
 
 # List all loaded modules with their source directory.
 # Modules from lib/ are labelled "(lib)"; others show their directory path.
-# Usage: zdot_module_list
+# With --before, also list each module's registered before-module callbacks:
+#   --cmd registrations show the captured command
+#   --fn  registrations show the function name and its registration origin
+# Usage: zdot_module_list [--before]
 zdot_module_list() {
+    local show_before=0
+    while (( $# )); do
+        case "$1" in
+            --before) show_before=1; shift ;;
+            *) zdot_error "zdot_module_list: unknown flag: $1"; return 1 ;;
+        esac
+    done
+
     zdot_report "Loaded modules:"
     local module src
     for module in ${(ko)_ZDOT_MODULES_LOADED}; do
@@ -238,6 +260,30 @@ zdot_module_list() {
             zdot_info "  ${module}  (modules)"
         else
             zdot_info "  ${module}  (${src})"
+        fi
+
+        if (( show_before )) && [[ -n "${_ZDOT_BEFORE_MODULE[$module]:-}" ]]; then
+            zdot_info "    before:"
+            # Initialise locals on declaration. Re-declaring an existing local
+            # WITHOUT an initialiser (e.g. just `local _fn`) makes zsh echo the
+            # variable's current value as a typeset-style line.
+            local _fn=""
+            for _fn in ${=_ZDOT_BEFORE_MODULE[$module]}; do
+                # --cmd registrations get framework-namespace names beginning
+                # with `_zdot_before_`; anything else came in as --fn <name>.
+                if [[ "$_fn" == _zdot_before_* ]]; then
+                    # $functions[fn] is the body content only (no `() { … }`
+                    # wrapping). For our single-line --cmd definitions the
+                    # body has a leading tab inserted by typeset; strip it.
+                    local _body="${functions[$_fn]}"
+                    _body="${_body#$'\t'}"
+                    zdot_info "      cmd: ${_body}"
+                else
+                    local _key="${module}::${_fn}"
+                    local _origin="${_ZDOT_BEFORE_MODULE_ORIGIN[$_key]:-unknown}"
+                    zdot_info "      fn: ${_fn}  ← ${_origin}"
+                fi
+            done
         fi
     done
 }
