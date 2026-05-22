@@ -7,4 +7,4 @@ _bun_init() {
     zdot_register_completion_file "bun" "bun completions zsh"
 }
 
-zdot_simple_hook bun --provides bun-ready
+zdot_simple_hook bun --provides bun-ready --requires-group bun-configure

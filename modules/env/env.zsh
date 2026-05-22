@@ -36,4 +36,4 @@ _env_init() {
 }
 
 # Register hook - requires XDG paths for tool configurations
-zdot_simple_hook env
+zdot_simple_hook env --requires-group env-configure

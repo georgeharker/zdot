@@ -13,7 +13,7 @@ _uv_init() {
 }
 
 # Register hook: runs after secrets if available, otherwise runs anyway
-zdot_simple_hook uv --requires secrets-loaded --optional
+zdot_simple_hook uv --requires secrets-loaded --optional --requires-group uv-configure
 
 zdot_register_completion_file "uv" "uv generate-shell-completion zsh"
 zdot_register_completion_file "uvx" "uvx --generate-shell-completion zsh"

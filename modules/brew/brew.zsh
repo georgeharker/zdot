@@ -26,4 +26,4 @@ _brew_init() {
 
 # Tool list: override via zstyle ':zdot:brew' verify-tools <tool...>
 zdot_provides_tool_args ':zdot:brew' op eza oh-my-posh gh tmux tailscale
-zdot_simple_hook brew --provides brew-ready "${reply[@]}"
+zdot_simple_hook brew --provides brew-ready --requires-group brew-configure "${reply[@]}"

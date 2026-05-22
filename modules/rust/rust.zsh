@@ -8,4 +8,4 @@ _rust_init() {
     zdot_register_completion_file "cargo" "rustup completions zsh cargo"
 }
 
-zdot_simple_hook rust --provides rust-ready
+zdot_simple_hook rust --provides rust-ready --requires-group rust-configure

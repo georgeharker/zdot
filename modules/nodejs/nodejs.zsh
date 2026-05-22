@@ -55,6 +55,7 @@ zdot_define_module node \
     --configure _node_configure \
     --load-plugins omz:plugins/npm omz:plugins/nvm \
     --auto-bundle \
+    --auto-configure-group \
     --provides-tool nvm \
     --interactive-init _nvm_interactive_init \
     --noninteractive-init _nvm_noninteractive_init

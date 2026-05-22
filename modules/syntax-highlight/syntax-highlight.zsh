@@ -55,5 +55,6 @@ zdot_define_module syntax-highlight \
     --configure _syntax_highlight_configure \
     --post-init _syntax_highlight_post_init \
     --requires plugins-cloned \
+    --auto-configure-group \
     --post-init-requires fast-abbr-ready \
     --post-init-context interactive

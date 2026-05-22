@@ -142,6 +142,10 @@ zdot_simple_hook <name> [flags...]
 | `--fn` | `<name>` | Override function name |
 | *(others)* | | Passed through to `zdot_register_hook` |
 
+To expose a user-extension group, pass `--requires-group <name>-configure`
+directly (it falls through to `zdot_register_hook`). Users then attach with
+`--group <name>-configure`.
+
 **Example:**
 
 ```zsh
@@ -196,6 +200,7 @@ Registers up to five lifecycle hooks from a single call:
 | `--requires` | `<phase...>` | Extra requirements for the load phase |
 | `--auto-bundle` | | Auto-detect bundle group/requires from plugin specs |
 | `--group` | `<name>` | Explicit group for the load phase (may repeat) |
+| `--auto-configure-group` | | Expose the `<basename>-configure` extension group. The `--configure` fn (or `--load` fn, if no configure) becomes the CONSUMER (`--requires-group`), running after all user group hooks. Requires at least one of `--configure` / `--load`. |
 | `--configure-context` | `<ctx...>` | Override configure phase context |
 | `--load-context` | `<ctx...>` | Override load phase context |
 | `--post-init-requires` | `<phase...>` | Override post-init requires |
@@ -220,6 +225,49 @@ zdot_define_module fzf \
   --post-init _fzf_post_init \
   --provides-tool fzf
 ```
+
+**With `--auto-configure-group` (extension point for downstream config):**
+
+```zsh
+zdot_define_module brew \
+  --configure _brew_defaults \
+  --load _brew_load \
+  --auto-configure-group
+```
+
+Downstream code hooks into `brew-configure` to contribute pre-load
+configuration:
+
+```zsh
+_my_brew_overrides() {
+    zstyle ':zdot:brew' verify-tools op fd ripgrep
+}
+zdot_register_hook _my_brew_overrides interactive noninteractive \
+    --group brew-configure
+```
+
+**Wiring.** `--auto-configure-group` exposes the `<basename>-configure`
+extension group. The module's `--configure` fn (or `--load` fn, if no
+configure is set) becomes the *consumer* of the group via
+`--requires-group <basename>-configure`, so it runs after every
+user-registered group hook. The DAG is:
+
+```
+xdg-configured
+      ↓
+  [ _my_brew_overrides  ||  …other user hooks ]   ← group members
+      ↓
+  group end-barrier
+      ↓
+  _brew_defaults    ← the module's --configure fn (consumer)
+      ↓ provides brew-configured
+  _brew_load
+```
+
+The module's configure fn (or load fn) is positioned to read state the
+user hooks set — e.g. `zstyle -s ':zdot:brew' verify-tools _tools ||
+_tools=(default fallback)`. The flag requires at least one of `--configure`
+or `--load`; otherwise it is ignored with a warning.
 
 ---
 
@@ -324,6 +372,58 @@ zdot_load_module xdg
 zdot_load_module brew
 zdot_load_module history
 ```
+
+---
+
+### `zdot_before_module`
+
+Register a callback to run synchronously before a module is sourced. Useful
+for setting zstyles or other shell state that the module reads at parse time
+(see [User Extension Points](module-guide.md#user-extension-points) for the
+two-layer model).
+
+```zsh
+zdot_before_module <module-name> --fn  <function-name>
+zdot_before_module <module-name> --cmd <command> [args...]
+```
+
+Exactly one of `--fn` / `--cmd` must be given.
+
+| Flag | Description |
+|------|-------------|
+| `--fn <name>` | Register an existing function. Deduplicated by name. |
+| `--cmd <cmd> [args…]` | Schedule a single command + args. The framework generates an anonymous function. Not deduplicated. |
+
+Callbacks fire in registration order. `--fn` accepts a name that is not yet
+defined; missing-at-drain warns and continues. Registering after the module
+has been loaded warns and the callback does not run. Callbacks for modules
+that never load silently never fire.
+
+**Examples:**
+
+```zsh
+# Light: one-shot zstyle override
+zdot_before_module brew --cmd zstyle ':zdot:brew' verify-tools op fd ripgrep
+
+# Heavy: multi-statement setup or conditional logic
+_my_brew_setup() {
+    zstyle ':zdot:brew' verify-tools op fd ripgrep
+    is-platform mac && zstyle ':zdot:brew' something-else yes
+}
+zdot_before_module brew --fn _my_brew_setup
+```
+
+For one-off zstyles, raw `zstyle … ; zdot_load_module <name>` in `.zshrc` is
+lighter and adds no API surface. Reach for `zdot_before_module` when grouping
+multiple settings, when setup is conditional, or when per-module config files
+should self-register.
+
+**Cross-module configuration**: any module M may register
+`zdot_before_module N …` callbacks for another module N, provided M is
+sourced before `zdot_load_module N`. Callbacks for modules that never load
+are silent no-ops. See [User Extension Points →
+Cross-module configuration](module-guide.md#cross-module-configuration) for
+the full pattern.
 
 ---
 

@@ -88,4 +88,4 @@ _history_init() {
 }
 
 # Register hook - requires XDG paths for history directory
-zdot_simple_hook history
+zdot_simple_hook history --requires-group history-configure

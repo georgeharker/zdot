@@ -67,8 +67,8 @@ function zdot() {
     function _zdot_help_module() {
         zdot_info "zdot module — module management"
         zdot_info ""
-        zdot_info "  zdot module list           List all loaded modules and their source directory"
-        zdot_info "  zdot module clone <name>   Copy a module to the first user directory in the search path"
+        zdot_info "  zdot module list [--before]  List loaded modules and source directory; --before adds before-module callbacks"
+        zdot_info "  zdot module clone <name>     Copy a module to the first user directory in the search path"
     }
 
     function _zdot_help_completion() {
@@ -249,7 +249,7 @@ function zdot() {
         # ── module ────────────────────────────────────────────────────────
         module)
             case "$verb" in
-                list)       zdot_module_list ;;
+                list)       zdot_module_list "${@:3}" ;;
                 clone)
                     local name="${3:-}"
                     if [[ -z "$name" ]]; then
