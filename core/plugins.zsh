@@ -330,7 +330,12 @@ zdot_use_bundle() {
 # otherwise the plain user/repo defaults below apply.
 
 zdot_plugin_path() {
-    local spec=$1
+    # The version pin (@dev etc.) belongs only in the zdot_use_plugin
+    # declaration, where it's recorded as a git ref to check out. It's never part
+    # of the cache path, so we strip it here defensively: a caller that passes a
+    # versioned spec still resolves to the same dir as the bare spec rather than
+    # silently getting a nonexistent path. (Same rationale for repo/url/name.)
+    local spec=${1%@*}
     local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
 
     local handler
@@ -343,7 +348,7 @@ zdot_plugin_path() {
 }
 
 zdot_plugin_repo() {
-    local spec=$1
+    local spec=${1%@*}   # strip @version (git ref; not part of the path)
     local handler
     if _zdot_bundle_handler_for "$spec"; then
         handler=$REPLY
@@ -358,7 +363,7 @@ zdot_plugin_repo() {
 }
 
 zdot_plugin_url() {
-    local spec=$1
+    local spec=${1%@*}   # strip @version (git ref; not part of the URL)
     local handler
     if _zdot_bundle_handler_for "$spec"; then
         handler=$REPLY
@@ -372,7 +377,7 @@ zdot_plugin_url() {
 }
 
 zdot_plugin_name() {
-    local spec=$1
+    local spec=${1%@*}   # strip @version (git ref)
     local handler
     if _zdot_bundle_handler_for "$spec"; then
         handler=$REPLY
@@ -420,6 +425,11 @@ _zdot_plugin_restore_default_branch() {
 }
 
 zdot_plugin_clone() {
+    # Intentionally does NOT strip @version (unlike zdot_plugin_path/url/load).
+    # clone is only ever called with bare specs — from _ZDOT_PLUGINS_ORDER (which
+    # zdot_use_plugin already stripped) or hardcoded bundle/bootstrap specs — and
+    # the ref to check out is read from _ZDOT_PLUGINS_VERSION (keyed by bare spec),
+    # not parsed from this argument. Stripping here would be a misleading no-op.
     local spec=$1
     local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
 
@@ -584,7 +594,7 @@ zdot_plugins_clone_all() {
 # Load a plugin and provide a phase
 # Usage: zdot_load_plugin <spec> [--provides <phase>]
 zdot_load_plugin() {
-    local spec=$1
+    local spec=${1%@*}   # strip @version; dedup key + path use the bare spec
     local provides_phase=$2
     
     if [[ -z "$spec" ]]; then
@@ -643,7 +653,7 @@ zdot_load_plugin() {
 # Compile a plugin's .zsh files to .zwc bytecode
 # Uses zdot_cache_compile_file for each file
 zdot_plugin_compile() {
-    local spec=$1
+    local spec=${1%@*}   # strip @version (git ref)
     zdot_plugin_path "$spec"
     local plugin_path=$REPLY
 
