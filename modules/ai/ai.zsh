@@ -104,7 +104,7 @@ _ai_load() {
     # syncing into whatever venv is active (the uv module activates ~/.venv).
     if [[ -f "${_ai_path}/pyproject.toml" && ! -d "${_ai_path}/.venv" ]]; then
         zdot_info "ai: setting up zsh-ai Python venv (uv sync)…"
-        ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync ) \
+        ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync --no-dev ) \
             || zdot_warn "ai: uv sync failed; the zsh-ai LLM bridge may not work"
     fi
 
