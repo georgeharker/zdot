@@ -5,10 +5,9 @@ _shell_extras_configure() {
     # Set eza defaults only if the user has not already configured them.
     # Override any of these before this module loads, e.g. in a configure hook:
     #   zstyle ':omz:plugins:eza' 'dirs-first' no
-    local _val
-    zstyle -s ':omz:plugins:eza' 'dirs-first' _val || zstyle ':omz:plugins:eza' 'dirs-first' yes
-    zstyle -s ':omz:plugins:eza' 'git-status' _val || zstyle ':omz:plugins:eza' 'git-status' yes
-    zstyle -s ':omz:plugins:eza' 'icons'      _val || zstyle ':omz:plugins:eza' 'icons'      yes
+    zdot_zstyle_default ':omz:plugins:eza' 'dirs-first' yes
+    zdot_zstyle_default ':omz:plugins:eza' 'git-status' yes
+    zdot_zstyle_default ':omz:plugins:eza' 'icons'      yes
 }
 
 # Custom loader needed for conditional debian plugin

@@ -30,9 +30,7 @@
 # plain user/repo specs).
 
 _zdot_plugins_configure_default() {
-    local _m
-    zstyle -s ':zdot:plugin-update' mode _m \
-        || zstyle ':zdot:plugin-update' mode prompt
+    zdot_zstyle_default ':zdot:plugin-update' mode prompt
 }
 
 zdot_register_hook _zdot_plugins_configure_default interactive noninteractive \

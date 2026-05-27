@@ -28,8 +28,7 @@
 # (default: yes); set to no to skip cloning OMZ even with this module loaded.
 
 _omz_configure_update() {
-    local _m
-    zstyle -s ':omz:update' mode _m || zstyle ':omz:update' mode prompt
+    zdot_zstyle_default ':omz:update' mode prompt
 }
 
 zdot_register_hook _omz_configure_update interactive noninteractive \

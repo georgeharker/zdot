@@ -36,6 +36,31 @@ zdot_is_newer_or_missing() {
     return 1
 }
 
+# Seed a zstyle default only when the style isn't already set for the context.
+# Lets a module define backstop defaults that any user-set value transparently
+# overrides — whether set in .zshrc, a zdot_before_module callback (parse-time),
+# or a *-configure group hook (DAG-time). If the user already set the style, the
+# default is skipped; otherwise it's applied.
+#
+# Presence is tested with `zstyle -g`, so it works regardless of how the style
+# is later read (-s/-a/-b/-t) and for arrays and -e (evaluated) styles alike.
+#
+# Mirrors the zstyle *setting* syntax: pass -e to define an evaluated default,
+# and any number of values after <style> for multi-valued styles.
+#
+# Usage: zdot_zstyle_default [-e] <context> <style> <value> [<value>...]
+#   zdot_zstyle_default ':zsh-ai:*'       endpoint 'http://localhost:11434/v1'
+#   zdot_zstyle_default ':zsh-ai:scratch' enabled  yes
+#   zdot_zstyle_default -e ':completion:*' hosts 'reply=($myhosts)'
+zdot_zstyle_default() {
+    local -a _setopts
+    [[ "$1" == -e ]] && { _setopts=(-e); shift; }
+    local ctx="$1" style="$2"; shift 2
+    local -a _existing
+    zstyle -g _existing "$ctx" "$style" 2>/dev/null && return 0
+    zstyle "${_setopts[@]}" "$ctx" "$style" "$@"
+}
+
 # Source a file relative to the calling module
 # Usage: zdot_module_source <relative-path>
 zdot_module_source() {

@@ -1241,6 +1241,35 @@ zdot_simple_hook brew "${reply[@]}"
 
 ---
 
+### `zdot_zstyle_default`
+
+Seed a zstyle default only when the style isn't already set for the context.
+
+```zsh
+zdot_zstyle_default [-e] <context> <style> <value> [<value>...]
+```
+
+Lets a module define backstop defaults that any user-set value transparently
+overrides — whether set in `.zshrc`, a [`zdot_before_module`](#zdot_before_module)
+callback (parse-time), or a `*-configure` group hook (DAG-time). If the user
+already set the style, the default is skipped; otherwise it's applied.
+
+Presence is tested with `zstyle -g`, so it works regardless of how the style is
+later read (`-s`/`-a`/`-b`/`-t`) and for array and `-e` (evaluated) styles alike.
+Mirrors the zstyle *setting* syntax: pass `-e` for an evaluated default, and any
+number of values after `<style>` for multi-valued styles.
+
+**Example:**
+
+```zsh
+zdot_zstyle_default ':zsh-ai:*'        endpoint 'http://localhost:11434/v1'
+zdot_zstyle_default ':zsh-ai:scratch'  enabled  yes
+zdot_zstyle_default ':zsh-ai:scratch'  keybind  '^Xa'
+zdot_zstyle_default -e ':completion:*' hosts    'reply=($myhosts)'
+```
+
+---
+
 ### `zdot_is_newer_or_missing`
 
 Check if a source file is newer than a destination (or the destination is

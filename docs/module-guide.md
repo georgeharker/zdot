@@ -415,6 +415,20 @@ Both layers share the same idiom inside the module: read state with a
 backstop fallback (`zstyle -s ... || default`) so user-set values win, but
 sensible defaults apply when nothing is set.
 
+When the module reads the value itself, the inline fallback is enough. But when
+something *else* reads the zstyle — e.g. an upstream plugin the module sources,
+which looks up its own `:plugin:*` styles — the module must *seed* the default
+into the style ahead of time. Use
+[`zdot_zstyle_default`](api-reference.md#zdot_zstyle_default) for that: it sets a
+value only when the style is unset, so any user value (from `.zshrc`, a
+`zdot_before_module` callback, or a `*-configure` hook) still wins.
+
+```zsh
+# Seed upstream-plugin defaults the user can override; the plugin reads these.
+zdot_zstyle_default ':zsh-ai:*'       endpoint 'http://localhost:11434/v1'
+zdot_zstyle_default ':zsh-ai:scratch' enabled  yes
+```
+
 The rest of this section walks through DAG-time first (the common case),
 then parse-time.
 
