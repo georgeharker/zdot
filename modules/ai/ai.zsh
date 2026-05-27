@@ -22,10 +22,12 @@
 #   (b) a hook in the `ai-configure` group (DAG-time, runs before _ai_init)
 #   (c) a `zdot_before_module ai` callback (parse-time, before this file runs)
 #
+# The zsh-ai plugin itself is the georgeharker/zsh-ai repo, declared with
+# zdot_use_plugin (cloned/updated by the plugin system) and sourced from
+# _ai_init via zdot_load_plugin like any other plugin.
+#
 # Module knobs (`:zdot:ai` namespace):
-#   path             location of the zsh-ai checkout
-#                      (default ${HOME}/Development/zsh/zsh-ai)
-#   add-cli-to-path  boolean; prepend <path>/bin to $PATH for the `zsh-ai`
+#   add-cli-to-path  boolean; prepend <plugin>/bin to $PATH for the `zsh-ai`
 #                      CLI (default off)
 #   api-key-env      shortcut: forwarded to `:zsh-ai:* api_key_env` when that
 #                      upstream value isn't already set
@@ -56,17 +58,11 @@
 #   zdot_register_hook _my_ai_configure interactive --group ai-configure
 
 _ai_init() {
-    local _ai_path
-    zstyle -s ':zdot:ai' path _ai_path \
-        || _ai_path="${HOME}/Development/zsh/zsh-ai"
-
-    if [[ ! -f "${_ai_path}/zsh-ai.plugin.zsh" ]]; then
-        zdot_warn "ai: zsh-ai plugin not found at ${_ai_path} — set zstyle ':zdot:ai' path /path/to/zsh-ai"
-        return 0
-    fi
-
     # Optional CLI on PATH (zsh-ai ships bin/zsh-ai).
     if zstyle -t ':zdot:ai' add-cli-to-path; then
+        local _ai_path
+        zdot_plugin_path georgeharker/zsh-ai
+        _ai_path="$REPLY"
         path=("${_ai_path}/bin" $path)
     fi
 
@@ -92,14 +88,20 @@ _ai_init() {
         zstyle ':zsh-ai:*' api_key_env "$_ake"
     fi
 
-    # Source the upstream plugin. Widget registration reads zstyle at source
-    # time, which is why this runs inside the DAG-time hook — after any
-    # ai-configure group hooks have had their chance to set zstyles.
-    # shuck: disable=C003   # path resolved at runtime; static analysis can't follow
-    source "${_ai_path}/zsh-ai.plugin.zsh"
+    # Load the plugin. Widget registration reads zstyle at source time, which is
+    # why this runs inside the DAG-time hook — after any ai-configure group
+    # hooks have had their chance to set zstyles.
+    zdot_load_plugin georgeharker/zsh-ai
 }
 
+# Declare the plugin so the zdot plugin system clones/updates it. It is *loaded*
+# later, from _ai_init, so ai-configure hooks can set zstyles before zsh-ai
+# registers its widgets (which reads zstyle at source time).
+zdot_use_plugin georgeharker/zsh-ai
+
 # zsh-ai is fundamentally interactive (zle widgets) — interactive context only.
+#
+# plugins-cloned ensures georgeharker/zsh-ai is on disk before _ai_init loads it.
 #
 # secrets-loaded is listed as a require + --optional so the hook waits for the
 # secrets module when it's loaded (e.g. an API key sourced from 1Password) but
@@ -107,7 +109,7 @@ _ai_init() {
 # elsewhere and you don't load secrets, this still works — the optional require
 # simply drops.
 zdot_simple_hook ai \
-    --requires xdg-configured secrets-loaded \
+    --requires xdg-configured secrets-loaded plugins-cloned \
     --optional \
     --provides ai-ready \
     --context interactive \
