@@ -58,12 +58,14 @@
 #   zdot_register_hook _my_ai_configure interactive --group ai-configure
 
 _ai_init() {
-    # Optional CLI on PATH (zsh-ai ships bin/zsh-ai).
+    # Optional CLI on PATH (zsh-ai ships bin/zsh-ai). Use an explicit `export`
+    # so PATH is re-exported to child processes regardless of whether the
+    # path<->PATH tie carries the export attribute in this shell.
     if zstyle -t ':zdot:ai' add-cli-to-path; then
         local _ai_path
         zdot_plugin_path georgeharker/zsh-ai
         _ai_path="$REPLY"
-        path=("${_ai_path}/bin" $path)
+        export PATH="${_ai_path}/bin:$PATH"
     fi
 
     # ── Backstop defaults (all overridable via the ai-configure group) ────────
