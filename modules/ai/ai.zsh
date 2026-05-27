@@ -28,8 +28,13 @@
 #
 # Two phases (zdot_define_module): _ai_configure consumes the ai-configure
 # group, so it runs after user override hooks and seeds backstop zstyle
-# defaults; _ai_load then adds the CLI to PATH and sources the plugin (which
-# reads those zstyles at source time).
+# defaults; _ai_load then ensures the plugin's Python venv exists, adds the CLI
+# to PATH, and sources the plugin (which reads those zstyles at source time).
+#
+# The plugin ships a Python bridge (its own pyproject.toml). _ai_load runs
+# `uv sync` in the plugin dir to create its `.venv` when missing — hence the
+# dependency on the uv module (uv-configured). The sync runs with VIRTUAL_ENV
+# unset so it builds the plugin's own venv, not whatever venv is active.
 #
 # Module knobs (`:zdot:ai` namespace):
 #   add-cli-to-path  boolean; prepend <plugin>/bin to $PATH for the `zsh-ai`
@@ -85,15 +90,27 @@ _ai_configure() {
     fi
 }
 
-# Runs after _ai_configure: optionally put the CLI on PATH, then source the
-# plugin. zstyles are fully resolved by now, so widget registration sees them.
+# Runs after _ai_configure: ensure the plugin's Python venv exists, optionally
+# put the CLI on PATH, then source the plugin. zstyles are fully resolved by
+# now, so widget registration sees them.
 _ai_load() {
+    local _ai_path
+    zdot_plugin_path georgeharker/zsh-ai
+    _ai_path="$REPLY"
+
+    # The plugin ships a Python bridge (pyproject.toml; bin/zsh-ai-llm execs
+    # .venv/bin/python). Create that venv with uv when it's missing. VIRTUAL_ENV
+    # is unset for the sync so uv builds the plugin's own .venv rather than
+    # syncing into whatever venv is active (the uv module activates ~/.venv).
+    if [[ -f "${_ai_path}/pyproject.toml" && ! -d "${_ai_path}/.venv" ]]; then
+        zdot_info "ai: setting up zsh-ai Python venv (uv sync)…"
+        ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync ) \
+            || zdot_warn "ai: uv sync failed; the zsh-ai LLM bridge may not work"
+    fi
+
     # Optional CLI on PATH (zsh-ai ships bin/zsh-ai). Explicit `export` so PATH
     # is re-exported regardless of the path<->PATH tie's export attribute.
     if zstyle -t ':zdot:ai' add-cli-to-path; then
-        local _ai_path
-        zdot_plugin_path georgeharker/zsh-ai
-        _ai_path="$REPLY"
         export PATH="${_ai_path}/bin:$PATH"
     fi
 
@@ -110,9 +127,10 @@ zdot_use_plugin georgeharker/zsh-ai
 # user-extension group. The load phase requires:
 #   plugins-cloned   georgeharker/zsh-ai is on disk before _ai_load sources it
 #   secrets-loaded   API key (e.g. sourced from 1Password) is available
+#   uv-configured    uv is on PATH so _ai_load can create the plugin's .venv
 zdot_define_module ai \
     --configure _ai_configure \
     --load _ai_load \
     --auto-configure-group \
     --context interactive \
-    --requires plugins-cloned secrets-loaded
+    --requires plugins-cloned secrets-loaded uv-configured
