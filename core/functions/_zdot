@@ -94,7 +94,7 @@ function _zdot() {
     # ── flags per noun+verb ──────────────────────────────────────────────────
 
     local -a flags_hook_list flags_hook_graph flags_plugin_list flags_plugin_clean \
-             flags_update_check flags_update_apply flags_phase_list
+             flags_update flags_phase_list
 
     flags_hook_list=(
         '-v[show full hook metadata]'
