@@ -106,14 +106,17 @@ function _zdot() {
     )
 
     flags_hook_graph=(
-        '--depends[show dependency tree for a named hook]:hook name:'
-        '--uses[show what depends on a named hook]:hook name:'
-        '--all[show full dependency graph for all hooks]'
+        # --depends / --uses / --all are mutually exclusive modes (pick one); each
+        # rules out the other two so completion stops offering them once chosen.
+        '(--all --uses)--depends[show dependency tree for a named hook]:hook name:'
+        '(--all --depends)--uses[show what depends on a named hook]:hook name:'
+        '(--depends --uses)--all[show full dependency graph for all hooks]'
+        # Layout flags combine with any mode.
         '--ascii[use ASCII glyphs instead of Unicode box-drawing]'
         '--max-depth[cap recursion depth]:depth:'
         '--show-internal[include synthetic group-begin/group-end hooks]'
-        '-v[show label and function name together]'
-        '--verbose[show label and function name together]'
+        # -v and --verbose are one logical option (aliases) — offer just one.
+        '(-v --verbose)'{-v,--verbose}'[show label and function name together]'
     )
 
     flags_plugin_list=(
