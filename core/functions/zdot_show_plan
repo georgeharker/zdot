@@ -29,7 +29,7 @@ function zdot_show_plan() {
         local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
         local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
 
-        zdot_infoq "$i. $func"
+        zdot_info "$i. $func"
         zdot_info "   contexts: $contexts"
         zdot_info "   provides: $provides"
         zdot_info "   requires: $requires"
