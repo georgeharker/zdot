@@ -93,7 +93,7 @@ zdot_register_hook <function-name> <context...> [flags...]
 | `--name` | `<name>` | Human-readable label (used by `zdot_defer_order` and introspection) |
 | `--deferred` | | Mark for post-prompt deferred execution |
 | `--deferred-prompt` | | Like `--deferred` but refreshes the prompt afterward |
-| `--group` | `<name>` | Add to a named group (may repeat) |
+| `--group` | `<name>` | Add to a named group (may repeat). Two names are reserved: `pre-defer` (runs as the last eager step, before the deferred phase) and `finally` (runs last of all, after the deferred drain). See the [Module Guide](module-guide.md#reserved-groups-pre-defer-and-finally). |
 | `--provides-group` | `<name>` | Provide into a named group |
 | `--requires-group` | `<name>` | Require all members of the named group to complete |
 | `--variant` | `<name>` | Only run when variant matches (may repeat; empty = all) |
@@ -110,7 +110,7 @@ _my_tool_init() {
 }
 
 zdot_register_hook _my_tool_init interactive noninteractive \
-  --requires xdg-configured \
+  --requires bootstrap-ready \
   --provides my-tool-ready \
   --provides-tool my-tool \
   --name "my-tool"
@@ -129,14 +129,14 @@ zdot_simple_hook <name> [flags...]
 
 **Auto-derived defaults:**
 - Function: `_<name>_init`
-- Requires: `xdg-configured`
+- Requires: `bootstrap-ready`
 - Provides: `<name>-configured`
 - Context: `interactive noninteractive`
 
 | Flag | Argument | Description |
 |------|----------|-------------|
 | `--provides` | `<phase>` | Override provides (default: `<name>-configured`) |
-| `--requires` | `<phase...>` | Override requires (default: `xdg-configured`) |
+| `--requires` | `<phase...>` | Override requires (default: `bootstrap-ready`) |
 | `--no-requires` | | Clear all auto-derived requires |
 | `--context` | `<ctx...>` | Override contexts |
 | `--fn` | `<name>` | Override function name |
@@ -149,7 +149,7 @@ directly (it falls through to `zdot_register_hook`). Users then attach with
 **Example:**
 
 ```zsh
-# Registers _rust_init with requires=xdg-configured, provides=rust-configured
+# Registers _rust_init with requires=bootstrap-ready, provides=rust-configured
 _rust_init() {
   source "$HOME/.cargo/env" 2>/dev/null
 }
@@ -188,7 +188,7 @@ Registers up to five lifecycle hooks from a single call:
 
 | Flag | Argument | Description |
 |------|----------|-------------|
-| `--configure` | `<fn>` | Configure hook function (auto-requires `xdg-configured`) |
+| `--configure` | `<fn>` | Configure hook function (auto-requires `bootstrap-ready`) |
 | `--load` | `<fn>` | Custom loader hook function |
 | `--load-plugins` | `<specs...>` | Auto-generate loader from plugin specs |
 | `--post-init` | `<fn>` | Post-init hook function |
@@ -253,7 +253,7 @@ configure is set) becomes the *consumer* of the group via
 user-registered group hook. The DAG is:
 
 ```
-xdg-configured
+bootstrap-ready
       ↓
   [ _my_brew_overrides  ||  …other user hooks ]   ← group members
       ↓

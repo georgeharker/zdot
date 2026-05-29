@@ -25,8 +25,21 @@ function zdot_show_plan() {
     local i=1
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         local func=${_ZDOT_HOOKS[$hook_id]}
-        local provides=${_ZDOT_HOOK_PROVIDES[$hook_id]:-"(none)"}
-        local requires=${_ZDOT_HOOK_REQUIRES[$hook_id]:-"(none)"}
+        local _raw_provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-}"
+        local _raw_requires="${_ZDOT_HOOK_REQUIRES[$hook_id]:-}"
+        local provides=$(_zdot_render_phase_list "$_raw_provides")
+        local requires=$(_zdot_render_phase_list "$_raw_requires")
+        # Structural (not name-based) special case: a group BEGIN barrier — one that
+        # provides _group_begin_<G> — whose requires are member tokens of that same
+        # group <G> is a "gather everything before the group starts" barrier. Today
+        # only finally/pre-defer do this (to sort last), but any group could; keying
+        # off the shape keeps it general. Collapsing to [group:<G>] would be
+        # misleading (it waits on every hook, not <G>'s own members), so label it.
+        if [[ $_raw_provides == *_group_begin_* ]]; then
+            local _bg=${${_raw_provides##*_group_begin_}%% *}
+            [[ " $_raw_requires " == *" _group_member_${_bg}_"* ]] \
+                && requires="%F{magenta}[after: every other hook]%f"
+        fi
         local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
 
         zdot_info "$i. $func"

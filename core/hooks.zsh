@@ -37,10 +37,29 @@ typeset -gA _ZDOT_HOOK_DEFER_ARGS           # hook_id -> flag-set key (see _ZDOT
 typeset -gA _ZDOT_DEFER_FLAG_NAMES          # flag-set key -> display name; extend here to add new defer modes
 typeset -gA _ZDOT_HOOK_VARIANTS             # hook_id -> "v1 v2 ..." (variant include list; empty = all)
 typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES     # hook_id -> "v1 v2 ..." (variant exclude list)
-_ZDOT_DEFER_FLAG_NAMES["--prompt"]="prompt"
-_ZDOT_DEFER_FLAG_NAMES["-p"]="prompt"
-_ZDOT_DEFER_FLAG_NAMES["--quiet"]="quiet"
-_ZDOT_DEFER_FLAG_NAMES["-q"]="quiet"
+# Reserved-group barrier hook_ids, captured at synthesis (see _zdot_init_resolve_groups).
+# Reference these directly instead of _ZDOT_HOOK_BY_NAME[group-begin:finally] etc. —
+# a literal colon-keyed subscript is the fragile idiom behind the quote-in-key bugs.
+#
+# WRITE-ONCE, NOT CACHED: assigned ONLY in _zdot_init_resolve_groups, which runs every
+# shell *before* the plan cache is loaded (see zdot_init in init.zsh). A normal shell
+# loads the cached plan and skips zdot_build_execution_plan, but resolve_groups always
+# runs — so these are deterministically re-derived on every cache hit and must NOT be
+# serialized into the plan cache. Everything after resolve (the runtime deferred drain
+# included) treats them as read-only; mutating them post-resolve is a bug. Empty means
+# the group has no members in this shell, so guard reads with
+# `[[ -n $_ZDOT_FINALLY_BEGIN && … ]]` rather than comparing against an empty value.
+typeset -g _ZDOT_FINALLY_BEGIN=""     # 'finally' group begin-barrier hook_id
+typeset -g _ZDOT_FINALLY_END=""       # 'finally' group end-barrier hook_id
+typeset -g _ZDOT_PREDEFER_BEGIN=""    # 'pre-defer' group begin-barrier hook_id
+typeset -g _ZDOT_PREDEFER_END=""      # 'pre-defer' group end-barrier hook_id
+# Unquoted subscripts: a quoted subscript would bake the quote chars into the
+# key, but the read at _zdot_defer_order_display uses a variable subscript
+# (clean key) and would always miss → label falls back to the raw flag.
+_ZDOT_DEFER_FLAG_NAMES[--prompt]="prompt"
+_ZDOT_DEFER_FLAG_NAMES[-p]="prompt"
+_ZDOT_DEFER_FLAG_NAMES[--quiet]="quiet"
+_ZDOT_DEFER_FLAG_NAMES[-q]="quiet"
 typeset -ga _ZDOT_DEFER_CMDS            # [N] = command string submitted
 typeset -ga _ZDOT_DEFER_HOOKS           # [N] = hook_func that submitted it (or "?" if outside hook)
 typeset -ga _ZDOT_DEFER_DELAYS          # [N] = delay in seconds (0 if none)
@@ -92,7 +111,13 @@ zdot_allow_defer() {
 # --provides-tool <tool>  sugar for --provides tool:<tool>
 # --requires-tool <tool>  sugar for --requires tool:<tool>
 # Multiple --provides / --provides-tool flags are allowed
-# Example: zdot_register_hook _my_init interactive --requires xdg-configured --provides my-ready
+# Reserved --group names: 'pre-defer' (members run as the last EAGER step, just
+#   before the deferred phase / first prompt) and 'finally' (members run last of
+#   all, after the deferred drain). Both are ordinary groups (begin/member/end
+#   barrier synthesis, so intra-group --requires are honoured); they differ only
+#   in how their begin barrier is ordered after everything else — see the
+#   pre-defer / finally injections in zdot_build_execution_plan.
+# Example: zdot_register_hook _my_init interactive --requires bootstrap-ready --provides my-ready
 # Example: zdot_register_hook _brew_install interactive --provides-tool fzf --provides-tool op
 zdot_register_hook() {
     # Pre-pass: extract --name and --deferred before positional parsing.
@@ -536,7 +561,7 @@ zdot_build_execution_plan() {
             for _ctx in "${current_contexts[@]}"; do
                 local _prov="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${_ph}]}"
                 if [[ -n "$_prov" ]]; then
-                    edge_set["${_prov}:${_hid}"]=1
+                    edge_set[${_prov}:${_hid}]=1
                 fi
             done
         done
@@ -649,13 +674,122 @@ zdot_build_execution_plan() {
 
         # Track in defer-order-only graph for future cycle checks
         _doo_adj[$_hid_a]+=" $_hid_b"
-        edge_set["${_hid_a}:${_hid_b}"]=1
+        edge_set[${_hid_a}:${_hid_b}]=1
     done
 
     # Emit accumulated warnings
     for _w in "${_ZDOT_DEFER_ORDER_WARNINGS[@]}"; do
         _zdot_internal_warn "$_w"
     done
+
+    # ── pre-defer ordering injection (synthetic, ordering-only) ──
+    #
+    # 'pre-defer' runs as the final EAGER step — after every other eager hook,
+    # just before the deferred phase (and, interactively, the first prompt). Its
+    # begin barrier already gates the members (normal group synthesis); here we
+    # order that begin barrier after every other eager hook so the whole group
+    # lands last in the eager pass.
+    #
+    # WHY these are synthetic Kahn-graph edges (via each predecessor's
+    # `_defer_order_<A>` bridge phase) and NOT real _ZDOT_HOOK_REQUIRES:
+    #   1. pre-defer must STAY eager. Real deps feed force-deferral, and the
+    #      eager/deferred split isn't known until force-deferral runs (after this
+    #      sort) — so a real dep on a hook that later promotes to deferred would
+    #      drag pre-defer into the deferred set, i.e. make it run after the
+    #      prompt. Synthetic edges never enter _ZDOT_HOOK_REQUIRES, so the
+    #      force-deferral closure below can't see them and can't promote pre-defer.
+    #   2. The eager loop runs hooks in plan order, so merely repositioning the
+    #      begin barrier last is enough to make it run last — no real dependency
+    #      is needed to ENFORCE the order.
+    # The real, introspectable deps are recorded separately AFTER force-deferral
+    # (see "pre-defer posterity deps" near the end of this function), scoped to
+    # the hooks that actually stayed eager. Those document the order; they don't
+    # enforce it.
+    local _pd_begin="${_ZDOT_PREDEFER_BEGIN}"
+    if [[ -n $_pd_begin && -n ${in_degree[$_pd_begin]+x} ]]; then
+        # Never order the pre-defer gate behind its own subgraph or behind
+        # finally (finally runs after pre-defer, post-drain).
+        local -a _pd_excl=(
+            ${=_ZDOT_GROUP_MEMBERS[pre-defer]:-} ${=_ZDOT_GROUP_MEMBERS[finally]:-}
+            $_pd_begin
+            ${_ZDOT_PREDEFER_END}
+            ${_ZDOT_FINALLY_BEGIN} ${_ZDOT_FINALLY_END}
+        )
+        local _pdx
+        for _pdx in ${(k)in_degree}; do
+            (( ${_pd_excl[(Ie)$_pdx]} )) && continue
+            # explicit-deferred hooks aren't eager — no need to order behind them
+            [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$_pdx]} -gt 0 ]] && continue
+            # a hook that --requires-group pre-defer already depends on the end
+            # barrier; ordering it BEFORE the begin barrier would close a cycle.
+            [[ " ${_ZDOT_HOOK_REQUIRES[$_pdx]:-} " == *" _group_end_pre-defer "* ]] && continue
+            # a real edge already orders them — skip to avoid a redundant bump
+            [[ -n ${edge_set[${_pdx}:${_pd_begin}]} ]] && continue
+            # Build the bridge-phase key in a variable, NOT as a quoted literal
+            # subscript: adjacency_list["_defer_order_${_pdx}"] bakes the quote
+            # characters into the key, so the unquoted drain below (which reads
+            # adjacency_list[_defer_order_<current_hook>]) would never find it —
+            # leaving this begin barrier stuck forever. Matches line 649/653.
+            local _pd_bridge="_defer_order_${_pdx}"
+            adjacency_list[$_pd_bridge]+=" $_pd_begin"
+            (( in_degree[$_pd_begin]++ ))
+            edge_set[${_pdx}:${_pd_begin}]=1
+            _doo_adj[$_pdx]+=" $_pd_begin"
+        done
+    fi
+
+    # ── finally: begin-barrier dependency injection ──
+    #
+    # 'finally' is an ordinary group (begin/member/end barriers, identical to
+    # e.g. bootstrap). The ONE structural difference is which deps its
+    # BEGIN barrier carries: we auto-add a real `--requires` on every other
+    # in-plan hook's completion, so the begin barrier — and thus the whole
+    # finally subgraph — sorts after everything else. Each prior hook H is made
+    # to provide `_group_member_finally_<hid>` (the SAME member-phase term a
+    # normal group uses) and the begin barrier requires it. (A normal group's
+    # END barrier consumes its members' phases; here the BEGIN barrier consumes
+    # every prior hook's.)
+    #
+    # Scope to ${(k)in_degree} — hooks that actually made it into the plan.
+    # Optional/unsatisfiable hooks were already dropped to degree=-1 above, so
+    # the begin barrier never waits on a phase that will never be provided. Each
+    # requirement is context-restricted to H's contexts, exactly as a group-end
+    # barrier's member requirements are, so a hook absent from this shell does
+    # not block the barrier here.
+    #
+    # INCREMENTAL: these deps fix plan ORDER (begin barrier now sorts last).
+    # Runtime dispatch of the begin barrier is still driven by the gate in
+    # _zdot_run_deferred_phase_check (begin-skip + quiesce-release); a follow-up
+    # removes that gate so these deps drive runtime directly.
+    local _fin_begin="${_ZDOT_FINALLY_BEGIN}"
+    if [[ -n $_fin_begin && -n ${in_degree[$_fin_begin]+x} ]]; then
+        local -a _fin_excl=(
+            ${=_ZDOT_GROUP_MEMBERS[finally]:-}
+            $_fin_begin
+            ${_ZDOT_FINALLY_END}
+        )
+        local _finx _mphase _fc
+        for _finx in ${(k)in_degree}; do
+            (( ${_fin_excl[(Ie)$_finx]} )) && continue
+            # --requires-group finally consumers depend on the end barrier;
+            # making the begin barrier wait on them would close a cycle.
+            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_finx]:-}" == finally ]] && continue
+            [[ " ${_ZDOT_HOOK_REQUIRES[$_finx]:-} " == *" _group_end_finally "* ]] && continue
+            _mphase="_group_member_finally_${_finx}"
+            # H provides its member phase (marked when H runs).
+            if [[ " ${_ZDOT_HOOK_PROVIDES[$_finx]:-} " != *" $_mphase "* ]]; then
+                _ZDOT_HOOK_PROVIDES[$_finx]+="${_ZDOT_HOOK_PROVIDES[$_finx]:+ }$_mphase"
+                for _fc in ${=_ZDOT_HOOK_CONTEXTS[$_finx]:-}; do
+                    _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_fc}:${_mphase}]=$_finx
+                done
+            fi
+            # finally begin requires it; context-restricted to H's contexts.
+            _ZDOT_HOOK_REQUIRES[$_fin_begin]+="${_ZDOT_HOOK_REQUIRES[$_fin_begin]:+ }$_mphase"
+            _ZDOT_HOOK_REQUIRES_CONTEXTS[${_fin_begin}:${_mphase}]="${_ZDOT_HOOK_CONTEXTS[$_finx]}"
+            adjacency_list[$_mphase]+=" $_fin_begin"
+            (( in_degree[$_fin_begin]++ ))
+        done
+    fi
 
     # Seed zero_in_degree from final in_degree values.
     # This pass is intentionally placed AFTER both injection blocks
@@ -900,6 +1034,53 @@ zdot_build_execution_plan() {
         fi
     done
 
+    # ── pre-defer posterity deps (introspection only) ──
+    #
+    # The synthetic edges (earlier in this function) already ORDER pre-defer last
+    # in the eager pass, but they live only in the Kahn graph — invisible to
+    # `zdot hook plan`/`graph`, which read _ZDOT_HOOK_REQUIRES. To make the
+    # ordering visible/honest, record real member deps on the begin barrier here.
+    #
+    # WHY this runs HERE, after force-deferral, and is NOT the ordering mechanism:
+    #   - The eager/deferred split is now final, so we scope the deps to hooks
+    #     that actually stayed EAGER. That's truthful: pre-defer runs after those
+    #     and BEFORE the deferred phase, so no deferred hook appears in the list.
+    #   - Force-deferral has already run and the sort is done, so adding these
+    #     requires can neither promote pre-defer (the hazard that made real deps
+    #     unusable earlier) nor move anything.
+    # They are DISPLAY ONLY: the eager loop runs pre-defer by plan position, not
+    # by checking these requires. They serialise into the plan cache like any
+    # other requires, so the graph stays accurate on cache hits. Each eager hook
+    # H provides `_group_member_pre-defer_<H>` (same member-phase term a normal
+    # group uses) and the begin barrier requires it, context-restricted to H.
+    local _pdb="${_ZDOT_PREDEFER_BEGIN}"
+    if [[ -n $_pdb && ${_ZDOT_EXECUTION_PLAN[(Ie)$_pdb]} -gt 0 ]]; then
+        local -a _pdb_excl=(
+            ${=_ZDOT_GROUP_MEMBERS[pre-defer]:-} ${=_ZDOT_GROUP_MEMBERS[finally]:-}
+            $_pdb
+            ${_ZDOT_PREDEFER_END}
+            ${_ZDOT_FINALLY_BEGIN} ${_ZDOT_FINALLY_END}
+        )
+        local _pdh _pdm _pdc
+        for _pdh in $_ZDOT_EXECUTION_PLAN; do
+            # eager survivors only — never claim a dep on a deferred hook
+            [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$_pdh]} -gt 0 ]] && continue
+            (( ${_pdb_excl[(Ie)$_pdh]} )) && continue
+            # a --requires-group pre-defer consumer already depends on the end
+            # barrier; a begin→it dep here would be a cycle.
+            [[ " ${_ZDOT_HOOK_REQUIRES[$_pdh]:-} " == *" _group_end_pre-defer "* ]] && continue
+            _pdm="_group_member_pre-defer_${_pdh}"
+            if [[ " ${_ZDOT_HOOK_PROVIDES[$_pdh]:-} " != *" $_pdm "* ]]; then
+                _ZDOT_HOOK_PROVIDES[$_pdh]+="${_ZDOT_HOOK_PROVIDES[$_pdh]:+ }$_pdm"
+                for _pdc in ${=_ZDOT_HOOK_CONTEXTS[$_pdh]:-}; do
+                    _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_pdc}:${_pdm}]=$_pdh
+                done
+            fi
+            _ZDOT_HOOK_REQUIRES[$_pdb]+="${_ZDOT_HOOK_REQUIRES[$_pdb]:+ }$_pdm"
+            _ZDOT_HOOK_REQUIRES_CONTEXTS[${_pdb}:${_pdm}]="${_ZDOT_HOOK_CONTEXTS[$_pdh]}"
+        done
+    fi
+
     # Report skipped optional hooks if any
     if [[ ${#skipped_hooks} -gt 0 ]]; then
         for skip_msg in $skipped_hooks; do
@@ -950,12 +1131,17 @@ _zdot_init_resolve_groups() {
     done
 
     # ── Process each group ───────────────────────────────────────────────────
+    # The reserved groups 'finally' and 'pre-defer' go through the SAME barrier
+    # synthesis as every other group — that is what gives their members proper
+    # begin/end gates and honours intra-group --requires via the topo sort. The
+    # reserved-specific wiring lives entirely in zdot_build_execution_plan: the
+    # begin barrier of each gets extra ordering deps (finally: real --requires on
+    # every other in-plan hook, so it runs last and is force-deferred ONLY when
+    # something it depends on is deferred; pre-defer: synthetic edges after all
+    # eager hooks, plus posterity deps for introspection). Nothing reserved-
+    # specific happens in this loop.
     local -A _ctx_union
     for _grp in "${(k)_all_groups[@]}"; do
-
-        # 'finally' members are dispatched directly by the deferred drain;
-        # skip DAG barrier synthesis entirely for this group.
-        [[ $_grp == finally ]] && continue
 
         # -- Compute union of member AND requiring-hook contexts -------------
         _ctx_union=()
@@ -1037,7 +1223,9 @@ _zdot_init_resolve_groups() {
         # -- Register begin barrier ------------------------------------------
         _ZDOT_HOOKS[$_hid_begin]=$_fn_begin
         _ZDOT_HOOK_NAMES[$_hid_begin]="group-begin:${_grp}"
-        _ZDOT_HOOK_BY_NAME["group-begin:${_grp}"]=$_hid_begin
+        # NB: subscript MUST be unquoted — a quoted assoc subscript ("group-begin:...")
+        # stores the quotes as part of the key in zsh, so unquoted lookups miss.
+        _ZDOT_HOOK_BY_NAME[group-begin:${_grp}]=$_hid_begin
         _ZDOT_HOOK_CONTEXTS[$_hid_begin]="$_ctx_list"
         _ZDOT_HOOK_REQUIRES[$_hid_begin]=""
         _ZDOT_HOOK_PROVIDES[$_hid_begin]="$_phase_begin"
@@ -1048,13 +1236,35 @@ _zdot_init_resolve_groups() {
         # -- Register end barrier --------------------------------------------
         _ZDOT_HOOKS[$_hid_end]=$_fn_end
         _ZDOT_HOOK_NAMES[$_hid_end]="group-end:${_grp}"
-        _ZDOT_HOOK_BY_NAME["group-end:${_grp}"]=$_hid_end
+        _ZDOT_HOOK_BY_NAME[group-end:${_grp}]=$_hid_end
         _ZDOT_HOOK_CONTEXTS[$_hid_end]="$_ctx_list"
         _ZDOT_HOOK_REQUIRES[$_hid_end]=""
         _ZDOT_HOOK_PROVIDES[$_hid_end]="$_phase_end"
         _ZDOT_HOOK_OPTIONAL[$_hid_end]=1
         _ZDOT_HOOK_VARIANTS[$_hid_end]="${_barrier_includes[*]}"
         _ZDOT_HOOK_VARIANT_EXCLUDES[$_hid_end]="${_barrier_excludes[*]}"
+
+        # -- Capture reserved-group barrier ids into dedicated globals -------
+        # Set straight from the local ids (no subscript lookup). Consumers
+        # reference $_ZDOT_FINALLY_BEGIN etc. rather than re-deriving via a
+        # colon-keyed _ZDOT_HOOK_BY_NAME lookup.
+        #
+        # Recomputed here every shell (resolve_groups always runs) rather than
+        # serialized into the plan cache. Most resolve_groups output IS cached
+        # (_ZDOT_HOOKS/_PROVIDES/_PHASE_PROVIDERS_BY_CONTEXT/…) and restored over
+        # the recompute on a hit — but _ZDOT_HOOK_BY_NAME, the map these globals
+        # exist to *replace*, is deliberately NOT cached, and these follow it:
+        # caching the shadow but not the thing it shadows would be its own
+        # inconsistency. resolve_groups runs unconditionally (before, and
+        # regardless of, a cache hit), so a serialized copy would just be dead
+        # state overwritten by this assignment. Barrier ids are deterministic —
+        # same registration order → same counter → same hook id — so the
+        # recomputed value always matches the cached plan. (See the WRITE-ONCE
+        # note at the declarations.)
+        case $_grp in
+            finally)   _ZDOT_FINALLY_BEGIN=$_hid_begin;  _ZDOT_FINALLY_END=$_hid_end ;;
+            pre-defer) _ZDOT_PREDEFER_BEGIN=$_hid_begin; _ZDOT_PREDEFER_END=$_hid_end ;;
+        esac
 
         # -- Register begin/end phases into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT -
         for _ctx in ${(k)_ctx_union}; do
@@ -1106,7 +1316,90 @@ _zdot_init_resolve_groups() {
             fi
         done
 
+        # -- Reserved group 'finally': auto-promote --------------------------
+        # finally's begin barrier really requires every other in-plan hook (wired
+        # in zdot_build_execution_plan). So whenever ANY of those hooks is
+        # deferred, force-deferral promotes the begin barrier — and, through
+        # _group_begin_finally and the member phases, the members and end barrier
+        # too — into the deferred set. That promotion is the WHOLE POINT (finally
+        # runs after the deferred drain), not an accident, so pre-accept it: mark
+        # the entire subgraph auto-promote so the force-defer pass stays silent
+        # instead of emitting "forced" warnings for it. This is the conditional
+        # replacement for the old unconditional explicit-defer — when nothing is
+        # deferred, nothing is promoted and finally simply stays eager.
+        #
+        # (Only finally is auto-promote. pre-defer is deliberately NOT: it uses
+        # synthetic ordering edges that can't promote it, and a pre-defer member
+        # that genuinely depends on a deferred phase is a misuse we WANT to warn
+        # about.)
+        if [[ $_grp == finally ]]; then
+            _ZDOT_ACCEPTED_DEFERRED[$_fn_begin]="all"
+            _ZDOT_ACCEPTED_DEFERRED[$_fn_end]="all"
+            local _mfn
+            for _member in ${=_ZDOT_GROUP_MEMBERS[finally]:-}; do
+                # Build the key in a variable: a quoted literal subscript
+                # ["${_ZDOT_HOOKS[$_member]}"] bakes the quote chars into the key,
+                # so the unquoted lookup in the force-defer pass would miss it and
+                # the warning would still fire. Same trap as the BY_NAME keys.
+                _mfn="${_ZDOT_HOOKS[$_member]}"
+                _ZDOT_ACCEPTED_DEFERRED[$_mfn]="all"
+            done
+        fi
+
     done
+}
+
+# Render a phase list for human display (used by `zdot hook plan` / `graph`).
+#
+# Collapses the synthetic per-hook group-member tokens —
+# `_group_member_<grp>_hook_<N>` — into ONE coloured `[group:<grp>]` chip per
+# group, leaving real phases untouched and in order. Those tokens are internal
+# membership plumbing keyed by hook-id (see _zdot_init_resolve_groups); echoing
+# one opaque token per member is unreadable, whereas a single chip per group says
+# exactly what it means: "participates in / waits on this group".
+#
+# $1 = space-separated phase list. Prints the rendered list (with %F{}/%f prompt
+# colour escapes — emit it through zdot_info, which prompt-expands).
+_zdot_render_phase_list() {
+    emulate -L zsh
+    local _in="$1"
+    local -a _out=()
+    local -A _seen=()
+    local _tok _grp _hid _chip
+    for _tok in ${=_in}; do
+        _chip=""
+        case $_tok in
+            _group_member_*_hook_<->)
+                # Membership token. Show it ONLY for real members (hooks that
+                # used --group G, i.e. listed in _ZDOT_GROUP_MEMBERS[G]). Every
+                # hook also carries a _group_member_finally/pre-defer_<self>
+                # token injected purely so those begin barriers sort last — that
+                # is ordering plumbing, not membership, so suppress it. (The
+                # "after everything" fact is shown on the begin barrier itself as
+                # "[after: every other hook]".)
+                _grp=${_tok#_group_member_}
+                _grp=${_grp%_hook_<->}
+                _hid="hook_${_tok##*_hook_}"   # trailing hook_<N>, no var-in-pattern
+                [[ " ${_ZDOT_GROUP_MEMBERS[$_grp]:-} " == *" $_hid "* ]] || continue
+                _chip="%F{magenta}[group:${_grp}]%f"
+                ;;
+            _group_begin_*)
+                _chip="%F{magenta}[group:${_tok#_group_begin_}:start]%f"
+                ;;
+            _group_end_*)
+                _chip="%F{magenta}[group:${_tok#_group_end_}:end]%f"
+                ;;
+            *)
+                _out+=("$_tok")
+                continue
+                ;;
+        esac
+        [[ -n ${_seen[$_chip]:-} ]] && continue
+        _seen[$_chip]=1
+        _out+=("$_chip")
+    done
+    (( ${#_out} )) || _out=("(none)")
+    print -r -- "${_out[*]}"
 }
 
 # ============================================================================
@@ -1295,6 +1588,15 @@ _zdot_run_deferred_phase_check() {
             continue
         fi
 
+        # The 'finally' begin barrier is held out of normal dispatch: it has no
+        # requires, so it would otherwise fire in the first wave. The finally
+        # gate below releases it explicitly once all other deferred work has
+        # drained, so the finally subgraph runs strictly last. (Skipped here
+        # without adding to pending_hooks so it never trips stall detection.)
+        if [[ -n $_ZDOT_FINALLY_BEGIN && "$hook_id" == "$_ZDOT_FINALLY_BEGIN" ]]; then
+            continue
+        fi
+
         # Dispatch only when all required phases are available
         if ! _zdot_hook_requirements_met "$hook_id"; then
             pending_hooks+=("$hook_id")
@@ -1313,6 +1615,34 @@ _zdot_run_deferred_phase_check() {
         fi
         zdot_defer "${_defer_extra[@]}" --label "$_hw_label" _zdot_deferred_hook_wrapper "$hook_id"
     done
+
+    # ── finally gate ──────────────────────────────────────────────────────────
+    # Release the 'finally' begin barrier exactly once, when the rest of the
+    # deferred graph has quiesced: nothing dispatched this wave, nothing in
+    # flight, and every hook still pending is part of the finally subgraph
+    # (members + end barrier — they are blocked on _group_begin_finally). The
+    # begin barrier is held out of the loop above, so this is the single
+    # imperative unblock. Providing _group_begin_finally then lets the normal
+    # readiness dispatch cascade the finally members in dependency order and
+    # fire the end barrier on subsequent waves — so finally runs strictly last.
+    local _finally_begin="${_ZDOT_FINALLY_BEGIN}"
+    if [[ -n $_finally_begin \
+          && ${_ZDOT_EXECUTION_PLAN[(Ie)$_finally_begin]} -gt 0 \
+          && ${+_ZDOT_HOOKS_EXEC_RESULT[$_finally_begin]} -eq 0 \
+          && ${+_ZDOT_HOOKS_QUEUED[$_finally_begin]} -eq 0 \
+          && $dispatched -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
+        local _fg_subgraph=" ${_ZDOT_GROUP_MEMBERS[finally]:-} ${_ZDOT_FINALLY_END} "
+        local _fg_only_finally=1 _fg_ph
+        for _fg_ph in $pending_hooks; do
+            [[ "$_fg_subgraph" == *" $_fg_ph "* ]] || { _fg_only_finally=0; break; }
+        done
+        if [[ $_fg_only_finally -eq 1 ]]; then
+            _ZDOT_HOOKS_QUEUED[$_finally_begin]=1
+            local _fg_label="${_ZDOT_HOOKS[$_finally_begin]} [group-begin:finally]"
+            zdot_defer -q --label "$_fg_label" _zdot_deferred_hook_wrapper "$_finally_begin"
+            return 0
+        fi
+    fi
 
     # Stall detection: if nothing was dispatched this round but hooks are still
     # waiting, their required phases will never arrive — report an error.
@@ -1354,6 +1684,10 @@ _zdot_run_deferred_phase_check() {
         [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -eq 0 ]] && continue
         [[ ${+_ZDOT_HOOKS_EXEC_RESULT[$hook_id]} -eq 1 ]] && continue
         [[ ${+_ZDOT_HOOKS_QUEUED[$hook_id]} -eq 1 ]] && continue
+        # The finally begin barrier is intentionally held (released by the
+        # finally gate above), so it is "ready but not dispatched" by design —
+        # not a logic bug.
+        [[ -n $_ZDOT_FINALLY_BEGIN && "$hook_id" == "$_ZDOT_FINALLY_BEGIN" ]] && continue
         _zdot_hook_requirements_met "$hook_id" || continue
         # Requirements met, not queued, not executed — it should have been dispatched
         # but wasn't (possibly on a previous call to this function that was interrupted).
@@ -1377,19 +1711,11 @@ _zdot_run_deferred_phase_check() {
     fi
 
     # Normal completion: nothing dispatched, nothing queued, nothing pending —
-    # the deferred queue has fully drained.
+    # the deferred queue has fully drained. By this point the finally subgraph
+    # has already cascaded through the normal dispatch above (the finally gate
+    # released its begin barrier on an earlier wave), so there is nothing left
+    # to run here — only teardown.
     if [[ $dispatched -eq 0 && ${#pending_hooks} -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
-        # Auto-dispatch the 'finally' group on first full drain.
-        # Hooks that declared --group finally are collected in
-        # _ZDOT_GROUP_MEMBERS[finally]; execute any that haven't run yet.
-        if [[ -n "${_ZDOT_GROUP_MEMBERS[finally]}" ]]; then
-            local _finally_hook_id
-            for _finally_hook_id in ${=_ZDOT_GROUP_MEMBERS[finally]}; do
-                if [[ -z ${_ZDOT_HOOKS_EXEC_RESULT[$_finally_hook_id]} ]]; then
-                    _zdot_execute_hook "$_finally_hook_id" "_zdot_run_deferred_phase_check"
-                fi
-            done
-        fi
         _ZDOT_DEFERRED_ACTIVE=0
         if [[ -o zle ]]; then
             local _zdot_flush_fd
@@ -1415,15 +1741,20 @@ _zdot_run_deferred_phase_check() {
 # safe to call after a partial run.
 #
 # Returns 1 if one or more hooks fail; otherwise 0.
+#
+# Reserved groups need no special-casing here: 'pre-defer' members are ordinary
+# eager hooks (ordered last in the plan by zdot_build_execution_plan); 'finally'
+# is force-deferred whenever any deferred hook exists (so the deferred skip below
+# covers it) and otherwise stays eager and runs at the end of the eager pass.
 zdot_execute_all() {
     if [[ ${#_ZDOT_EXECUTION_PLAN} -eq 0 ]]; then
         zdot_error "zdot_execute_all: ERROR: No execution plan. Call zdot_build_execution_plan first."
         return 1
     fi
-    
+
     local executed=0
     local failed=0
-    
+
     zdot_verbose "zdot: hooks: executing plan (${#_ZDOT_EXECUTION_PLAN} hooks)"
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         # Skip if this hook was already executed
@@ -1438,14 +1769,14 @@ zdot_execute_all() {
 
         _zdot_execute_hook "$hook_id" "zdot_execute_all"
         local result=$?
-        
+
         if [[ $result -eq 0 || $result -eq 2 ]]; then
             (( executed++ ))
         else
             (( failed++ ))
         fi
     done
-    
+
     if [[ $failed -gt 0 ]]; then
         _zdot_internal_error "zdot_execute_all: Completed with $failed failed hook(s)"
         return 1
@@ -1488,13 +1819,13 @@ zdot_execute_all() {
 #
 # Sugar for the most common single-hook module pattern. Auto-derives:
 #   fn       = _<name>_init         (must already exist)
-#   requires = xdg-configured       (override with --requires, clear with --no-requires)
+#   requires = bootstrap-ready      (override with --requires, clear with --no-requires)
 #   provides = <name>-configured    (override with --provides)
 #   contexts = interactive noninteractive (override with --context)
 #
 # Supported flags:
 #   --provides <phase>            Override the auto-derived provides token
-#   --requires <phase...>         Override the default requires (xdg-configured)
+#   --requires <phase...>         Override the default requires (bootstrap-ready)
 #   --no-requires                 Clear all auto-derived requires
 #   --context <ctx...>            Override contexts (default: interactive noninteractive)
 #   --fn <name>                   Override the auto-derived function name
@@ -1507,7 +1838,7 @@ zdot_simple_hook() {
     local name="$1"; shift
     local fn="_${name}_init"
     local provides="${name}-configured"
-    local -a requires=(xdg-configured)
+    local -a requires=(bootstrap-ready)
     local -a contexts=(interactive noninteractive)
     local no_requires=false
     local -a passthrough=()

@@ -28,7 +28,7 @@ _starship_prompt_init() {
 
 zdot_register_hook _starship_prompt_init interactive \
     --name starship-prompt \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --requires-group starship-prompt-configure \
     --requires-tool starship \
     --provides prompt-ready \

@@ -40,7 +40,7 @@ scattered across one big `.zshrc`. Miss one and things break silently.
 zdot fixes this:
 
 - **Declare, don't order.** Each module says what it *provides* (`brew-ready`)
-  and what it *requires* (`xdg-configured`). zdot topologically sorts the rest.
+  and what it *requires* (`bootstrap-ready`). zdot topologically sorts the rest.
 - **Modular by design.** One directory per concern. Swap, override, or skip
   modules without touching anything else.
 - **Fast.** Execution plans are cached. All startup code is compiled to `.zwc`
@@ -63,6 +63,7 @@ git clone https://github.com/georgeharker/zdot \
 source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
 zdot_load_module xdg
+zdot_load_module bootstrap
 zdot_load_module shell
 zdot_load_module brew          # macOS only; skipped if brew not found
 zdot_load_module keybinds
@@ -133,6 +134,7 @@ Create `~/.dotfiles/.config/zsh/.zshrc`:
 source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
 zdot_load_module xdg
+zdot_load_module bootstrap
 zdot_load_module shell
 zdot_load_module brew         # macOS only
 zdot_load_module completions
@@ -205,6 +207,7 @@ zstyle ':zdot:cache'  enabled true
 
 # ── Modules ────────────────────────────────────────────
 zdot_load_module xdg
+zdot_load_module bootstrap
 zdot_load_module env
 zdot_load_module shell
 zdot_load_module brew
@@ -329,7 +332,7 @@ _mymodule_init() {
 
 zdot_simple_hook mymodule
 # Registers _mymodule_init with:
-#   requires: xdg-configured
+#   requires: bootstrap-ready
 #   provides: mymodule-configured
 #   context:  interactive noninteractive
 ```
@@ -384,7 +387,7 @@ zdot_register_hook _keybinds_init interactive \
 
 # Noninteractive-only: lightweight PATH setup for scripts
 zdot_register_hook _env_noninteractive noninteractive \
-  --requires xdg-configured \
+  --requires bootstrap-ready \
   --provides env-ready
 ```
 
@@ -491,6 +494,7 @@ source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 # Modules register hooks for specific contexts internally.
 # Loading a module does NOT execute it -- it just registers hooks.
 zdot_load_module xdg           # provides xdg-configured (all contexts)
+zdot_load_module bootstrap     # provides bootstrap-ready: the default baseline (all contexts)
 zdot_load_module env           # sets PATH, LANG, etc. (all contexts)
 zdot_load_module brew          # homebrew (all contexts)
 zdot_load_module shell         # history, options (all contexts)
@@ -502,7 +506,7 @@ zdot_load_module plugins       # third-party plugins (interactive only)
 zdot_load_module omz           # Oh-My-Zsh bundle defaults
 zdot_load_module starship-prompt  # prompt theme (interactive only)
 zdot_load_module completions   # tab completion (interactive only)
-zdot_load_module local_rc      # source ~/.zshrc.local (interactive only)
+zdot_load_module local_rc      # ~/.zshenv_local (early, in bootstrap) + ~/.zshrc_local (late)
 
 zdot_init
 ```

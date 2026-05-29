@@ -51,7 +51,7 @@ _completions_finalize() {
 # register completion contributions before fpath is finalised:
 #   zdot_register_hook _my_completions interactive --group completions-configure
 zdot_register_hook _completions_init interactive \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --requires-group completions-configure \
     --provides completions-paths-ready
 

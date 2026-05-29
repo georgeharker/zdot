@@ -25,7 +25,7 @@ _patina_init() {
 
 zdot_register_hook _patina_init interactive \
     --name patina \
-    --requires xdg-configured prompt-ready \
+    --requires bootstrap-ready prompt-ready \
     --requires-group patina-configure \
     --requires-tool zsh-patina \
     --provides patina-ready \

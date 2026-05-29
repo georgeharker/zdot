@@ -15,15 +15,22 @@ copy a built-in module to your user directory as a starting point.
 The rough loading order imposed by dependencies:
 
 ```
-xdg  →  env, sudo, history, secrets
-         secrets  →  dotfiler, local_rc, uv (optional)
-         xdg      →  brew / apt
-                   →  omp-prompt | starship-prompt | omz-prompt  (provides prompt-ready)
-                   →  plugins     →  autocompletion, fzf, shell-extras, tmux, nodejs
-                              omz  (OMZ bundle defaults; load with plugins)
-                   →  venv        →  completions
-                                  →  rust, bun, uv
+bootstrap  →  env, sudo, history, secrets
+   (the bootstrap group runs xdg first, then local_rc's local_env, etc.,
+    before bootstrap-ready is provided)
+         secrets       →  dotfiler, local_rc (overrides), uv (optional)
+         bootstrap     →  brew / apt
+                       →  omp-prompt | starship-prompt | omz-prompt  (provides prompt-ready)
+                       →  plugins     →  autocompletion, fzf, shell-extras, tmux, nodejs
+                                  omz  (OMZ bundle defaults; load with plugins)
+                       →  venv        →  completions
+                                      →  rust, bun, uv
 ```
+
+`bootstrap-ready` is the default `--requires` for `zdot_simple_hook` and
+`zdot_define_module` configure phases. It implies `xdg-configured` (`xdg` is the
+first member of the `bootstrap` group), so modules depend on `bootstrap-ready`
+rather than `xdg-configured` directly.
 
 ---
 
@@ -34,13 +41,38 @@ xdg  →  env, sudo, history, secrets
 ### `xdg`
 
 Foundation module. Sets all XDG Base Directory variables and defines platform
-helper functions (`is-macos`, `is-debian`). Nearly every other module requires
-`xdg-configured` — load this first.
+helper functions (`is-macos`, `is-debian`). Registered as the **first member of
+the `bootstrap` group**: it has no dependencies, so it sorts first and runs before
+any other per-machine setup. `bootstrap-ready` (the group's completion, and the
+default baseline nearly every module depends on) therefore transitively guarantees
+`xdg-configured`.
 
 | | |
 |---|---|
 | **Provides** | `xdg-configured` |
-| **Requires** | — |
+| **Requires** | group `bootstrap` (member; no other deps) |
+| **Context** | interactive + noninteractive |
+| **zstyle** | none |
+
+---
+
+### `bootstrap`
+
+Foundation module. Owns the initial per-machine setup milestone. Does no work of
+its own: it closes the `bootstrap` group and provides `bootstrap-ready` once every
+group member has run. `bootstrap-ready` is the default `--requires` for
+`zdot_simple_hook` and `zdot_define_module` configure phases.
+
+Register early per-machine setup hooks into the group with `--group bootstrap`.
+`xdg` is itself the first member (so the XDG dirs are set before any other member),
+and they run before `bootstrap-ready`. `local_rc`'s `local_env` hook is another
+shipped member. The coordinator just `--requires-group bootstrap` — it does **not**
+name `xdg-configured`, so nothing special-cases xdg.
+
+| | |
+|---|---|
+| **Provides** | `bootstrap-ready` |
+| **Requires** | group `bootstrap` (which includes `xdg`) |
 | **Context** | interactive + noninteractive |
 | **zstyle** | none |
 
@@ -109,7 +141,7 @@ cache.
 | | |
 |---|---|
 | **Provides** | `secrets-loaded` |
-| **Requires** | `xdg-configured`, tool `op` |
+| **Requires** | `bootstrap-ready`, tool `op` |
 | **Context** | interactive + noninteractive |
 
 **zstyle options:**
@@ -153,7 +185,7 @@ apt-installed tools are present.
 | | |
 |---|---|
 | **Provides** | `apt-ready` |
-| **Requires** | `xdg-configured`, `env-configured` |
+| **Requires** | `bootstrap-ready`, `env-configured` |
 | **Context** | interactive + noninteractive |
 
 **zstyle options:**
@@ -251,7 +283,7 @@ Initialises [oh-my-posh](https://ohmyposh.dev/) as the shell prompt. Provides
 | | |
 |---|---|
 | **Provides** | `prompt-ready` |
-| **Requires** | `xdg-configured`, tool `oh-my-posh` (optional), group `omp-prompt-configure` |
+| **Requires** | `bootstrap-ready`, tool `oh-my-posh` (optional), group `omp-prompt-configure` |
 | **Context** | interactive only |
 
 | zstyle | Default | Description |
@@ -268,7 +300,7 @@ Initialises [Starship](https://starship.rs/) as the shell prompt. Provides
 | | |
 |---|---|
 | **Provides** | `prompt-ready` |
-| **Requires** | `xdg-configured`, tool `starship` (optional), group `starship-prompt-configure` |
+| **Requires** | `bootstrap-ready`, tool `starship` (optional), group `starship-prompt-configure` |
 | **Context** | interactive only |
 
 | zstyle | Default | Description |
@@ -286,7 +318,7 @@ at a time.
 | | |
 |---|---|
 | **Provides** | `prompt-ready` |
-| **Requires** | `xdg-configured` (optional), group `omz-prompt-configure` |
+| **Requires** | `bootstrap-ready` (optional), group `omz-prompt-configure` |
 | **Context** | interactive only |
 
 | zstyle | Default | Description |
@@ -436,7 +468,7 @@ pypy venv aliases and activates `~/.venv` globally.
 | | |
 |---|---|
 | **Provides** | `venv-configured`, `venv-ready` |
-| **Requires** | `xdg-configured`, group `venv-configure`; optionally `secrets-loaded` |
+| **Requires** | `bootstrap-ready`, group `venv-configure`; optionally `secrets-loaded` |
 | **Context** | interactive + noninteractive |
 
 Set zstyle options in a hook registered into the `venv-configure` group to
@@ -465,7 +497,7 @@ runs all registered live completion generators (`gh`, `tailscale`, etc.).
 | | |
 |---|---|
 | **Provides** | `completions-paths-ready`, `completions-ready` |
-| **Requires** | Phase 1: `xdg-configured`; Phase 2: `completions-paths-ready`, `autocomplete-post-configured`, `rust-ready`, `bun-ready`, `uv-configured` |
+| **Requires** | Phase 1: `bootstrap-ready`; Phase 2: `completions-paths-ready`, `autocomplete-post-configured`, `rust-ready`, `bun-ready`, `uv-configured` |
 | **Context** | interactive + noninteractive |
 | **zstyle** | none |
 
@@ -493,13 +525,19 @@ checker. Silently skips if the dotfiler scripts directory cannot be found.
 
 ### `local_rc`
 
-Sources `~/.zshrc_local` if it exists, allowing per-machine customisation
-without touching the shared dotfiles repo.
+Per-machine customisation without touching the shared dotfiles repo, via two
+hooks:
+
+- **`local_env`** — sources `~/.zshenv_local` early. Member of the
+  `bootstrap` group, so it runs (after `xdg-configured`) before
+  `bootstrap-ready` is provided. Provides `local-env-loaded`.
+- **`local_rc`** — sources `~/.zshrc_local` late, so it can override anything.
+  Provides `local-overrides-loaded`.
 
 | | |
 |---|---|
-| **Provides** | `local-overrides-loaded` |
-| **Requires** | `secrets-loaded` (optional) |
+| **Provides** | `local-env-loaded` (early), `local-overrides-loaded` (late) |
+| **Requires** | `local_env`: `xdg-configured` (group member); `local_rc`: `secrets-loaded` (optional) |
 | **Context** | interactive + noninteractive |
 | **zstyle** | none |
 

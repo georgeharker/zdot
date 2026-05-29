@@ -1,2 +1,13 @@
+[format]
+# Configure `shuck format` and editor formatting.
+indent-style = "space"     # tab | space
+indent-width = 4           # used when indent-style = "space"
+binary-next-line = false   # put binary operators on continuation lines
+switch-case-indent = false # indent case branch bodies
+space-redirects = true     # add spaces around redirection operators
+keep-padding = false       # preserve safe horizontal padding
+function-next-line = false # put function opening braces on their own line
+never-split = false        # prefer compact layouts
+
 [lint]
 ignore = ["C002", "C003"]

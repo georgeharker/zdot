@@ -79,7 +79,12 @@ _xdg_cleanup() {
 }
 
 # Register hooks
-# xdg is a foundation module - no dependencies, provides xdg-configured phase
-zdot_register_hook _xdg_init interactive noninteractive --provides xdg-configured
+# xdg is the first member of the bootstrap group: it has no dependencies, so it
+# sorts first within the group and runs before any other per-machine setup. It
+# still provides xdg-configured for intra-group consumers (e.g. local_env) and
+# any hook that needs the XDG dirs directly; bootstrap-ready (the group's end)
+# therefore transitively guarantees xdg-configured. Being a member is what lets
+# the bootstrap coordinator stop special-casing xdg entirely.
+zdot_register_hook _xdg_init interactive noninteractive --group bootstrap --provides xdg-configured
 # Cleanup hook runs at the end of deferred dispatch as a finally-group member
 zdot_register_hook _xdg_cleanup interactive noninteractive --group finally

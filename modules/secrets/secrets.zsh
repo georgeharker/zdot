@@ -161,13 +161,13 @@ _op_init() {
     _setup_ssh_auth_sock
 }
 
-# Register hook - requires xdg-configured and the secrets-configure group,
+# Register hook - requires bootstrap-ready and the secrets-configure group,
 # provides secrets-loaded.  Any user hook registered with --group secrets-configure
 # is guaranteed to run before this.
 # Runs in both interactive and noninteractive modes;
 # interactive prompts only happen in interactive shells due to function guards.
 zdot_register_hook _op_init interactive noninteractive \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --requires-tool op \
     --requires-group secrets-configure \
     --provides secrets-loaded

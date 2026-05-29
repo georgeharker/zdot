@@ -46,7 +46,7 @@ _activate_global_venv() {
 
 # Register hooks
 zdot_register_hook _venv_init interactive noninteractive \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --requires-group venv-configure \
     --provides venv-configured
 

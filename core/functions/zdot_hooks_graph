@@ -112,6 +112,30 @@ function zdot_hooks_graph() {
         return 1
     }
 
+    # ── group contraction ──────────────────────────────────────────────────────
+    # Default view collapses each group into a single [group:G] node: its real
+    # members AND its begin/end barrier hooks all canonicalise to "group:G", and the
+    # intra-group edges between them drop out. --show-internal disables this (the raw
+    # barrier + per-member graph is kept). _zdot_g_canon_map is hook_id -> "group:G".
+    typeset -gA _zdot_g_canon_map=()
+    function _zdot_g_build_canon_map() {
+        _zdot_g_canon_map=()
+        local g hid label
+        for g in ${(k)_ZDOT_GROUP_MEMBERS}; do
+            for hid in ${=_ZDOT_GROUP_MEMBERS[$g]}; do
+                [[ -n "${_zdot_g_canon_map[$hid]:-}" ]] || _zdot_g_canon_map[$hid]="group:$g"
+            done
+        done
+        for hid in ${(k)_ZDOT_HOOKS}; do
+            label="${_ZDOT_HOOK_NAMES[$hid]:-}"
+            case $label in
+                group-begin:*|group-end:*) _zdot_g_canon_map[$hid]="group:${label#*:}" ;;
+            esac
+        done
+    }
+    # Map a hook_id to its display node: [group:G] if it belongs to a group, else itself.
+    function _zdot_g_canon() { REPLY="${_zdot_g_canon_map[$1]:-$1}"; }
+
     # Synthetic group scaffolding has labels like "group-begin:<group>" or
     # "group-end:<group>" — see core/hooks.zsh:1038-1051.
     function _zdot_g_is_internal() {
@@ -124,6 +148,11 @@ function zdot_hooks_graph() {
     # Verbose mode shows both.
     function _zdot_g_display_name() {
         local hid="$1"
+        if [[ "$hid" == group:* ]]; then
+            # [group:…] (ASCII) — matches the chip form used by `zdot hook plan`.
+            print -r -- "%F{magenta}[group:${hid#group:}]%f"
+            return
+        fi
         local label="${_ZDOT_HOOK_NAMES[$hid]:-}"
         local func="${_ZDOT_HOOKS[$hid]:-$hid}"
         local out
@@ -139,6 +168,15 @@ function zdot_hooks_graph() {
             out="$func"
         fi
         print -r -- "$out"
+    }
+
+    # Visible width of a head string, ignoring the %F{magenta}…%f colour escapes we
+    # add to [group:…] labels — so the pstree column math stays aligned (a raw
+    # ${#head} would count the escape characters and shift every child right).
+    function _zdot_g_vwidth() {
+        local s=${1//\%F\{magenta\}/}
+        s=${s//\%f/}
+        REPLY=${#s}
     }
 
     # Display for any node, including phase pseudo-nodes.
@@ -188,14 +226,39 @@ function zdot_hooks_graph() {
             local requires="${_ZDOT_HOOK_REQUIRES[$hid]:-}"
             [[ -z "$requires" ]] && continue
             for phase in ${=requires}; do
+                # Skip finally/pre-defer "ordering injection" edges: every hook
+                # provides a _group_member_<G>_<self> token purely so G's begin
+                # barrier can sort last. Those aren't real membership (the hook is
+                # not in _ZDOT_GROUP_MEMBERS[G]) and would hang G's whole subtree
+                # under EVERY hook. Real membership tokens (--group G) are kept, so
+                # genuine group structure still renders. (--show-internal keeps all.)
+                # Suppress finally/pre-defer "ordering injection" edges: every hook
+                # provides a _group_member_<G>_<self> token only so G's begin barrier
+                # sorts last. Those aren't real membership, so dropping them keeps the
+                # gather-all groups from smearing under every hook — they instead
+                # surface as a single root node (a universal sink). Real membership
+                # tokens fall through and get contracted into the group node below.
+                if (( ! _g_show_internal )) && [[ $phase == _group_member_*_hook_<-> ]]; then
+                    local _g=${phase#_group_member_}; _g=${_g%_hook_<->}
+                    local _m="hook_${phase##*_hook_}"
+                    [[ " ${_ZDOT_GROUP_MEMBERS[$_g]:-} " == *" $_m "* ]] || continue
+                fi
                 _zdot_g_provider_for_phase "$phase"
                 provider_id="$REPLY"
                 [[ -z "$provider_id" ]] && continue
-                [[ "$provider_id" == "$hid" ]] && continue
-                if [[ -z "${_zdot_g_rev_map[$provider_id]}" ]]; then
-                    _zdot_g_rev_map[$provider_id]="$hid"
-                else
-                    _zdot_g_rev_map[$provider_id]+=" $hid"
+                # Contract groups: map members + begin/end barriers to their [group:G]
+                # node, and drop the resulting intra-group self-edges. (No-op under
+                # --show-internal, which keeps the raw barrier/member graph.)
+                local _cnode="$hid" _pnode="$provider_id"
+                if (( ! _g_show_internal )); then
+                    _zdot_g_canon "$hid";         _cnode="$REPLY"
+                    _zdot_g_canon "$provider_id"; _pnode="$REPLY"
+                fi
+                [[ "$_pnode" == "$_cnode" ]] && continue
+                if [[ -z "${_zdot_g_rev_map[$_pnode]}" ]]; then
+                    _zdot_g_rev_map[$_pnode]="$_cnode"
+                elif [[ " ${_zdot_g_rev_map[$_pnode]} " != *" $_cnode "* ]]; then
+                    _zdot_g_rev_map[$_pnode]+=" $_cnode"
                 fi
             done
         done
@@ -213,6 +276,8 @@ function zdot_hooks_graph() {
         for x in "$@"; do
             if [[ "$x" == phase:* ]]; then
                 d="[phase: ${x#phase:}]"
+            elif [[ "$x" == group:* ]]; then
+                d="[group:${x#group:}]"
             else
                 label="${_ZDOT_HOOK_NAMES[$x]:-}"
                 func="${_ZDOT_HOOKS[$x]:-$x}"
@@ -237,14 +302,34 @@ function zdot_hooks_graph() {
     function _zdot_g_raw_children() {
         local hid="$1"
         local -a out=()
+        # Group pseudo-node: contents are the group's real members; in --uses we
+        # also hang its external dependents (consumers) off it.
+        if [[ "$hid" == group:* ]]; then
+            out=( ${=_ZDOT_GROUP_MEMBERS[${hid#group:}]:-} )
+            [[ "$_zdot_g_dir" == "uses" ]] && out+=( ${=_zdot_g_rev_map[$hid]:-} )
+            REPLY="${(F)out}"
+            return
+        fi
+        local _hn="$hid"
+        (( ! _g_show_internal )) && { _zdot_g_canon "$hid"; _hn="$REPLY"; }
         if [[ "$_zdot_g_dir" == "depends" ]]; then
             local requires="${_ZDOT_HOOK_REQUIRES[$hid]:-}"
-            local phase provider
+            local phase provider _pn
             for phase in ${=requires}; do
+                # Drop injection ordering tokens (member token of a non-member); the
+                # gather-all begin barrier otherwise lists every hook. See reverse map.
+                if (( ! _g_show_internal )) && [[ $phase == _group_member_*_hook_<-> ]]; then
+                    local _g=${phase#_group_member_}; _g=${_g%_hook_<->}
+                    local _m="hook_${phase##*_hook_}"
+                    [[ " ${_ZDOT_GROUP_MEMBERS[$_g]:-} " == *" $_m "* ]] || continue
+                fi
                 _zdot_g_provider_for_phase "$phase"
                 provider="$REPLY"
-                if [[ -n "$provider" && "$provider" != "$hid" ]]; then
-                    out+=("$provider")
+                if [[ -n "$provider" ]]; then
+                    _pn="$provider"
+                    (( ! _g_show_internal )) && { _zdot_g_canon "$provider"; _pn="$REPLY"; }
+                    [[ "$_pn" == "$_hn" ]] && continue   # drop intra-group self-edge
+                    out+=("$_pn")
                 else
                     out+=("phase:$phase")
                 fi
@@ -383,7 +468,7 @@ function zdot_hooks_graph() {
             return
         fi
 
-        local head_w=${#head}
+        _zdot_g_vwidth "$head"; local head_w=$REPLY
         local pad=""
         local _i
         for (( _i=0; _i < head_w + 1; _i++ )); do pad+=" "; done
@@ -437,6 +522,7 @@ function zdot_hooks_graph() {
             return 1
         fi
         _zdot_g_dir="depends"
+        (( _g_show_internal )) || { _zdot_g_build_canon_map; _zdot_g_canon "$root_id"; root_id="$REPLY"; }
         _zdot_g_seen=()
         _zdot_g_render "$root_id" "" "" 0
         _zdot_g_seen=()
@@ -444,6 +530,8 @@ function zdot_hooks_graph() {
     fi
 
     # ── modes that need the reverse map ──────────────────────────────────────
+    # Canon map must exist before the reverse map (which contracts via it).
+    (( _g_show_internal )) || _zdot_g_build_canon_map
     typeset -gA _zdot_g_rev_map=()
     _zdot_g_build_reverse_map
 
@@ -461,6 +549,7 @@ function zdot_hooks_graph() {
             return 1
         fi
         _zdot_g_dir="uses"
+        (( _g_show_internal )) || { _zdot_g_canon "$root_id"; root_id="$REPLY"; }
         _zdot_g_seen=()
         _zdot_g_render "$root_id" "" "" 0
         _zdot_g_seen=()
@@ -482,45 +571,24 @@ function zdot_hooks_graph() {
         done
     done
 
-    local -a initial_roots=()
-    for hid in ${(k)_ZDOT_HOOKS}; do
-        [[ -n "${is_dep[$hid]:-}" ]] && continue
-        initial_roots+=("$hid")
-    done
-
+    # Roots = nodes nothing depends on. Default view works on the contracted node
+    # set (each hook mapped to its [group:G] box, deduped), so members and barriers
+    # fold into their group rather than appearing as spurious standalone roots.
+    # --show-internal uses the raw hook set.
     local -a final_roots=()
-    local -A added=()
-    if (( _g_show_internal )); then
-        final_roots=( "${initial_roots[@]}" )
-    else
-        # Build "non-internal is_dep": a hook is a real dependent only if a
-        # non-internal hook depends on it.
-        local -A ni_is_dep=()
-        for hid in ${(k)_zdot_g_rev_map}; do
-            _zdot_g_is_internal "$hid" && continue
-            for d in ${=_zdot_g_rev_map[$hid]}; do
-                ni_is_dep[$d]=1
-            done
-        done
-
-        local -a worklist=( "${initial_roots[@]}" )
-        local w
-        while (( ${#worklist[@]} > 0 )); do
-            w="${worklist[1]}"
-            worklist=( "${worklist[@]:1}" )
-            if _zdot_g_is_internal "$w"; then
-                local deps_w="${_zdot_g_rev_map[$w]:-}"
-                local -a sub=( ${=deps_w} )
-                worklist=( "${sub[@]}" "${worklist[@]}" )
-            else
-                [[ -n "${ni_is_dep[$w]:-}" ]] && continue
-                if [[ -z "${added[$w]:-}" ]]; then
-                    added[$w]=1
-                    final_roots+=("$w")
-                fi
-            fi
-        done
-    fi
+    local -A _seen_node=()
+    local _n
+    for hid in ${(k)_ZDOT_HOOKS}; do
+        if (( _g_show_internal )); then
+            _n="$hid"
+        else
+            _zdot_g_canon "$hid"; _n="$REPLY"
+        fi
+        [[ -n "${_seen_node[$_n]:-}" ]] && continue
+        _seen_node[$_n]=1
+        [[ -n "${is_dep[$_n]:-}" ]] && continue
+        final_roots+=("$_n")
+    done
 
     if (( ${#final_roots[@]} == 0 )); then
         zdot_info "(no hooks registered)"

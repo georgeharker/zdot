@@ -576,7 +576,7 @@ for each hook_id not in execution_plan:
 
 1. **No Recursion**: BFS queue eliminates recursion depth limits
 2. **Deterministic Order**: Hooks at the same depth are processed in registration order
-3. **Finally Group**: Hooks requiring the `finally` group are dispatched automatically when the deferred queue fully drains
+3. **Finally Group**: The reserved `finally` group is synthesized as an ordinary group (begin/member/end barriers) whose *begin* barrier requires every other in-plan hook, so it sorts last; it is force-deferred (and drains last) whenever any deferred hooks exist, otherwise it runs last in the eager pass
 4. **Optional Handling**: Hooks with unresolvable optional deps are silently skipped
 5. **Circular Detection**: Hooks still in the unprocessed set after BFS drains indicate a cycle
 
@@ -642,19 +642,28 @@ zdot_register_hook _hook_a interactive --requires nonexistent-phase
 
 **Example:**
 ```zsh
-# In module: register a cleanup hook that runs after all deferred hooks complete
-zdot_register_hook _cleanup interactive --requires-group finally
+# In module: register a cleanup hook that runs after all other hooks complete
+zdot_register_hook _cleanup interactive --group finally
 ```
 
 **Behavior:**
-- Hook is added to `_ZDOT_GROUP_MEMBERS[finally]` at registration time
-- Hook is NOT in the main execution plan — it does not participate in topological sort
-- When `_zdot_run_deferred_phase_check` detects the deferred queue has fully drained
-  (no hooks dispatched, no pending hooks, no queued hooks), it iterates
-  `_ZDOT_GROUP_MEMBERS[finally]` and executes each member not yet in `_ZDOT_HOOKS_EXECUTED`
-- No manual triggering required
+- `--group finally` makes the hook a **member** of the reserved `finally` group
+  (use `--group`, not `--requires-group` — the latter is for hooks that must run
+  *after* finally completes, which is rare)
+- `finally` is synthesized as an ordinary group: begin/member/end barriers, and
+  members participate in the topological sort like any other group
+- The group's **begin** barrier is given a real `--requires` on every other
+  in-plan hook (each prior hook H provides `_group_member_finally_<H>`, which the
+  begin barrier requires), so the whole subgraph sorts after everything else
+- Because the begin barrier requires every hook — deferred ones included — it is
+  **force-deferred whenever any deferred hooks exist**, cascading the subgraph
+  into the deferred set; the drain then releases it last. The cascade is
+  intentional, so the subgraph is pre-accepted and the force-defer pass stays
+  silent. If nothing is deferred, `finally` simply runs last in the eager pass.
 
-**Use Case**: Cleanup tasks, post-init bookkeeping that should run after all deferred setup completes
+**Use Case**: Cleanup tasks, post-init bookkeeping that should run after all other setup completes
+
+See the [Module Guide → Reserved groups](module-guide.md#reserved-groups-pre-defer-and-finally) for the full design and the companion `pre-defer` group.
 
 ## Context System
 
@@ -1364,13 +1373,17 @@ echo "Optional: ${_ZDOT_HOOK_OPTIONAL[$hook_id]:-0}"
 **Alternatives Considered:**
 1. **Manual trigger (`zdot_run_until finalize`)**: Requires user to call explicitly, easy to forget (rejected)
 2. **Special `finalize` phase**: Treated as a regular phase but never provided by an eager hook — caused plan errors (rejected)
-3. **Finally group with auto-dispatch**: Chosen
+3. **Finally as an ordinary group, ordered last by real deps**: Chosen
 
 **Why chosen:**
 - Fully automatic: no user action required to trigger cleanup hooks
-- Uses the existing group infrastructure (`_ZDOT_GROUP_MEMBERS`)
-- Clean separation: `finally` hooks are outside the main execution plan
-- Hooks simply declare `--requires-group finally` at registration time
+- Reuses the standard group machinery (begin/member/end barriers) — no special
+  case in the executor; intra-group `--requires` and introspection just work
+- Ordered last by giving the begin barrier a real `--requires` on every other
+  in-plan hook, so it falls out of the normal topological sort
+- Deferred *only when needed*: force-deferral promotes it past the deferred drain
+  iff deferred hooks exist, otherwise it stays eager and runs last in the eager pass
+- Members simply declare `--group finally` at registration time
 
 ### Why Autoloading for Functions?
 
@@ -1551,14 +1564,16 @@ zdot_debug_phases() {
 
 **Implementation:**
 
-In module, register hook with `--requires-group finally`:
+In module, register hook as a member of the `finally` group with `--group finally`:
 ```zsh
 zdot_register_hook _mymodule_cleanup interactive noninteractive \
-    --requires-group finally
+    --group finally
 ```
 
-**Result**: `_mymodule_cleanup` runs automatically when `_zdot_run_deferred_phase_check` detects
-the deferred queue has fully drained — no manual triggering required.
+**Result**: `_mymodule_cleanup` runs last of all — after every eager *and* deferred hook —
+because the synthesized `finally` begin barrier requires every other in-plan hook. No manual
+triggering required. (Use `--requires-group finally` only for the rare hook that must run
+*after* the finally group itself completes.)
 
 ---
 

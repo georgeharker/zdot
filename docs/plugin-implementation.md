@@ -48,6 +48,7 @@ Provides phase-based execution:
 
 ```
 xdg-configured          -> XDG dirs configured
+bootstrap-ready         -> initial per-machine setup done (default baseline)
 plugins-cloned          -> Plugins cloned to cache
 omz-lib-loaded          -> OMZ lib sourced
 omz-plugins-loaded      -> OMZ plugins individually loaded
@@ -362,8 +363,8 @@ zdot_init (core/init.zsh):
   5. execute all hooks in order
 
 Hook phase chain (driven by zdot_init step 5):
-  xdg-configured
-    └─> _plugins_configure         (requires: xdg-configured)
+  bootstrap-ready
+    └─> _plugins_configure         (requires: bootstrap-ready)
   plugins-cloned
     └─> _plugins_load_omz          (requires: plugins-cloned)
                                    (provides: omz-plugins-loaded)

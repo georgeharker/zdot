@@ -8,6 +8,7 @@ quick start to complex plugin-loading lifecycles.
 - [Quick Start](#quick-start)
 - [Module Structure](#module-structure)
 - [Choosing Your Approach](#choosing-your-approach)
+- [Foundation phases: xdg-configured and bootstrap-ready](#foundation-phases-xdg-configured-and-bootstrap-ready)
 - [zdot_simple_hook](#zdot_simple_hook)
 - [zdot_define_module](#zdot_define_module)
 - [Manual Hooks](#manual-hooks)
@@ -100,6 +101,43 @@ Does your module load third-party plugins?
 
 ---
 
+## Foundation phases: xdg-configured and bootstrap-ready
+
+Two phases sit at the base of every module's dependency chain:
+
+| Phase | Provided by | Meaning |
+|-------|-------------|---------|
+| `xdg-configured` | `xdg` (first member of the `bootstrap` group) | XDG Base Directory env vars (`XDG_CONFIG_HOME`, etc.) are exported. |
+| `bootstrap-ready` | `bootstrap` module | Initial per-machine setup is complete: **everything in the `bootstrap` group — `xdg` included — has run.** |
+
+`bootstrap-ready` is the **default `--requires`** for both `zdot_simple_hook`
+and the `zdot_define_module` configure phase. `xdg` is the first member of the
+`bootstrap` group (it has no dependencies, so it sorts first), and `bootstrap-ready`
+is the group's completion — so depending on `bootstrap-ready` transitively
+guarantees XDG is set up. Most modules should just take the default and never
+name `xdg-configured` directly.
+
+**`bootstrap` group** — register early per-machine setup here and it is
+guaranteed to run (after `xdg`, which is itself a member) before `bootstrap-ready`
+is provided:
+
+```zsh
+zdot_register_hook _my_machine_setup interactive noninteractive \
+    --group bootstrap
+```
+
+The shipped `xdg` and `local_env` (in `local_rc`, which sources `~/.zshenv_local`)
+hooks are members of this group.
+
+**When to require `xdg-configured` instead of `bootstrap-ready`:** only a hook
+that itself runs *inside* `bootstrap` and needs the XDG dirs before the rest of
+the group (e.g. `local_env`). It can't depend on `bootstrap-ready` — that's the
+group's own completion, so it would be circular — so it requires `xdg-configured`
+(provided by the `xdg` member) instead. Nothing **outside** the group treats xdg
+specially: the coordinator just `--requires-group bootstrap`.
+
+---
+
 ## zdot_simple_hook
 
 Convention-over-configuration sugar for the most common pattern: one function,
@@ -110,7 +148,7 @@ one hook, standard dependencies.
 | Property | Default | Override |
 |----------|---------|---------|
 | Function | `_<name>_init` | `--fn <name>` |
-| Requires | `xdg-configured` | `--requires <phases...>` or `--no-requires` |
+| Requires | `bootstrap-ready` | `--requires <phases...>` or `--no-requires` |
 | Provides | `<name>-configured` | `--provides <token>` |
 | Contexts | `interactive noninteractive` | `--context <ctx...>` |
 
@@ -132,7 +170,7 @@ _sudo_init() {
 
 zdot_simple_hook sudo
 # Expands to: zdot_register_hook _sudo_init interactive noninteractive \
-#     --requires xdg-configured --provides sudo-configured
+#     --requires bootstrap-ready --provides sudo-configured
 ```
 
 **Custom provides token:**
@@ -178,13 +216,14 @@ zdot_simple_hook uv --requires secrets-loaded --optional
 ```zsh
 _apt_init() { ... }
 
-zdot_simple_hook apt --requires xdg-configured env-configured \
+zdot_simple_hook apt --requires bootstrap-ready env-configured \
     --provides apt-ready \
     --provides-tool op --provides-tool eza
 ```
 
-Note: `--requires` replaces the default `xdg-configured`. Include it explicitly
-if you still need it alongside other requires.
+Note: `--requires` replaces the default `bootstrap-ready`. Include it explicitly
+if you still need it alongside other requires. (`bootstrap-ready` transitively
+guarantees `xdg-configured`, so you rarely need to list xdg separately.)
 
 ---
 
@@ -200,7 +239,7 @@ Each takes a function name (the function must be defined before calling
 
 | Flag | Hook Name | Provides | Behavior |
 |------|-----------|----------|----------|
-| `--configure <fn>` | `<name>-configure` | `<name>-configured` | Eager, requires `xdg-configured` |
+| `--configure <fn>` | `<name>-configure` | `<name>-configured` | Eager, requires `bootstrap-ready` |
 | `--load <fn>` | `<name>-load` | `<name>-loaded` | Eager, requires `<name>-configured` if configure exists |
 | `--load-plugins <specs>` | `<name>-load` | `<name>-loaded` | Like `--load` but auto-generates the loader function |
 | `--post-init <fn>` | `<name>-post-init` | `<name>-post-configured` | Deferred, requires `<name>-loaded` (or override) |
@@ -331,10 +370,13 @@ When both configure and load phases exist, load automatically requires
 `<name>-configured`. This creates the pipeline:
 
 ```
-xdg-configured --> <name>-configure --> <name>-load --> <name>-post-init
-                   (provides              (provides       (provides
-                    <name>-configured)     <name>-loaded)  <name>-post-configured)
+bootstrap-ready --> <name>-configure --> <name>-load --> <name>-post-init
+                    (provides             (provides       (provides
+                     <name>-configured)    <name>-loaded)  <name>-post-configured)
 ```
+
+(`bootstrap-ready` is the standard baseline — it sits above `xdg-configured`
+and the per-machine `bootstrap` group; see [Foundation phases](#foundation-phases-xdg-configured-and-bootstrap-ready).)
 
 If only load exists (no configure), there's no auto-derived dependency on a
 configure phase.
@@ -365,7 +407,7 @@ _activate_global_venv() {
 }
 
 zdot_register_hook _venv_init interactive noninteractive \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --provides venv-configured
 
 zdot_register_hook _activate_global_venv interactive noninteractive \
@@ -380,7 +422,7 @@ zdot_module_autoload_funcs
 
 ```zsh
 zdot_register_hook _op_init interactive noninteractive \
-    --requires xdg-configured \
+    --requires bootstrap-ready \
     --requires-tool op \
     --provides secrets-loaded
 ```
@@ -398,6 +440,57 @@ zdot_register_hook _omz_configure_completion interactive noninteractive \
 
 Group hooks participate in barrier synchronization. All members of a group
 must complete before anything that `--requires-group <name>` can run.
+
+### Reserved groups: `pre-defer` and `finally`
+
+Two group names are reserved by the scheduler. They use the **same begin/member/end
+barrier synthesis as every other group** — so intra-group `--requires` are
+honoured by the topological sort and members appear at their true position in
+introspection. What's special is only how their begin barrier is ordered after
+everything else:
+
+| Group | Runs | Use for |
+|-------|------|---------|
+| `pre-defer` | The final **eager** step — after every other eager hook, just before the deferred phase begins (and, interactively, the first prompt). | Last-chance setup that must be in place before deferred work / on the very first prompt. |
+| `finally` | Dead last — after every eager *and* deferred hook. In noninteractive shells the deferred drain is synchronous, so it still runs. | Teardown/cleanup that must outlast all other work (e.g. `xdg`'s `_xdg_cleanup` unsetting helper functions). |
+
+```zsh
+# Runs at the end of the eager pass, before deferred work:
+zdot_register_hook _my_pre_defer interactive --group pre-defer
+
+# Runs dead last, after deferred work:
+zdot_register_hook _my_teardown interactive noninteractive --group finally
+```
+
+How each begin barrier is pushed last — and why the two differ:
+
+- **`pre-defer`** must stay **eager**. Its begin barrier is ordered after every
+  other eager hook with **synthetic Kahn-graph edges only** (via each
+  predecessor's `_defer_order_<hid>` bridge phase), never real `--requires`.
+  This is deliberate: the eager/deferred split isn't known until force-deferral
+  runs *after* the sort, so a real dependency on a hook that later promotes to
+  deferred would drag `pre-defer` into the deferred set too. Synthetic edges are
+  invisible to force-deferral, so they can't promote it. (For introspection, the
+  real, now-known-eager dependencies are recorded separately *after*
+  force-deferral — they document the order in `zdot hook graph`; they don't
+  enforce it.)
+- **`finally`** must run after *everything*, deferred work included, so its begin
+  barrier carries a **real `--requires` on every other in-plan hook** (each prior
+  hook H is made to provide `_group_member_finally_<H>`, and the begin barrier
+  requires it — the same member-phase mechanism a normal group's *end* barrier
+  uses, applied to the *begin* barrier here). `finally` is therefore deferred
+  **only if deferred hooks exist**: requiring a deferred hook's phase force-defers
+  the begin barrier, cascading the whole subgraph into the deferred set, and the
+  drain releases it last. If nothing is deferred, `finally` simply stays eager and
+  runs last in the eager pass (like `pre-defer`, one step later). When the cascade
+  does happen it is the whole point, not an accident, so the entire `finally`
+  subgraph is pre-accepted (`zdot_allow_defer`-style) and the force-defer pass
+  stays silent for it.
+
+Members respect their own `--requires` and each other's; they only fire in
+contexts where they survived into the execution plan. Both groups are standard
+barriers whose begin gate is ordered last — `pre-defer` last among eager,
+`finally` last of all.
 
 ---
 
@@ -492,7 +585,7 @@ zdot_register_hook _my_node_overrides interactive noninteractive \
 Resulting DAG:
 
 ```
-xdg-configured
+bootstrap-ready
       ↓
   [ _my_node_overrides  ||  …other user hooks ]   ← group members
       ↓
@@ -812,6 +905,11 @@ zdot_load_module mymod
 
 Load order in `.zshrc` doesn't determine execution order -- the dependency
 DAG does. But grouping related modules together aids readability.
+
+Always load the `xdg` and `bootstrap` foundation modules — they provide
+`xdg-configured` and `bootstrap-ready`, the phases nearly every other module
+depends on by default. Omitting `bootstrap` leaves `bootstrap-ready` unprovided,
+which stalls every module that requires it.
 
 ### Acknowledging Deferred Hooks
 

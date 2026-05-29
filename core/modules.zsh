@@ -453,7 +453,7 @@ zdot_define_module() {
         fi
         zdot_register_hook "$configure_fn" "${cfg_ctx[@]}" \
             --name "${basename}-configure" \
-            --requires xdg-configured \
+            --requires bootstrap-ready \
             --provides "${basename}-configured" \
             "${_dm_cfg_extra[@]}" \
             "${_dm_variant_args[@]}"
