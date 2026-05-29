@@ -331,7 +331,8 @@ at a time.
 
 Loads completion, suggestion, and syntax-highlighting plugins:
 `fast-syntax-highlighting`, `zsh-autosuggestions`, `zsh-abbr`, and
-`fzf-tab`. Runs `compinit` deferred after all plugins settle.
+`fzf-tab`, and activates autosuggestions at the first prompt. (`compinit`
+is launched by the `completions` module, not here.)
 
 | | |
 |---|---|
@@ -490,13 +491,16 @@ zdot_register_hook _my_venv_config interactive noninteractive --group venv-confi
 
 ### `completions`
 
-Two-phase completion management. Phase 1 adds per-module and global
-completion dirs to `fpath` and registers file-based completions. Phase 2
-runs all registered live completion generators (`gh`, `tailscale`, etc.).
+Completion management, and the launch point for `compinit`. Phase 1 adds
+per-module and global completion dirs to `fpath` and registers file-based
+completions. Phase 2 runs all registered live completion generators (`gh`,
+`tailscale`, etc.). Phase 3 runs `compinit` itself (`_completions_compinit`),
+gated `--requires-group completions` so it fires after every producer; a core
+`finally` hook is the fallback when this module is absent.
 
 | | |
 |---|---|
-| **Provides** | `completions-paths-ready`, `completions-ready` |
+| **Provides** | `completions-paths-ready`, `completions-ready`, `compinit-done` |
 | **Requires** | Phase 1: `bootstrap-ready`; Phase 2: `completions-paths-ready`, `autocomplete-post-configured`, `rust-ready`, `bun-ready`, `uv-configured` |
 | **Context** | interactive + noninteractive |
 | **zstyle** | none |

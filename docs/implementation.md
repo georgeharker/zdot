@@ -95,7 +95,7 @@ zdot/
 │   │   ├── _zdot                    # Tab-completion for zdot CLI
 │   │   └── ...
 │   └── plugin-bundles/
-│       └── omz.zsh                  # OMZ plugin bundle (two-phase compinit, compdef queue)
+│       └── omz.zsh                  # OMZ plugin bundle (compdef stub queue)
 └── modules/                             # User modules
     ├── xdg/
     │   └── xdg.zsh
@@ -660,6 +660,9 @@ zdot_register_hook _cleanup interactive --group finally
   into the deferred set; the drain then releases it last. The cascade is
   intentional, so the subgraph is pre-accepted and the force-defer pass stays
   silent. If nothing is deferred, `finally` simply runs last in the eager pass.
+  (Barrier pre-acceptance — begin/end barriers staying silent when
+  force-deferred — applies to *every* group, since a barrier defers only because
+  its members did; pre-accepting the *members* is the part unique to `finally`.)
 
 **Use Case**: Cleanup tasks, post-init bookkeeping that should run after all other setup completes
 

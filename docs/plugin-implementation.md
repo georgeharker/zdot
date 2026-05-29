@@ -185,13 +185,14 @@ compdef _git git
 # Later replayed by zdot_compdef_queue_process after compinit
 ```
 
-### Two-Phase Compinit Flow
+### Compinit Flow
 
 Completions require a careful ordering: all plugins must add to `$fpath` before
-`compinit` runs, but `compinit` must not block startup. The solution is a
-two-phase approach with a compdef stub queue.
+`compinit` runs, but `compinit` must not block startup. The pieces: a compdef
+stub queue, an idempotent runner, a primary launch from the completions module,
+and a core `finally` fallback.
 
-#### Phase 1 — Compdef stub (sourced immediately)
+#### Compdef stub (sourced immediately)
 
 A `compdef()` stub is installed at source time. When plugins call `compdef`
 before `compinit` has run, the stub queues the call in `_ZDOT_COMPDEF_QUEUE`
@@ -204,43 +205,52 @@ compdef() {
 }
 ```
 
-#### Phase 2a — fpath accumulation + deferred signal
+#### Launch — primary (completions module) + core fallback
 
-After all deferred plugins are loaded (and have added their dirs to `$fpath`),
-`zdot_compinit_defer` is called via `zdot_defer`. Its only job is to set the
-`_ZDOT_FPATH_READY=1` flag — it never calls `compinit` directly (doing so
-inside `zsh-defer` would cause a hang):
+`compinit` is launched not by core directly but by the **completions module**:
+`_completions_compinit` is registered `--deferred --requires-group completions`,
+so it fires during the deferred drain once every completion *producer* in the
+`completions` group has run (full `$fpath`), and calls `zdot_compinit_run`
+directly. Running `compinit` inside the `zsh-defer`/ZLE context is safe on
+current zsh (the historical hang does not reproduce), and launching here is what
+makes completion live at the **first** prompt.
 
 ```zsh
-zdot_compinit_defer() {
-    zdot_interactive || return 0
-    _ZDOT_FPATH_READY=1
-}
+# modules/completions/completions.zsh
+_completions_compinit() { zdot_compinit_run; }
+zdot_register_hook _completions_compinit interactive \
+    --deferred --requires-group completions --provides compinit-done
 ```
 
-#### Phase 2b — precmd hook triggers compinit
-
-`zdot_ensure_compinit_during_precmd` is registered as a `precmd` hook. On each
-prompt draw it checks both conditions, then runs `zdot_compinit_run` exactly
-once:
+So that `compinit` still runs in a config that loads completions but not the
+autocompletion module, core registers an idempotent floor in the `finally`
+group:
 
 ```zsh
-zdot_ensure_compinit_during_precmd() {
-    (( _ZDOT_COMPINIT_DONE )) && { _zdot_remove_precmd_hook; return 0 }
-    (( _ZDOT_FPATH_READY  )) || return 0   # not ready yet — try next precmd
+# core/compinit.zsh — the floor
+_zdot_compinit_fallback() {
+    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0   # primary already ran it
     zdot_compinit_run
 }
+zdot_register_hook _zdot_compinit_fallback interactive --group finally
 ```
 
-#### `zdot_compinit_run` — the critical step
+`finally` runs last in the drain (full `$fpath`, still first-prompt idle) and
+deliberately does **not** fire on a genuine stall — so a real misconfiguration
+surfaces as a stall error instead of being silently patched here.
 
-**`unfunction compdef` MUST precede `compinit`.**  If the stub is still defined
+#### `zdot_compinit_run` — the idempotent runner
+
+`zdot_compinit_run` is the single entry point, guarded by `_ZDOT_COMPINIT_DONE`
+so repeat calls (primary then fallback) are harmless. **`unfunction compdef`
+MUST precede `compinit`.**  If the stub is still defined
 when `compinit` runs, zsh sees an existing `compdef` and silently skips
 redefining it — leaving only the stub, which can only queue and never register
 completions.
 
 ```zsh
 zdot_compinit_run() {
+    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0   # idempotent
     unfunction compdef 2>/dev/null   # remove stub BEFORE compinit
     if zdot_compdump_needs_refresh; then
         compinit -i                  # full init, refresh compdump
@@ -382,18 +392,24 @@ Hook phase chain (driven by zdot_init step 5):
     └─> olets/zsh-autosuggestions-abbreviations-strategy
                                    (deferred; provides: autosuggest-abbr-ready)
   autosuggest-abbr-ready
-    └─> zdot_compinit_defer        (deferred; provides: compinit-done)
+    └─> _autocomplete_autosuggest_start  (deferred; provides: autosuggest-started)
     └─> _plugins_load_fzf_tab      (interactive only; provides: fzf-tab-loaded)
     └─> _plugins_post_init         (deferred; provides: plugins-post-configured)
   plugins-post-configured
     └─> _nvm_interactive_init      (interactive, deferred; provides: nvm-ready)
 ```
 
+> `compinit` is launched separately, from the **completions** module:
+> `_completions_compinit`, gated `--requires-group completions` (i.e. after every
+> completion producer), plus a core `finally` fallback — see
+> [Compinit Flow](#compinit-flow). It is not part of this autosuggest chain.
+
 ## Non-Interactive Mode Handling
 
 The plugin system handles non-interactive shells gracefully:
 
-1. **Compinit** - `zdot_compinit_defer` returns early in non-interactive:
+1. **Compinit** - `zdot_compinit_run` returns early in non-interactive (and its
+   launch hooks are registered `interactive` only):
    ```zsh
    zdot_interactive || return 0
    ```

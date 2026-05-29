@@ -1316,25 +1316,32 @@ _zdot_init_resolve_groups() {
             fi
         done
 
-        # -- Reserved group 'finally': auto-promote --------------------------
+        # -- Group barriers: pre-accept structural force-deferral -----------
+        # A group's begin/end barriers are synthetic, OPTIONAL gates. The end
+        # barrier's ONLY requires are its members' `_group_member_*` phases (see
+        # the wiring above; begin barriers have empty requires), so if any member
+        # is deferred the end barrier is force-deferred too. That is purely
+        # structural — the barrier mirrors its members by design, not an
+        # unexpected dependency chain — so pre-accept the barriers for EVERY group
+        # to keep the force-defer pass silent about them. The real signal is
+        # unaffected: a *member* (a real user hook) that is force-deferred by a
+        # genuine surprise dependency still warns on the member itself.
+        _ZDOT_ACCEPTED_DEFERRED[$_fn_begin]="all"
+        _ZDOT_ACCEPTED_DEFERRED[$_fn_end]="all"
+
+        # -- Reserved group 'finally': also auto-accept its MEMBERS ----------
         # finally's begin barrier really requires every other in-plan hook (wired
         # in zdot_build_execution_plan). So whenever ANY of those hooks is
-        # deferred, force-deferral promotes the begin barrier — and, through
-        # _group_begin_finally and the member phases, the members and end barrier
-        # too — into the deferred set. That promotion is the WHOLE POINT (finally
-        # runs after the deferred drain), not an accident, so pre-accept it: mark
-        # the entire subgraph auto-promote so the force-defer pass stays silent
-        # instead of emitting "forced" warnings for it. This is the conditional
-        # replacement for the old unconditional explicit-defer — when nothing is
-        # deferred, nothing is promoted and finally simply stays eager.
+        # deferred, force-deferral promotes the whole finally subgraph — members
+        # included — into the deferred set. That promotion is the WHOLE POINT
+        # (finally runs after the deferred drain), not an accident, so pre-accept
+        # the members too.
         #
-        # (Only finally is auto-promote. pre-defer is deliberately NOT: it uses
-        # synthetic ordering edges that can't promote it, and a pre-defer member
-        # that genuinely depends on a deferred phase is a misuse we WANT to warn
-        # about.)
+        # (Only finally auto-accepts its members. pre-defer is deliberately NOT:
+        # it uses synthetic ordering edges that can't promote it, and a pre-defer
+        # member that genuinely depends on a deferred phase is a misuse we WANT to
+        # warn about. Other groups likewise keep member-level warnings.)
         if [[ $_grp == finally ]]; then
-            _ZDOT_ACCEPTED_DEFERRED[$_fn_begin]="all"
-            _ZDOT_ACCEPTED_DEFERRED[$_fn_end]="all"
             local _mfn
             for _member in ${=_ZDOT_GROUP_MEMBERS[finally]:-}; do
                 # Build the key in a variable: a quoted literal subscript

@@ -29,7 +29,11 @@ autocomplete-loaded
         → zsh-autosuggestions-abbreviations-strategy  (autosuggest-abbr-ready)
 ```
 
-`compinit` runs deferred after all plugins have loaded (`autosuggest-abbr-ready`).
+Once autosuggestions is loaded (`autosuggest-abbr-ready`), this module fires
+`_zsh_autosuggest_start` during the deferred drain so suggestions are live at the
+**first** prompt (provides `autosuggest-started`). `compinit` is **not** launched
+here — it is owned by the **completions** module (gated `--requires-group
+completions`), with a core `finally` fallback.
 
 ## Configuration
 
@@ -73,4 +77,5 @@ to commands this shell typed.
 ## Provides
 
 Phases via `zdot_define_module`: `autocomplete-configured`, `autocomplete-loaded`,
-`autocomplete-post-configured`
+`autocomplete-post-configured`. The autosuggestions-activation hook additionally
+provides `autosuggest-started`.

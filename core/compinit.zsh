@@ -225,41 +225,20 @@ zdot_compinit_post_full() {
 }
 
 # ============================================================================
-# Two-phase compinit: defer → flag → precmd
+# Compinit Run
 # ============================================================================
 #
-# The problem: compinit must run *after* all deferred plugins have been
-# sourced (so $fpath is fully populated), but compinit hangs when called
-# directly inside a zsh-defer / ZLE callback.
+# zdot_compinit_run is the single entry point for running compinit. It is
+# invoked once, from the completions module's deferred launch hook
+# (_completions_compinit), which is gated --requires-group completions so it
+# fires only after every completion producer has drained and $fpath is complete.
 #
-# Solution:
-#   Phase 1 – zdot_compinit_defer (called via zdot_defer from plugins.zsh,
-#              therefore guaranteed to run after all deferred plugin sources):
-#              Just sets _ZDOT_FPATH_READY=1.  Does NOT call compinit.
-#
-#   Phase 2 – zdot_ensure_compinit_during_precmd (precmd hook, normal shell
-#              context): checks _ZDOT_FPATH_READY; if set, calls
-#              zdot_compinit_run which runs compinit safely.  If not yet set
-#              (rare: first precmd fired before zsh-defer finished), skips and
-#              retries on the next precmd.
-
-# Phase 1: called from zsh-defer after all deferred plugin sources.
-# Sets the "fpath is ready" flag; never calls compinit directly.
-typeset -g _ZDOT_FPATH_READY=0
-
-zdot_compinit_defer() {
-    _ZDOT_FPATH_READY=1
-}
-
-# ============================================================================
-# Compinit Run (precmd)
-# ============================================================================
-#
-# zdot_compinit_run is the single entry point for running compinit.  It is
-# called from zdot_ensure_compinit_during_precmd, which is registered as a
-# precmd hook.  Running compinit from precmd (normal shell context) avoids the
-# fpath-scan hang that occurs when compinit is invoked inside a zsh-defer /
-# ZLE callback.
+# It runs directly in the deferred (zsh-defer/ZLE) context. The historical
+# concern that compinit hangs there does not reproduce on current zsh (verified):
+# the fpath scan completes synchronously. Running it directly — rather than via a
+# flag + precmd relay — keeps the whole compinit lifecycle in one place and makes
+# completion live at the first prompt. It is idempotent (guarded by
+# _ZDOT_COMPINIT_DONE).
 #
 # Fast path: when the compdump is fresh (_zdot_compdump_needs_refresh returns
 #   false) we call compinit -C to load cached completions without regenerating
@@ -277,7 +256,7 @@ zdot_compinit_run() {
     # Completions are not needed in non-interactive shells.
     zdot_interactive || return 0
 
-    # Guard against double-invocation (precmd hook fires on every prompt).
+    # Guard against double-invocation (idempotent).
     [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0
 
     _zdot_compdef_queue_init
@@ -342,33 +321,23 @@ zdot_compinit_run() {
 }
 
 # ============================================================================
-# Ensure Compinit During Precmd
+# Compinit fallback — the floor (finally group)
 # ============================================================================
-
-zdot_ensure_compinit_during_precmd() {
-    # Once compinit has run, deregister so we don't fire on every prompt.
-    if [[ -n "$_ZDOT_COMPINIT_DONE" ]]; then
-        add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
-        return 0
-    fi
-
-    # Phase 2 gate: wait until all deferred plugins have been sourced (fpath
-    # fully populated).  zdot_compinit_defer (called via zdot_defer in
-    # plugins.zsh after all deferred sources) sets this flag.  On the rare
-    # first precmd that fires before zsh-defer completes, skip and retry.
-    if (( ! _ZDOT_FPATH_READY )); then
-        return 0
-    fi
-
+#
+# Belt-and-braces: guarantees compinit runs even when no module drives it — e.g.
+# a config without the completions module, whose _completions_compinit is the
+# PRIMARY launch. Registered into the `finally` group, so it runs at the very end
+# of the deferred drain — after every producer, $fpath fully populated, still
+# within first-prompt idle. Idempotent (no-op if the primary already ran), and a
+# one-shot (finally fires once, so nothing to deregister).
+#
+# `finally` is the right dependency point: it means "after the drain has
+# drained", and it deliberately does NOT fire when a hook genuinely stalls — so a
+# real misconfiguration still surfaces as a stall error rather than being
+# silently papered over here. Lives in core so compinit depends on no module.
+_zdot_compinit_fallback() {
+    [[ -n "$_ZDOT_COMPINIT_DONE" ]] && return 0
     zdot_compinit_run
-    add-zsh-hook -d precmd zdot_ensure_compinit_during_precmd
 }
 
-zdot_enable_compinit_precmd() {
-    autoload -Uz add-zsh-hook
-    add-zsh-hook precmd zdot_ensure_compinit_during_precmd
-}
-
-zdot_register_hook zdot_enable_compinit_precmd interactive \
-    --requires plugins-cloned \
-    --provides compinit-precmd-ready
+zdot_register_hook _zdot_compinit_fallback interactive --group finally

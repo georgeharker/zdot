@@ -74,9 +74,31 @@ zdot_define_module autocomplete \
     --post-init-context interactive
 
 # ============================================================================
-# Compinit (deferred, after all deferred plugins)
+# Autosuggestions activation
 # ============================================================================
+#
+# In the deferred setup, zsh-autosuggestions' own `_zsh_autosuggest_start` precmd
+# hook never fires during the FIRST prompt — the zsh-defer drain runs after
+# prompt-1's precmd and itself fires no precmd — so `self-insert` et al. are not
+# wrapped until prompt 2 ("suggestions dead at first prompt"). We fix the TIMING
+# by firing _zsh_autosuggest_start ourselves, once, during the drain.
+#
+# Gated only on autosuggest-abbr-ready (i.e. autosuggest is loaded). Ordering
+# relative to the widget-redefiners (zsh-abbr, fzf-tab) is NOT required: a source
+# sweep confirmed every widget-wrapping plugin in this setup CALLS THROUGH to the
+# prior implementation, so the chain stays intact regardless of load/wrap order,
+# and autosuggest re-wraps on every precmd thereafter anyway. (If a future plugin
+# ever redefines a wrapped widget WITHOUT calling through, suggestions would die
+# on that widget until the next precmd — that's the plugin's bug to fix, or the
+# reason to reintroduce an explicit "after the widget-redefiners" ordering gate.)
+#
+# Autosuggest-specific, so it lives in THIS module; compinit is launched
+# separately from the completions module.
+_autocomplete_autosuggest_start() {
+    (( ${+functions[_zsh_autosuggest_start]} )) && _zsh_autosuggest_start
+}
 
-zdot_register_hook zdot_compinit_defer interactive \
-    --name compinit-defer --deferred \
-    --requires autosuggest-abbr-ready --provides compinit-done
+zdot_register_hook _autocomplete_autosuggest_start interactive \
+    --deferred \
+    --requires autosuggest-abbr-ready \
+    --provides autosuggest-started

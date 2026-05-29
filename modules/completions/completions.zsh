@@ -56,6 +56,29 @@ zdot_register_hook _completions_init interactive \
     --provides completions-paths-ready
 
 # Phase 2: Late live completions (after tools available)
+#
+# Member of the `completions` group: any hook that PRODUCES completion files or
+# adds to fpath should join this group (--group completions). The deferred
+# compinit-activate hook gates on --requires-group completions, so it runs only
+# after every producer has drained (full fpath) — but NOT behind unrelated slow
+# deferred hooks (e.g. nvm), which simply aren't members. Distinct from the
+# `completions-configure` group above, which gates pre-fpath contributions.
 zdot_register_hook _completions_finalize interactive \
+    --group completions \
     --requires completions-paths-ready autocomplete-post-configured rust-ready bun-ready uv-configured \
     --provides completions-ready
+
+# Phase 3: compinit — the single launch point for the completion system.
+#
+# Owned by THIS module (not autocompletion): compinit is a completion-system
+# primitive, so a user who doesn't load the autocompletion module must still get
+# it. Gated --requires-group completions, so it runs after every producer in the
+# `completions` group (members join with --group completions; see the group as
+# the composition seam). compinit runs directly in the deferred drain —
+# zdot_compinit_run is idempotent and does not hang in the zsh-defer/ZLE context.
+_completions_compinit() { zdot_compinit_run; }
+
+zdot_register_hook _completions_compinit interactive \
+    --deferred \
+    --requires-group completions \
+    --provides compinit-done
