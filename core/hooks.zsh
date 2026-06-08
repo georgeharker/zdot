@@ -719,8 +719,12 @@ zdot_build_execution_plan() {
     # _doo_adj, cycle guard) the defer-order loop above uses, so the Kahn
     # drain (real provided phase, or the `_defer_order_<A>` synthetic
     # bridge) unblocks B with no extra plumbing.
-    local _hid_b _at _hid_a _bridge _cc _pv _byname
-    local -a _after_targets _from_hids _ap
+    # Initialise on declare (not bare names): _hid_a/_hid_b/_cc already
+    # exist as function-locals from the defer-order pass above, and a
+    # bare `local <existing-name>` triggers typeset's *display* of the
+    # current value (printing `name=value`). Assigning suppresses that.
+    local _hid_b='' _at='' _hid_a='' _bridge='' _cc='' _pv='' _byname=''
+    local -a _after_targets=() _from_hids=() _ap=()
     for _hid_b in ${(k)in_degree}; do
         _after_targets=(${=_ZDOT_HOOK_AFTER[$_hid_b]})
         (( ${#_after_targets[@]} )) || continue
