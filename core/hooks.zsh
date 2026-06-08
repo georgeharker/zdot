@@ -12,6 +12,7 @@ typeset -gA _ZDOT_HOOK_CONTEXTS      # hook_id -> "interactive noninteractive ..
 typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
+typeset -gA _ZDOT_HOOK_AFTER         # hook_id -> "target1 target2 ..." (soft --after ordering; phase-or-hook-name, no-op if absent)
 typeset -gA _ZDOT_PHASE_PROVIDERS_BY_CONTEXT  # "context:phase" -> hook_id (context-aware lookup)
 typeset -gA _ZDOT_HOOK_REQUIRES_CONTEXTS # "hook_id:phase" -> "ctx1 ctx2 ..." (absent = all contexts)
 typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
@@ -105,7 +106,7 @@ zdot_allow_defer() {
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--after <target...>] [--after-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
 # Sets REPLY to the hook_id on success.
 # Contexts: interactive, noninteractive, login, nonlogin
 # --provides-tool <tool>  sugar for --provides tool:<tool>
@@ -177,6 +178,7 @@ zdot_register_hook() {
     local -a contexts
     local -a requires
     local -a provides
+    local -a after
     local optional=0
 
     # Parse arguments
@@ -192,6 +194,23 @@ zdot_register_hook() {
                 ;;
             --requires-tool)
                 requires+=("tool:$2")
+                shift 2
+                ;;
+            --after)
+                # Soft ordering target(s): run this hook after each, but
+                # ONLY if the target exists/is active in context. Unlike
+                # --requires, a missing target is a silent no-op (the hook
+                # still runs). Targets resolve as a phase first, else as a
+                # hook name (see the soft-edge injection in the planner).
+                shift
+                while [[ $# -gt 0 && $1 != --* ]]; do
+                    after+=($1)
+                    shift
+                done
+                ;;
+            --after-tool)
+                # Sugar: order after whoever --provides-tool <tool>, soft.
+                after+=("tool:$2")
                 shift 2
                 ;;
             --provides)
@@ -245,6 +264,7 @@ zdot_register_hook() {
     _ZDOT_HOOK_REQUIRES[$hook_id]="${requires[*]}"
     _ZDOT_HOOK_PROVIDES[$hook_id]="${provides[*]}"
     _ZDOT_HOOK_OPTIONAL[$hook_id]=$optional
+    _ZDOT_HOOK_AFTER[$hook_id]="${after[*]}"
     [[ $hook_deferred -eq 1 ]] && _ZDOT_DEFERRED_HOOKS+=($hook_id)
     [[ $hook_deferred -eq 1 && $hook_defer_noquiet -eq 1 ]] && _ZDOT_HOOK_DEFER_ARGS[$hook_id]="$hook_defer_args"
     if [[ ${#hook_groups[@]} -gt 0 ]]; then
@@ -675,6 +695,77 @@ zdot_build_execution_plan() {
         # Track in defer-order-only graph for future cycle checks
         _doo_adj[$_hid_a]+=" $_hid_b"
         edge_set[${_hid_a}:${_hid_b}]=1
+    done
+
+    # ── soft --after edge injection (declarative, ordering-only) ──
+    #
+    # `--after X` / `--after-tool T` on a hook B declare a SOFT ordering:
+    # run B after X (or after whoever --provides-tool T), but ONLY if that
+    # target exists and is active in this context. This is the soft
+    # counterpart to --requires / --requires-tool:
+    #   • --requires  absent → hard error
+    #   • --requires + --optional  absent → skip the whole hook
+    #   • --after  absent → silent no-op (B still runs, unordered)
+    # It differs from zdot_defer_order in two ways: it is declared ON the
+    # dependent hook (B names what it wants to follow), and a missing
+    # target is silent rather than warned — absence is the expected case.
+    #
+    # Each target resolves in two steps, tried in order:
+    #   1. as a phase (covers --after-tool T → tool:T, and bare phase
+    #      names): the edge runs from the phase's provider in context.
+    #   2. as a hook NAME (covers --after <hook>): the edge runs from
+    #      that hook directly.
+    # Injection reuses the exact machinery (bridge phase, edge_set,
+    # _doo_adj, cycle guard) the defer-order loop above uses, so the Kahn
+    # drain (real provided phase, or the `_defer_order_<A>` synthetic
+    # bridge) unblocks B with no extra plumbing.
+    local _hid_b _at _hid_a _bridge _cc _pv _byname
+    local -a _after_targets _from_hids _ap
+    for _hid_b in ${(k)in_degree}; do
+        _after_targets=(${=_ZDOT_HOOK_AFTER[$_hid_b]})
+        (( ${#_after_targets[@]} )) || continue
+        for _at in $_after_targets; do
+            # Resolve target → "from" hook(s). Phase-provider first.
+            _from_hids=()
+            for _cc in "${current_contexts[@]}"; do
+                _pv="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_cc}:${_at}]}"
+                [[ -n "$_pv" ]] && _from_hids+=("$_pv")
+            done
+            if (( ! ${#_from_hids[@]} )); then
+                # Not a provided phase — try as a hook name.
+                _byname="${_ZDOT_HOOK_BY_NAME[$_at]}"
+                [[ -n "$_byname" ]] && _from_hids+=("$_byname")
+            fi
+            # Soft: target absent entirely → silent no-op (no warning).
+            for _hid_a in ${(u)_from_hids}; do
+                # Target known but inactive in this context → silent skip.
+                [[ -z "${in_degree[$_hid_a]+x}" ]] && continue
+                [[ "$_hid_a" == "$_hid_b" ]] && continue
+                # Contradiction: B→A already a real edge (would deadlock).
+                if [[ -n "${edge_set[${_hid_b}:${_hid_a}]}" ]]; then
+                    _ZDOT_DEFER_ORDER_WARNINGS+=("--after: '${_ZDOT_HOOK_NAMES[$_hid_b]}' after '$_at' CONTRADICTS an existing dependency; skipping")
+                    continue
+                fi
+                # Redundant: A→B already present → nothing to do.
+                [[ -n "${edge_set[${_hid_a}:${_hid_b}]}" ]] && continue
+                # Cycle in the synthetic-edge subgraph.
+                if _zdot_doo_has_path "$_hid_b" "$_hid_a"; then
+                    _ZDOT_DEFER_ORDER_WARNINGS+=("--after: '${_ZDOT_HOOK_NAMES[$_hid_b]}' after '$_at' would create a cycle; skipping")
+                    continue
+                fi
+                # Inject A→B through A's bridge phase.
+                _ap=(${=_ZDOT_HOOK_PROVIDES[$_hid_a]})
+                if (( ${#_ap[@]} )); then
+                    _bridge="${_ap[1]}"
+                else
+                    _bridge="_defer_order_${_hid_a}"
+                fi
+                adjacency_list[$_bridge]+=" $_hid_b"
+                (( in_degree[$_hid_b]++ ))
+                _doo_adj[$_hid_a]+=" $_hid_b"
+                edge_set[${_hid_a}:${_hid_b}]=1
+            done
+        done
     done
 
     # Emit accumulated warnings

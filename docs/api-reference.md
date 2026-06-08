@@ -87,6 +87,8 @@ zdot_register_hook <function-name> <context...> [flags...]
 |------|----------|-------------|
 | `--requires` | `<phase...>` | Phases that must complete before this hook runs |
 | `--requires-tool` | `<tool>` | Sugar for `--requires tool:<tool>` |
+| `--after` | `<target...>` | **Soft** ordering: run after each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. The declarative, soft counterpart to `--requires`; the per-hook counterpart to `zdot_defer_order`. |
+| `--after-tool` | `<tool>` | Sugar for `--after tool:<tool>` — soft-order after whoever `--provides-tool <tool>`, if any. |
 | `--provides` | `<phase>` | Phase token this hook provides on completion |
 | `--provides-tool` | `<tool>` | Sugar for `--provides tool:<tool>` |
 | `--optional` | | Hook is skipped (not errored) if a required phase has no provider |
@@ -319,6 +321,16 @@ Generates a full ordering chain: A before B, A before C, B before C, etc.
 # Ensure fzf loads before shell-extras, which loads before autocompletion
 zdot_defer_order fzf shell-extras autocompletion
 ```
+
+**`zdot_defer_order` vs `--after`.** Both inject the same ordering-only
+synthetic edge and share the same contradiction/cycle safety. Reach for
+`zdot_defer_order` to order two *otherwise-unrelated* hooks by name from the
+outside; a missing endpoint **warns** (it's treated as a probable typo). Reach
+for [`--after`](#zdot_register_hook) when a hook itself declares "run me after
+this capability, if present" — it resolves a phase/tool/hook target, a missing
+target is a **silent no-op**, and the constraint lives on the dependent hook.
+In short: `--after` is the declarative, soft, dependent-side counterpart;
+`zdot_defer_order` is the imperative, warn-on-absence, third-party one.
 
 ---
 

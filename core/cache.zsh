@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="20"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="21"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -280,6 +280,7 @@ zdot_cache_save_plan() {
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
             local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+            local after="${_ZDOT_HOOK_AFTER[$hook_id]}"
 
             echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
@@ -295,6 +296,10 @@ zdot_cache_save_plan() {
             done
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
+            # Soft --after targets. Resolved into the plan order at build
+            # time (already baked into _ZDOT_EXECUTION_PLAN); serialised
+            # only so introspection (zdot_hooks_list) stays complete.
+            [[ -n "$after" ]] && echo "_ZDOT_HOOK_AFTER[$hook_id]='$after'"
 
             if [[ -n "$provides" ]]; then
                 # Serialize context-aware providers
@@ -334,6 +339,7 @@ zdot_cache_save_plan() {
             local requires="${_ZDOT_HOOK_REQUIRES[$hook_id]}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]}"
             local optional="${_ZDOT_HOOK_OPTIONAL[$hook_id]}"
+            local after="${_ZDOT_HOOK_AFTER[$hook_id]}"
 
             echo "_ZDOT_HOOKS[$hook_id]='$func_name'"
             echo "_ZDOT_HOOK_NAMES[$hook_id]='$name'"
@@ -348,6 +354,7 @@ zdot_cache_save_plan() {
             done
             echo "_ZDOT_HOOK_PROVIDES[$hook_id]='$provides'"
             echo "_ZDOT_HOOK_OPTIONAL[$hook_id]=$optional"
+            [[ -n "$after" ]] && echo "_ZDOT_HOOK_AFTER[$hook_id]='$after'"
         done
 
         echo ""

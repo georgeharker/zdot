@@ -87,5 +87,14 @@ _history_init() {
     fi
 }
 
-# Register hook - requires XDG paths for history directory
-zdot_simple_hook history --requires-group history-configure
+# Register hook - requires XDG paths for history directory.
+#
+# --after-tool fzf: the contextual-history plugin (loaded inside
+# _history_init) probes `command -v fzf` at source time to decide
+# whether to wire up its fzf ^R integration. fzf's PATH entry is added
+# by the fzf module's load phase (which --provides-tool fzf), so we
+# must source history AFTER that. This is a SOFT dependency: on a
+# machine with no fzf module the ordering is simply dropped and history
+# still loads normally (the plugin also has a runtime fallback, but
+# ordering it correctly avoids relying on that).
+zdot_simple_hook history --requires-group history-configure --after-tool fzf

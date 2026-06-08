@@ -203,13 +203,37 @@ zdot_simple_hook brew --provides brew-ready \
     --provides-tool gh --provides-tool tmux --provides-tool tailscale
 ```
 
-**Optional dependency:**
+**Optional dependency** (skip the hook if the dependency is missing):
 
 ```zsh
 _uv_init() { ... }
 
 zdot_simple_hook uv --requires secrets-loaded --optional
 ```
+
+**Soft ordering** (run *after* something if it exists, else proceed unordered):
+
+```zsh
+# Run after whoever provides the `fzf` tool, but only if some module does.
+# On a machine without fzf the ordering is dropped and this hook still runs.
+zdot_simple_hook history --after-tool fzf
+```
+
+`--after <target>` / `--after-tool <tool>` is the **soft** counterpart to
+`--requires` / `--requires-tool`. Compare the three absence behaviours:
+
+| | target/dep missing |
+|---|---|
+| `--requires-tool fzf` | hard error |
+| `--requires-tool fzf` + `--optional` | the whole hook is skipped |
+| `--after-tool fzf` | silent no-op — the hook still runs, just unordered |
+
+Each `--after` target resolves as a phase first (so `--after-tool fzf` →
+`tool:fzf` → whoever `--provides-tool fzf`), then as a hook name (so
+`--after some-hook` orders after that hook directly). It is the declarative,
+per-hook form of [`zdot_defer_order`](api-reference.md#zdot_defer_order); use
+`--after` when the hook itself knows what it wants to follow, and
+`zdot_defer_order` to order unrelated hooks from the outside.
 
 **Multiple requires (replaces the default):**
 
