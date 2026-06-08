@@ -25,8 +25,11 @@ _env_init() {
     export BAT_THEME="tokyonight_night"
 
     # Terminal color configuration
-    if [[ ${TERM} == "xterm-256color" ]]; then
-        export COLORTERM=256
+    # Modern terminals (Ptyxis/VTE, Ghostty, etc.) advertise truecolor via
+    # COLORTERM even though TERM stays xterm-256color. Respect that; only set a
+    # fallback when nothing has — never downgrade an existing truecolor value.
+    if [[ -z ${COLORTERM} ]]; then
+        export COLORTERM=truecolor
     fi
 
     # Eza
