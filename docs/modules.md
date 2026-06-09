@@ -200,7 +200,7 @@ apt-installed tools are present.
 
 Bootstraps the plugin management system and registers the bundle-aware
 background plugin-update reminder. Must be loaded before any module that
-uses `--auto-bundle` or `--load-plugins`.
+uses `--auto-bundle-deps` or `--load-plugins`.
 
 Bundle-specific modules (e.g. `omz`) live separately; load those alongside
 `plugins` to opt in.
@@ -389,7 +389,7 @@ already inside a multiplexer or `~/.notmux` exists.
 | | |
 |---|---|
 | **Provides** | — |
-| **Requires** | (via auto-bundle) |
+| **Requires** | (via auto-bundle-deps) |
 | **Context** | interactive only |
 | **zstyle** | none |
 | **Tools** | `tmux` |
@@ -405,7 +405,7 @@ disabled in non-interactive shells and inside Neovim.
 | | |
 |---|---|
 | **Provides** | tool `nvm` |
-| **Requires** | (via auto-bundle) |
+| **Requires** | (via auto-bundle-deps) |
 | **Context** | interactive + noninteractive |
 
 **zstyle options:**

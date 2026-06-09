@@ -202,7 +202,7 @@ Registers up to five lifecycle hooks from a single call:
 | `--provides-tool` | `<tool>` | Tool provided by the load phase (may repeat) |
 | `--requires-tool` | `<tool>` | Tool required by the load phase (may repeat) |
 | `--requires` | `<phase...>` | Extra requirements for the load phase |
-| `--auto-bundle` | | Auto-detect bundle group/requires from plugin specs |
+| `--auto-bundle-deps` | | Match each `--load-plugins` spec to a registered plugin-framework bundle handler and auto-wire the generated load hook. Per distinct handler found, injects `--group <handler>-plugins` and (if the handler declared one) `--requires <handler-provided-phase>`; always adds `--requires plugins-cloned`. No-op for specs no handler claims; ignored without `--load-plugins`. See [Module Guide → Bundle integration](module-guide.md#bundle-framework-integration-omz-prezto). |
 | `--group` | `<name>` | Explicit group for the load phase (may repeat) |
 | `--auto-configure-group` | | Expose the `<basename>-configure` extension group. The `--configure` fn (or `--load` fn, if no configure) becomes the CONSUMER (`--requires-group`), running after all user group hooks. Requires at least one of `--configure` / `--load`. |
 | `--configure-context` | `<ctx...>` | Override configure phase context |

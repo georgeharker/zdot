@@ -315,7 +315,9 @@ zdot_module_list() {
 #   --before <target...>          Soft ordering: run load phase before each
 #                                 target (phase or hook name), no-op if absent
 #   --before-tool <tool>          Soft ordering before whoever provides <tool>
-#   --auto-bundle                 Auto-detect bundle group/requires from plugin specs
+#   --auto-bundle-deps            Match --load-plugins specs to registered bundle
+#                                 handlers and auto-wire the load hook's group +
+#                                 requires edges
 #   --group <name>                Explicit group for the load phase
 #   --auto-configure-group        Expose the <basename>-configure extension
 #                                 group. The --configure fn (or the load fn,
@@ -398,7 +400,7 @@ zdot_define_module() {
                 ;;
             --before-tool)
                 before_targets+=("tool:$2"); shift 2 ;;
-            --auto-bundle)
+            --auto-bundle-deps)
                 auto_bundle=1; shift ;;
             --auto-configure-group)
                 auto_configure_group=1; shift ;;

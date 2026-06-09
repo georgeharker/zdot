@@ -300,7 +300,7 @@ Each takes a function name (the function must be defined before calling
 | `--requires-tool <tool>` | Tool required by the load phase |
 | `--requires <phases...>` | Extra requires for the load phase |
 | `--group <name>` | Group for the load phase |
-| `--auto-bundle` | Auto-detect bundle groups from plugin specs |
+| `--auto-bundle-deps` | Match `--load-plugins` specs to registered bundle handlers and auto-wire the load hook's group + requires edges. See [Bundle-framework integration](#bundle-framework-integration-omz-prezto). |
 | `--auto-configure-group` | Expose the `<basename>-configure` extension group. The `--configure` fn (or `--load` fn, if no configure) becomes the group consumer via `--requires-group <basename>-configure` — it runs after all user hooks. See [User Extension Points](#user-extension-points). |
 | `--variant <name>` | Only register phases when this variant is active (repeatable) |
 | `--variant-exclude <name>` | Skip all phases when this variant is active |
@@ -315,11 +315,14 @@ Each takes a function name (the function must be defined before calling
 
 zdot_define_module tmux \
     --load-plugins omz:plugins/tmux \
-    --auto-bundle
+    --auto-bundle-deps
 ```
 
-`--auto-bundle` detects the `omz:` prefix and injects `--group omz-plugins`
-and `--requires plugins-cloned omz-bundle-initialized`.
+`--auto-bundle-deps` matches each spec to a registered bundle handler and wires the
+generated load hook accordingly — here the `omz:` spec resolves to the `omz`
+handler, so it injects `--group omz-plugins`, `--requires omz-bundle-initialized`
+(the phase `omz` publishes), and `--requires plugins-cloned`. It is not OMZ-specific;
+see [Bundle-framework integration](#bundle-framework-integration-omz-prezto).
 
 **Full lifecycle with explicit functions:**
 
@@ -342,7 +345,7 @@ _nvm_noninteractive_init() {
 zdot_define_module node \
     --configure _node_configure \
     --load-plugins omz:plugins/npm omz:plugins/nvm \
-    --auto-bundle \
+    --auto-bundle-deps \
     --provides-tool nvm \
     --interactive-init _nvm_interactive_init \
     --noninteractive-init _nvm_noninteractive_init
@@ -633,7 +636,7 @@ _node_configure() {
 zdot_define_module node \
     --configure _node_configure \
     --load-plugins omz:plugins/nvm \
-    --auto-bundle \
+    --auto-bundle-deps \
     --auto-configure-group
 ```
 
@@ -906,25 +909,43 @@ zdot_use_plugin zsh-users/zsh-autosuggestions defer \
 Deferred plugins are installed eagerly (cloned) but loaded after the
 execution plan completes. Use `--requires` to sequence them.
 
-### OMZ Plugin Integration
+### Bundle-framework integration (OMZ, Prezto)
 
-For modules that load Oh-My-Zsh plugins:
+A **bundle** is a plugin-framework handler registered with `zdot_register_bundle
+<name> [--init-fn <fn>] [--provides <phase>]`. Each handler owns a set of plugin
+specs (decided by its `zdot_bundle_<name>_match` predicate) and may publish a
+phase token once its runtime is initialized. Two ship today:
+
+| Handler | Claims specs | Init phase (`--provides`) |
+|---------|--------------|---------------------------|
+| `omz` | `omz:*` | `omz-bundle-initialized` |
+| `pz` (Prezto) | `pz:*` | *(none)* |
+
+**`--auto-bundle-deps`** (only meaningful with `--load-plugins`) inspects your specs,
+asks the registry which handler owns each, and for every **distinct** handler it
+finds it wires the generated load hook so framework plugins can't load before the
+framework itself:
+
+- `--group <handler>-plugins` — joins that framework's plugin barrier.
+- `--requires <handler-provided-phase>` — **only if** the handler declared one.
+- `--requires plugins-cloned` — always added (once), so the loader waits for clones.
+
+So the injected edges depend on the handler:
 
 ```zsh
-# Declare for clone manifest
-zdot_use_plugin omz:plugins/fzf
+# OMZ: handler 'omz' publishes omz-bundle-initialized →
+#   --group omz-plugins --requires omz-bundle-initialized --requires plugins-cloned
+zdot_define_module fzf --load-plugins omz:plugins/fzf --auto-bundle-deps
 
-# Use zdot_define_module with --auto-bundle for automatic OMZ wiring
-zdot_define_module fzf \
-    --load-plugins omz:plugins/fzf \
-    --auto-bundle
+# Prezto: handler 'pz' declares no phase →
+#   --group pz-plugins --requires plugins-cloned   (no <bundle>-initialized edge)
+zdot_define_module syntax --load-plugins pz:prompt --auto-bundle-deps
 ```
 
-`--auto-bundle` detects `omz:` prefixes and injects:
-- `--group omz-plugins`
-- `--requires plugins-cloned omz-bundle-initialized`
-
-For explicit load functions, specify these manually:
+Specs no registered (and enabled) handler claims are left alone — only the
+`plugins-cloned` edge is added. `--auto-bundle-deps` is ignored entirely with `--load`
+(it lives in the `--load-plugins` path); with an explicit load function, wire the
+edges yourself:
 
 ```zsh
 zdot_define_module fzf \

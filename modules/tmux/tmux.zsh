@@ -23,5 +23,5 @@ zdot_define_module tmux \
     --configure _tmux_configure \
     --load-plugins omz:plugins/tmux \
     --context interactive \
-    --auto-bundle \
+    --auto-bundle-deps \
     --auto-configure-group
