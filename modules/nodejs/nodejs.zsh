@@ -19,7 +19,7 @@ _node_configure() {
     #   zstyle ':zdot:nodejs' lazy-cmd node1 node2 ...
     local -a lazy_cmds
     zstyle -a ':zdot:nodejs' lazy-cmd lazy_cmds \
-        || lazy_cmds=(opencode mcp-hub copilot prettierd claude-code)
+        || lazy_cmds=(opencode copilot prettierd claude)
     zstyle ':omz:plugins:nvm' lazy-cmd "${lazy_cmds[@]}"
 
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
