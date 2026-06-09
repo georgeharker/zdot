@@ -666,7 +666,7 @@ zdot_register_hook _cleanup interactive --group finally
 
 **Use Case**: Cleanup tasks, post-init bookkeeping that should run after all other setup completes
 
-See the [Module Guide → Reserved groups](module-guide.md#reserved-groups-pre-defer-and-finally) for the full design and the companion `pre-defer` group.
+See the [Module Guide → Predefined groups](module-guide.md#predefined-groups-bootstrap-pre-defer-and-finally) for the full design and the companion `pre-defer` group.
 
 ## Context System
 

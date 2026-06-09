@@ -89,13 +89,15 @@ zdot_register_hook <function-name> <context...> [flags...]
 | `--requires-tool` | `<tool>` | Sugar for `--requires tool:<tool>` |
 | `--after` | `<target...>` | **Soft** ordering: run after each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. The declarative, soft counterpart to `--requires`; the per-hook counterpart to `zdot_defer_order`. |
 | `--after-tool` | `<tool>` | Sugar for `--after tool:<tool>` — soft-order after whoever `--provides-tool <tool>`, if any. |
+| `--before` | `<target...>` | **Soft** ordering mirror of `--after`: run *before* each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. Lets a hook insert itself ahead of another without editing it. |
+| `--before-tool` | `<tool>` | Sugar for `--before tool:<tool>` — soft-order before whoever `--provides-tool <tool>`, if any. |
 | `--provides` | `<phase>` | Phase token this hook provides on completion |
 | `--provides-tool` | `<tool>` | Sugar for `--provides tool:<tool>` |
 | `--optional` | | Hook is skipped (not errored) if a required phase has no provider |
 | `--name` | `<name>` | Human-readable label (used by `zdot_defer_order` and introspection) |
 | `--deferred` | | Mark for post-prompt deferred execution |
 | `--deferred-prompt` | | Like `--deferred` but refreshes the prompt afterward |
-| `--group` | `<name>` | Add to a named group (may repeat). Two names are reserved: `pre-defer` (runs as the last eager step, before the deferred phase) and `finally` (runs last of all, after the deferred drain). See the [Module Guide](module-guide.md#reserved-groups-pre-defer-and-finally). |
+| `--group` | `<name>` | Add to a named group (may repeat). Three names are predefined: `bootstrap` (runs first), `pre-defer` (runs as the last eager step, before the deferred phase), and `finally` (runs last of all, after the deferred drain). See the [Module Guide](module-guide.md#predefined-groups-bootstrap-pre-defer-and-finally). |
 | `--provides-group` | `<name>` | Provide into a named group |
 | `--requires-group` | `<name>` | Require all members of the named group to complete |
 | `--variant` | `<name>` | Only run when variant matches (may repeat; empty = all) |

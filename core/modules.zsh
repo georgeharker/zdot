@@ -309,6 +309,12 @@ zdot_module_list() {
 #   --provides-tool <tool>        Tool provided by the load phase
 #   --requires-tool <tool>        Tool required by the load phase
 #   --requires <phase...>         Extra requirements for the load phase
+#   --after <target...>           Soft ordering: run load phase after each
+#                                 target (phase or hook name), no-op if absent
+#   --after-tool <tool>           Soft ordering after whoever provides <tool>
+#   --before <target...>          Soft ordering: run load phase before each
+#                                 target (phase or hook name), no-op if absent
+#   --before-tool <tool>          Soft ordering before whoever provides <tool>
 #   --auto-bundle                 Auto-detect bundle group/requires from plugin specs
 #   --group <name>                Explicit group for the load phase
 #   --auto-configure-group        Expose the <basename>-configure extension
@@ -339,6 +345,7 @@ zdot_define_module() {
     local -a load_plugins=()
     local -a provides_tools=() requires_tools=()
     local -a extra_requires=() extra_groups=()
+    local -a after_targets=() before_targets=()
     local -a configure_contexts=() load_contexts=()
     local -a post_init_requires=() post_init_contexts=()
     local auto_bundle=0
@@ -375,6 +382,22 @@ zdot_define_module() {
                     extra_requires+=("$1"); shift
                 done
                 ;;
+            --after)
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do
+                    after_targets+=("$1"); shift
+                done
+                ;;
+            --after-tool)
+                after_targets+=("tool:$2"); shift 2 ;;
+            --before)
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do
+                    before_targets+=("$1"); shift
+                done
+                ;;
+            --before-tool)
+                before_targets+=("tool:$2"); shift 2 ;;
             --auto-bundle)
                 auto_bundle=1; shift ;;
             --auto-configure-group)
@@ -506,6 +529,15 @@ zdot_define_module() {
     done
     for g in "${extra_groups[@]}"; do
         load_hook_args+=(--group "$g")
+    done
+
+    # Soft ordering targets (--after / --before) apply to the load phase.
+    local _ot
+    for _ot in "${after_targets[@]}"; do
+        load_hook_args+=(--after "$_ot")
+    done
+    for _ot in "${before_targets[@]}"; do
+        load_hook_args+=(--before "$_ot")
     done
 
     # Resolve load context: --load-context overrides --context

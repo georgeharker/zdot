@@ -235,6 +235,21 @@ per-hook form of [`zdot_defer_order`](api-reference.md#zdot_defer_order); use
 `--after` when the hook itself knows what it wants to follow, and
 `zdot_defer_order` to order unrelated hooks from the outside.
 
+`--before <target>` / `--before-tool <tool>` is the exact mirror — same soft
+"no-op if absent" semantics and the same phase-then-name resolution, but it
+orders the hook *ahead* of the target. Use it to insert a hook in front of one
+you can't (or don't want to) edit:
+
+```zsh
+# Run before the prompt module loads, but only if it's present.
+zdot_simple_hook my_path_tweak --before prompt-load
+```
+
+Both `--after` and `--before` work on `zdot_simple_hook`, `zdot_register_hook`,
+and `zdot_define_module` (where they apply to the module's load phase). A hook
+may combine them — `--after a --before b` runs it after `a` and before `b`,
+each independently dropped if absent.
+
 **Multiple requires (replaces the default):**
 
 ```zsh
@@ -465,28 +480,53 @@ zdot_register_hook _omz_configure_completion interactive noninteractive \
 Group hooks participate in barrier synchronization. All members of a group
 must complete before anything that `--requires-group <name>` can run.
 
-### Reserved groups: `pre-defer` and `finally`
+### Predefined groups: `bootstrap`, `pre-defer`, and `finally`
 
-Two group names are reserved by the scheduler. They use the **same begin/member/end
-barrier synthesis as every other group** — so intra-group `--requires` are
-honoured by the topological sort and members appear at their true position in
-introspection. What's special is only how their begin barrier is ordered after
-everything else:
+Three group names are predefined by the scheduler. They use the **same
+begin/member/end barrier synthesis as every other group** — so intra-group
+`--requires` are honoured by the topological sort and members appear at their
+true position in introspection. What's special is only *where* each group's
+begin barrier is ordered: `bootstrap` first, `pre-defer` last among eager,
+`finally` last of all.
 
 | Group | Runs | Use for |
 |-------|------|---------|
+| `bootstrap` | **First** — before any other per-machine setup. Closes by providing `bootstrap-ready` once every member has run. See [Foundation phases](#foundation-phases-xdg-configured-and-bootstrap-ready). | Early per-machine setup that everything else depends on (XDG dirs, `~/.zshenv_local`). |
 | `pre-defer` | The final **eager** step — after every other eager hook, just before the deferred phase begins (and, interactively, the first prompt). | Last-chance setup that must be in place before deferred work / on the very first prompt. |
 | `finally` | Dead last — after every eager *and* deferred hook. In noninteractive shells the deferred drain is synchronous, so it still runs. | Teardown/cleanup that must outlast all other work (e.g. `xdg`'s `_xdg_cleanup` unsetting helper functions). |
 
-```zsh
-# Runs at the end of the eager pass, before deferred work:
-zdot_register_hook _my_pre_defer interactive --group pre-defer
+Add a hook to a group with `--group <name>`. Within a group, order members with
+`--provides` / `--requires` — **registration order is irrelevant**; `b` runs
+after `a` below even though it registers first. The same idiom applies to all
+three groups:
 
-# Runs dead last, after deferred work:
-zdot_register_hook _my_teardown interactive noninteractive --group finally
+```zsh
+# bootstrap — runs first, before bootstrap-ready is provided:
+_my_bootstrap_a() { ... }
+zdot_register_hook _my_bootstrap_a interactive noninteractive \
+    --group bootstrap --provides my-bootstrap-a-done
+_my_bootstrap_b() { ... }
+zdot_register_hook _my_bootstrap_b interactive noninteractive \
+    --group bootstrap --requires my-bootstrap-a-done
+
+# pre-defer — runs at the end of the eager pass, before deferred work:
+_my_pre_defer_a() { ... }
+zdot_register_hook _my_pre_defer_a interactive noninteractive \
+    --group pre-defer --provides my-pre-defer-a-done
+_my_pre_defer_b() { ... }
+zdot_register_hook _my_pre_defer_b interactive noninteractive \
+    --group pre-defer --requires my-pre-defer-a-done
+
+# finally — runs dead last, after the deferred drain:
+_my_finally_a() { ... }
+zdot_register_hook _my_finally_a interactive noninteractive \
+    --group finally --provides my-finally-a-done
+_my_finally_b() { ... }
+zdot_register_hook _my_finally_b interactive noninteractive \
+    --group finally --requires my-finally-a-done
 ```
 
-How each begin barrier is pushed last — and why the two differ:
+How the `pre-defer` and `finally` begin barriers are pushed last — and why the two differ:
 
 - **`pre-defer`** must stay **eager**. Its begin barrier is ordered after every
   other eager hook with **synthetic Kahn-graph edges only** (via each
