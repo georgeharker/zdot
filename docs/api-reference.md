@@ -1282,6 +1282,54 @@ zdot_zstyle_default ':zsh-ai:scratch'  keybind  '^Xa'
 zdot_zstyle_default -e ':completion:*' hosts    'reply=($myhosts)'
 ```
 
+> **Note on `-e`:** this is zstyle's *evaluated*-style flag, forwarded to the
+> underlying `zstyle` set — the default value is shell code re-run on each
+> lookup (populating `reply`), not a literal. It is unrelated to the presence
+> check, which uses `-g`. There is no "exists vs blank" flag: any prior set
+> (even to empty) counts as present, so an explicit empty user value still wins.
+
+---
+
+### `zdot_zstyle_get`
+
+Seed a backstop default (if unset) **and** read the style into a variable in one
+call — the common [`zdot_zstyle_default`](#zdot_zstyle_default) + `zstyle -s/-a/-b`
+two-step.
+
+```zsh
+zdot_zstyle_get [-s|-a|-b] [-e] <context> <style> <var> [<default>...]
+```
+
+The retrieval flag selects how the stored value is interpreted (zstyle styles
+have no type — the reader decides):
+
+| flag | reads as | into `<var>` |
+|------|----------|--------------|
+| `-s` | scalar (first value) — **default** | string |
+| `-a` | array (all values) | array |
+| `-b` | boolean (yes/no) | string; **return code** reflects truthiness |
+
+Pass `-e` to mark the default as evaluated, exactly as with `zdot_zstyle_default`.
+Values after `<var>` are the default(s) applied when the style is unset — pass
+several for `-a`, or `yes`/`no` for `-b`. The return code is that of the
+underlying read (found-or-not for `-s`/`-a`, true/false for `-b`), so `-b`
+composes directly in a conditional.
+
+**Example:**
+
+```zsh
+# scalar (default mode) — replaces the two-line default+read pattern
+zdot_zstyle_get    ':zdot:update-nag' plugin  spec 'georgeharker/zsh-pkg-update-nag'
+
+# array
+zdot_zstyle_get -a ':my:ctx'          paths   dirs /a /b /c
+
+# boolean, used as a conditional
+if zdot_zstyle_get -b ':zdot:foo' enabled is_on yes; then
+    # is_on == "yes" and the branch is taken
+fi
+```
+
 ---
 
 ### `zdot_is_newer_or_missing`

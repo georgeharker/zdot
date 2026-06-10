@@ -61,6 +61,41 @@ zdot_zstyle_default() {
     zstyle "${_setopts[@]}" "$ctx" "$style" "$@"
 }
 
+# Set a backstop default (if unset) and read the style into a variable, in one
+# call — the common two-step pattern of zdot_zstyle_default followed by a
+# `zstyle -s/-a/-b` read.
+#
+# The retrieval mode selects how the stored value is interpreted (zstyle has no
+# per-style type — the reader decides):
+#   -s  scalar: read first value into <var>            (default)
+#   -a  array:  read all values into array <var>
+#   -b  boolean: read yes/no into <var>; return reflects truthiness
+# Pass -e to mark the default as evaluated (re-run on each lookup), exactly as
+# with zdot_zstyle_default.
+#
+# Any values after <var> are the default(s) set when the style is unset; for -a
+# pass multiple, for -b pass yes/no. Return code is that of the underlying read
+# (0/found for -s/-a, true/false for -b), so -b composes in conditionals.
+#
+# Usage: zdot_zstyle_get [-s|-a|-b] [-e] <context> <style> <var> [<default>...]
+#   zdot_zstyle_get    ':zdot:update-nag' plugin spec 'georgeharker/zsh-pkg-update-nag'
+#   zdot_zstyle_get -a ':my:ctx'          paths  dirs /a /b /c
+#   if zdot_zstyle_get -b ':zdot:foo' enabled on yes; then ...; fi
+zdot_zstyle_get() {
+    local -a _setopts
+    local _mode=-s
+    while [[ "$1" == -[esab] ]]; do
+        case "$1" in
+            -e)          _setopts=(-e) ;;
+            -s|-a|-b)    _mode="$1" ;;
+        esac
+        shift
+    done
+    local ctx="$1" style="$2" var="$3"; shift 3
+    (( $# )) && zdot_zstyle_default "${_setopts[@]}" "$ctx" "$style" "$@"
+    zstyle "$_mode" "$ctx" "$style" "$var"
+}
+
 # Source a file relative to the calling module
 # Usage: zdot_module_source <relative-path>
 zdot_module_source() {
