@@ -19,7 +19,7 @@
 # Other configuration (e.g. ZSH_PKG_UPDATE_NAG_* env vars) can be set from
 # hooks attached to the update-nag-configure group.
 
-typeset -g _update_nag_plugin_spec='madisonrickert/zsh-pkg-update-nag'
+typeset -g _update_nag_plugin_spec='georgeharker/zsh-pkg-update-nag'
 zstyle -s ':zdot:update-nag' plugin _update_nag_plugin_spec
 
 zdot_use_plugin "${_update_nag_plugin_spec}"
