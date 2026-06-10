@@ -39,6 +39,7 @@ _omz_prompt_init() {
 
 zdot_register_hook _omz_prompt_init interactive \
     --name omz-prompt \
+    --deferred-prompt \
     --requires bootstrap-ready \
     --requires-group omz-prompt-configure \
     --provides prompt-ready \
