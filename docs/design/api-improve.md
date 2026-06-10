@@ -1,3 +1,9 @@
+> **Note (2026-06-09):** The `--auto-bundle` flag discussed throughout this
+> journal was later renamed to `--auto-bundle-deps` (the name better reflects
+> that it wires the bundle's dependency edges — group + requires — rather than
+> creating a bundle). No backward-compatible alias was kept. References to
+> `--auto-bundle` below are preserved as the historical record.
+
 ## Me
 
 > Context:
