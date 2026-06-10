@@ -27,6 +27,7 @@ _omp_prompt_init() {
 
 zdot_register_hook _omp_prompt_init interactive \
     --name omp-prompt \
+    --deferred-prompt \
     --requires bootstrap-ready \
     --requires-group omp-prompt-configure \
     --requires-tool oh-my-posh \
