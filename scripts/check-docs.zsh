@@ -186,57 +186,6 @@ if [[ -f _quarto.yml ]]; then
     done
 fi
 
-# ── Pass 2: destinations in the content map ──────────────────────────────
-local map=docs/restructure-content-map.md
-if [[ -f "$map" ]]; then
-    links=( ${(f)"$(grep -oE '`[^`]+\.md(#[A-Za-z0-9_-]+)?`' "$map" 2>/dev/null)"} )  # shuck: ignore=C005  # literal backticks are the delimiters being matched
-    for l in $links; do
-        t="${l//\`/}"
-        check_ref "$map" "$t"
-    done
-fi
-
-# ── Pass 3: coverage of pre-restructure sections ──────────────────────────
-# Compares against the PRE-restructure docs (the main branch). Retire this
-# pass together with docs/restructure-content-map.md once the restructure
-# is reviewed and merged.
-# check_coverage <git-rev> <path> <max-heading-depth>
-check_coverage() {
-    local gitrev="$1" gitpath="$2"
-    local -i maxdepth="$3"
-    local content line text hashes
-    local -i in_code=0
-    content="$(git show "${gitrev}:${gitpath}" 2>/dev/null)" || return 0
-    local mapnorm="$(< $map)"
-    mapnorm="${mapnorm//\`/}"
-    while IFS= read -r line; do
-        if [[ "$line" == '```'* ]]; then
-            (( in_code = ! in_code ))
-            continue
-        fi
-        (( in_code )) && continue
-        [[ "$line" == ('#'##' '*) ]] || continue
-        hashes="${line%% *}"
-        (( ${#hashes} >= 2 )) || continue   # h1 is the doc title, not a section
-        (( ${#hashes} <= maxdepth )) || continue
-        text="${line##\### }"
-        text="${text//\`/}"
-        text="${text%% \(*}"         # drop trailing parenthetical
-        text="${text//[[:space:]]##/ }"
-        [[ "$text" == "Table of Contents" ]] && continue
-        [[ ${#text} -le 3 ]] && continue   # too short to match meaningfully
-        if [[ "$mapnorm" != *"$text"* ]]; then
-            fail "content-map: section '$text' of HEAD:$gitpath is unaccounted for"
-        fi
-    done <<< "$content"
-}
-
-if [[ -f "$map" ]] && git rev-parse main >/dev/null 2>&1; then
-    check_coverage main README.md 3
-    check_coverage main docs/plugins.md 2
-    check_coverage main docs/caching-implementation.md 2
-fi
-
 # ── Result ────────────────────────────────────────────────────────────────
 if (( errors )); then
     print -r -- "check-docs: $errors failure(s)"

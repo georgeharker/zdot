@@ -24,6 +24,17 @@ and its components (zdot, dotfiler-self):
   repo records; **Round 2 (self-directed)** advances each component from its
   own upstream, gated by `release-channel`.
 
+Two properties of the shipped shape worth naming explicitly:
+
+- **Zero overhead for non-participants**: update mode defaults to
+  `disabled`, and a disabled zdot registers nothing — non-opted-in shells
+  pay no startup or network cost, and dotfiler (when present) owns the
+  whole update cycle alone.
+- **Components reuse dotfiler's link-tree machinery** rather than carrying
+  their own: the setup primitives gained `--repo-dir`/`--link-dest`
+  parameters precisely so a component (zdot) can unpack its symlinks to an
+  arbitrary destination (`$XDG_CONFIG_HOME/zdot`) instead of `$HOME`.
+
 User-facing docs: dotfiler's `how-updates-work.md` and `update-hooks.md`;
 zdot's `zstyle-reference.md` (`:zdot:update`).
 

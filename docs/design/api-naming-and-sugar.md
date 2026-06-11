@@ -13,11 +13,13 @@ item moved to [open-questions.md](open-questions.md).
   rename chunks. **No compatibility shims** — old names were removed
   outright (pre-1.0, single-digit consumers).
 - **Module sugar**: `zdot_simple_hook` (single-hook modules) and
-  `zdot_define_module` (multi-phase plugin lifecycles); 20 built-in module
-  files use the sugar today (12 `zdot_simple_hook` and 10
-  `zdot_define_module` call sites — the rollout converted ~20 modules and
-  new modules adopted it since). Modules with genuinely bespoke hook graphs
-  (xdg, secrets, completions, venv, plugins) intentionally stay on manual
+  `zdot_define_module` (multi-phase plugin lifecycles). The original
+  rollout converted ~20 modules (the plan recorded 14 simple_hook + 6
+  define_module call sites); today 20 built-in module files carry 22 call
+  sites (12 `zdot_simple_hook` + 10 `zdot_define_module` — a file can hold
+  several, e.g. fzf) as new modules adopted the sugar and some converted
+  between forms. Modules with genuinely bespoke hook graphs (xdg, secrets,
+  completions, venv, plugins) intentionally stay on manual
   `zdot_register_hook`.
 - `--auto-bundle` was renamed **`--auto-bundle-deps`** late: the flag wires
   the bundle's dependency *edges* (group + requires) onto the generated

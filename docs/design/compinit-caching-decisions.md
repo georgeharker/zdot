@@ -39,9 +39,13 @@ revision grep is gone, and with it the "fpath changes are invisible"
 problem: fpath composition and contents are first-class staleness inputs
 now.
 
-**The precmd change became moot instead of being made.** The proposal
-wanted the precmd safety net fixed to run compinit unconditionally. The
-relay it patched (defer → flag → precmd) was deleted outright:
+**The precmd change became moot instead of being made.** The bug the
+proposal targeted: the precmd safety net gated on the staleness check, so
+when the deferred trigger failed to fire *and* the compdump was fresh,
+compinit was silently never run — completions dead, no error anywhere. A
+canonical invisible failure: a guard correct in the happy path, wrong when
+its assumptions broke. Rather than patching the guard, the relay it
+belonged to (defer → flag → precmd) was deleted outright:
 `zdot_compinit_run` executes directly in the deferred drain (the historical
 hang it was avoiding does not reproduce on current zsh), and the safety net
 became the `finally`-group fallback — it fires exactly once after the drain

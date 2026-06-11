@@ -41,7 +41,12 @@ function instead of a flag-plus-precmd relay.
 
 A `compdef()` stub is installed at source time. Plugins that call `compdef`
 before compinit has run get queued into `_ZDOT_COMPDEF_QUEUE` (no-op in
-non-interactive shells). `zdot_compinit_run` then:
+non-interactive shells). Queue entries are serialized as quoted strings and
+replayed with `${(@Q)${(z)entry}}` — a deliberate pragmatic choice over
+`typeset -p`-style serialization: marginally less robust against
+pathological arguments in theory, but `compdef` arguments are completion
+function names and command names in practice, and the `(z)`/`(Q)` round
+trip keeps the queue a plain array. `zdot_compinit_run` then:
 
 1. `unfunction compdef` — **before** compinit. If the stub still exists,
    compinit silently declines to define the real `compdef` (a function by
