@@ -7,6 +7,10 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that
 organizes your shell environment into modular, reusable components with
 automatic dependency resolution.
 
+> 📖 Rendered documentation:
+> [docs.georgeharker.com/zdot/main](https://docs.georgeharker.com/zdot/main/)
+> · [dev](https://docs.georgeharker.com/zdot/dev/)
+
 ---
 
 - [Why zdot?](#why-zdot)

@@ -119,6 +119,73 @@ for f in $files; do
     done
 done
 
+# ── Pass 1.5: site reachability ───────────────────────────────────────────
+# Every relative .md link in a RENDERED file must target another rendered
+# file — a target that exists in the repo but is missing from the Quarto
+# render list 404s on the published site (Quarto only rewrites links to
+# rendered inputs). Mirrors Quarto's rules: explicit entries, glob entries
+# (which skip README.md files), and "!" exclusions.
+if [[ -f _quarto.yml ]]; then
+    typeset -A rendered
+    local -a render_entries excl_entries expanded
+    local in_render=0 entry rf
+    while IFS= read -r l; do
+        if [[ $l == [[:space:]]#render: ]]; then
+            in_render=1
+            continue
+        fi
+        if (( in_render )); then
+            if [[ $l == [[:space:]]##-[[:space:]]* ]]; then
+                entry="${l##*- }"
+                entry="${entry//\"/}"
+                entry="${entry%%[[:space:]]#\#*}"   # strip inline comment
+                if [[ $entry == \!* ]]; then
+                    excl_entries+=("${entry#\!}")
+                else
+                    render_entries+=("$entry")
+                fi
+            elif [[ $l == [[:space:]]#\#* || -z ${l// /} ]]; then
+                continue
+            else
+                in_render=0
+            fi
+        fi
+    done < _quarto.yml
+
+    for entry in $render_entries; do
+        if [[ $entry == *[\*\?]* ]]; then
+            for rf in ${~entry}(N); do
+                [[ ${rf:t} == README.md ]] && continue   # globs skip READMEs
+                expanded+=("$rf")
+            done
+        else
+            [[ -f $entry ]] && expanded+=("$entry")
+        fi
+    done
+    for entry in $excl_entries; do
+        expanded=(${expanded:#$entry})
+    done
+    for rf in $expanded; do rendered[${rf:A}]=1; done
+
+    for rf in $expanded; do
+        [[ $rf == *.md ]] || continue
+        links=( ${(f)"$(grep -oE '\]\([^)[:space:]]+\)' "$rf" 2>/dev/null)"} )
+        for l in $links; do
+            t="${l#\]\(}"
+            t="${t%\)}"
+            case "$t" in (http://*|https://*|mailto:*|\#*) continue ;; esac
+            t="${t%%\#*}"
+            [[ $t == *.md ]] || continue
+            local _target="${rf:h}/${t}"
+            _target="${_target:A}"
+            [[ -f $_target ]] || continue   # missing files are pass-1 failures
+            if [[ -z ${rendered[$_target]:-} ]]; then
+                fail "$rf: links '$t' which is not in the Quarto render list (404 on the site)"
+            fi
+        done
+    done
+fi
+
 # ── Pass 2: destinations in the content map ──────────────────────────────
 local map=docs/restructure-content-map.md
 if [[ -f "$map" ]]; then
@@ -130,13 +197,16 @@ if [[ -f "$map" ]]; then
 fi
 
 # ── Pass 3: coverage of pre-restructure sections ──────────────────────────
-# check_coverage <git-path-at-HEAD> <max-heading-depth>
+# Compares against the PRE-restructure docs (the main branch). Retire this
+# pass together with docs/restructure-content-map.md once the restructure
+# is reviewed and merged.
+# check_coverage <git-rev> <path> <max-heading-depth>
 check_coverage() {
-    local gitpath="$1"
-    local -i maxdepth="$2"
+    local gitrev="$1" gitpath="$2"
+    local -i maxdepth="$3"
     local content line text hashes
     local -i in_code=0
-    content="$(git show "HEAD:${gitpath}" 2>/dev/null)" || return 0
+    content="$(git show "${gitrev}:${gitpath}" 2>/dev/null)" || return 0
     local mapnorm="$(< $map)"
     mapnorm="${mapnorm//\`/}"
     while IFS= read -r line; do
@@ -161,10 +231,10 @@ check_coverage() {
     done <<< "$content"
 }
 
-if [[ -f "$map" ]] && git rev-parse HEAD >/dev/null 2>&1; then
-    check_coverage README.md 3
-    check_coverage docs/plugins.md 2
-    check_coverage docs/caching-implementation.md 2
+if [[ -f "$map" ]] && git rev-parse main >/dev/null 2>&1; then
+    check_coverage main README.md 3
+    check_coverage main docs/plugins.md 2
+    check_coverage main docs/caching-implementation.md 2
 fi
 
 # ── Result ────────────────────────────────────────────────────────────────

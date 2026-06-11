@@ -5,3 +5,4 @@
 /.quarto/
 
 **/*.quarto_ipynb
+_quarto-deploy.yml
