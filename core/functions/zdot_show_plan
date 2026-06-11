@@ -8,7 +8,11 @@ function zdot_show_plan() {
         return 1
     fi
 
-    zdot_report "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks):"
+    local _ndef=0 _hid
+    for _hid in $_ZDOT_EXECUTION_PLAN; do
+        [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$_hid]} -gt 0 ]] && (( _ndef++ ))
+    done
+    zdot_report "Execution Plan (${#_ZDOT_EXECUTION_PLAN} hooks: $(( ${#_ZDOT_EXECUTION_PLAN} - _ndef )) eager, ${_ndef} deferred):"
     zdot_info ""
 
     # Show active context including variant
@@ -42,7 +46,9 @@ function zdot_show_plan() {
         fi
         local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
 
-        zdot_info "$i. $func"
+        local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+        _zdot_hook_display_marks "$hook_id" "$func"
+        zdot_info "$i. $func$_deferred_mark"
         zdot_info "   contexts: $contexts"
         zdot_info "   provides: $provides"
         zdot_info "   requires: $requires"

@@ -167,23 +167,48 @@ function zdot_hooks_graph() {
         else
             out="$func"
         fi
+        # Deferral annotation — same marks as `zdot hook list`/`plan`:
+        # magenta [ deferred] for --deferred hooks, yellow
+        # [ deferred: forced] for hooks promoted into the deferred plan by
+        # their dependencies. ASCII mode keeps the words, drops the glyphs.
+        local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
+        _zdot_hook_display_marks "$hid" "$func"
+        (( _g_ascii )) && _deferred_mark="${_deferred_mark//[] /}"
+        out+="$_deferred_mark"
         print -r -- "$out"
     }
 
-    # Visible width of a head string, ignoring the %F{magenta}…%f colour escapes we
-    # add to [group:…] labels — so the pstree column math stays aligned (a raw
-    # ${#head} would count the escape characters and shift every child right).
+    # Visible width of a head string, ignoring the %F{…}…%f colour escapes we
+    # add to [group:…] labels and deferral marks — so the pstree column math
+    # stays aligned (a raw ${#head} would count the escape characters and
+    # shift every child right).
     function _zdot_g_vwidth() {
         local s=${1//\%F\{magenta\}/}
+        s=${s//\%F\{yellow\}/}
         s=${s//\%f/}
+        # The deferral hourglasses (U+F251/U+F250, Nerd Font PUA) advance
+        # one cell in monospace Nerd Fonts, so a plain character count stays correct.
         REPLY=${#s}
     }
 
-    # Display for any node, including phase pseudo-nodes.
+    # Display for any node, including phase pseudo-nodes. A phase whose
+    # provider is deferred (explicitly or by force-deferral) is annotated —
+    # anything waiting on it lands after the first prompt.
     function _zdot_g_display_for_child() {
         local x="$1"
         if [[ "$x" == phase:* ]]; then
-            print -r -- "[phase: ${x#phase:}]"
+            local _ph="${x#phase:}" _pmark="" _k _phid
+            for _k in ${(k)_ZDOT_PHASE_PROVIDERS_BY_CONTEXT}; do
+                [[ "$_k" == *:"$_ph" ]] || continue
+                _phid="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$_k]}"
+                if [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$_phid]} -gt 0 || \
+                      ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$_phid]} -gt 0 ]]; then
+                    _pmark=" %F{yellow}[ deferred]%f"
+                    break
+                fi
+            done
+            (( _g_ascii )) && _pmark="${_pmark//[] /}"
+            print -r -- "[phase: ${_ph}]${_pmark}"
         else
             _zdot_g_display_name "$x"
         fi

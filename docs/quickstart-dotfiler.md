@@ -185,15 +185,15 @@ Once your dotfiles repo is on a remote (GitHub, etc.) and you're setting up a
 new machine:
 
 ```zsh
-# 1. Clone dotfiler
+# 1. Clone your dotfiles
+git clone <your-repo-url> ~/.dotfiles
+
+# 2. Clone dotfiler
 git clone https://github.com/georgeharker/dotfiler ~/.dotfiles/.nounpack/dotfiler
 export PATH="$HOME/.dotfiles/.nounpack/dotfiler:$PATH"
 
-# 2. Clone your dotfiles
-git clone <your-repo-url> ~/.dotfiles
-git -C ~/.dotfiles submodule update --init --recursive
-
-# 3. Unpack everything (reads hook directly from repo, no linktree needed yet)
+# 3. Bootstrap — initializes submodules (zdot included), reads hooks from
+#    the repo, unpacks everything (no linktree needed yet)
 dotfiler setup --bootstrap
 ```
 

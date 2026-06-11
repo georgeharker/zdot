@@ -140,7 +140,7 @@ function zdot_hooks_list() {
             local name="${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
             local provides="${_ZDOT_HOOK_PROVIDES[$hook_id]:-(none)}"
             local is_deferred="no"
-            [[ -n "${_ZDOT_DEFERRED_HOOKS[$hook_id]}" ]] && is_deferred="yes"
+            [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$hook_id]} -gt 0 ]] && is_deferred="yes"
             zdot_info "  [?] $func"
             zdot_info "       name:     $name"
             zdot_info "       provides: $provides"

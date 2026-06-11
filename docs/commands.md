@@ -86,6 +86,13 @@ _xdg_init─┬─_brew_init─┬─_op_init─┬─_dotfiler_init
 
 - Siblings sorted by display name (deterministic).
 - Single-child chains collapse onto one line: `A───B───C`.
+- Deferral is annotated (here and in `hook list`/`hook plan`/`phase list`),
+  distinguishable by glyph as well as color: magenta `[ deferred]` (Nerd Font
+  hourglass-start, U+F251) for hooks registered `--deferred`, yellow
+  `[ deferred: forced]` (hourglass-outline, U+F250) for hooks promoted into
+  the deferred plan because a required phase is only provided by deferred
+  hooks. Phase nodes whose provider is deferred show `[ deferred]`.
+  `--ascii` keeps the words and drops the glyphs.
 - Multiple children laid out with parent-width alignment under the `┬`.
 - DAG nodes printed once; later occurrences shown as `name ↑`.
 - Phase nodes with no provider appear as `[phase: foo] (no provider)`.

@@ -2132,7 +2132,15 @@ _zdot_hook_display_marks() {
     _name_mark=""
     [[ "$_hname" != "$2" ]] && _name_mark=" %F{blue}[name: $_hname]%f"
     _deferred_mark=""
-    [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]] && _deferred_mark=" %F{magenta}[deferred]%f"
+    if [[ ${_ZDOT_DEFERRED_HOOKS[(Ie)$1]} -gt 0 ]]; then
+        # Nerd Font hourglass-start (U+F251): deferred by design (--deferred).
+        _deferred_mark=" %F{magenta}[ deferred]%f"
+    elif [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$1]} -gt 0 ]]; then
+        # Nerd Font hourglass-outline (U+F250): promoted by force-deferral (a
+        # required phase is provided only by deferred hooks). Distinct glyph —
+        # disambiguates from  in text as well as color.
+        _deferred_mark=" %F{yellow}[ deferred: forced]%f"
+    fi
     _noquiet_mark=""
     local _defer_arg="${_ZDOT_HOOK_DEFER_ARGS[$1]:-}"
     if [[ -n "$_defer_arg" ]]; then
