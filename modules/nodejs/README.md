@@ -51,7 +51,7 @@ with a built-in default:
 
 | zstyle | Default | Purpose |
 |---|---|---|
-| `':zdot:nodejs' lazy-cmd` | `(opencode mcp-hub copilot prettierd claude-code)` | Commands whose first invocation triggers nvm load |
+| `':zdot:nodejs' lazy-cmd` | `(opencode copilot prettierd claude)` | Commands whose first invocation triggers nvm load |
 
 Override this in a `node-configure` group hook (see below). Setting it to an
 empty array disables lazy-loading triggers entirely — nvm will only load when
@@ -79,7 +79,7 @@ Or extend the default list rather than replacing it:
 ```zsh
 _my_node_configure() {
     # Append to the built-in defaults
-    local -a defaults=(opencode mcp-hub copilot prettierd claude-code)
+    local -a defaults=(opencode copilot prettierd claude)
     zstyle ':zdot:nodejs' lazy-cmd "${defaults[@]}" my-extra-tool
 }
 

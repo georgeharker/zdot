@@ -1,639 +1,245 @@
 # Plugin Hook Architecture
 
-**Status:** Design — not yet implemented
-**Date:** 2026-02-22
+> Validated against `core/` on 2026-06-10. History: this design shipped (renames: `zdot_use` → `zdot_use_plugin`, `zdot_hook_register` → `zdot_register_hook`); the original pre-implementation text is in git history.
 
----
+This document describes the architecture of zdot's plugin and hook system and the
+rationale behind its shape. Internals (data structures, cache serialization, file
+walkthroughs) are owned by [../plugin-implementation.md](../plugin-implementation.md);
+consumer how-to is owned by [../using-plugins.md](../using-plugins.md). The full
+flag reference for hooks lives in [../api-reference.md](../api-reference.md) and
+[../module-guide.md](../module-guide.md).
 
-## Background
+## The declare / clone / load model
 
-The current plugin loading system has two layers that have drifted out of sync:
+Plugin handling is split into three stages with a hard line between them:
 
-1. `core/plugins.zsh` — provides `zdot_use`, `zdot_use_defer`, `zdot_load_all_plugins`,
-   `zdot_load_deferred_plugins`, and the hook registration primitives.
-2. `lib/plugins/plugins.zsh` — declares plugins via `zdot_use` / `zdot_use_defer`, then
-   manually re-lists deferred plugins inside `_plugins_load_deferred()`.
+1. **Declare** — `zdot_use_plugin` calls record what is wanted: the spec, an
+   optional version pin (`user/repo@ref`), and a generated load hook. Nothing
+   touches disk or sources code.
+2. **Clone** — `zdot_init` runs `zdot_plugins_clone_all` (`core/plugins.zsh`)
+   once, synchronously, so every declared repo is on disk before any load hook
+   fires. A sentinel file (`.cloned` in the plugins cache) makes the
+   nothing-changed case a string comparison instead of N git invocations.
+3. **Load** — `zdot_load_plugin` sources a plugin on demand, exactly once
+   (deduplicated via `_ZDOT_PLUGINS_LOADED`), either eagerly during the hook
+   plan or post-prompt via the deferred drain.
 
-The manual re-listing in `_plugins_load_deferred()` duplicates what `zdot_use_defer`
-declarations already know, creating an error-prone coupling. A previous rewrite of
-`_plugins_load_deferred()` to call `zdot_load_plugin` directly also rendered
-`zdot_load_deferred_plugins` dead code and introduced `_ZDOT_DEFER_SKIP_RECORD` as a
-compensating hack. This design removes all of that.
+**Why declaration is split from loading:** each plugin is declared once, and the
+declaration carries everything needed to generate its load hook. Loading is then
+driven entirely by the hook scheduler's dependency graph — there is no second,
+hand-maintained list of "what to load and when" that can drift out of sync with
+the declarations. Ordering, deferral, and observability all come for free from
+the hook system instead of being re-implemented per plugin.
 
----
+## `zdot_use_plugin`
 
-## Goals
-
-- Each plugin is declared once; the declaration carries enough information to generate the
-  load hook automatically.
-- No separate `_plugins_load_deferred()` function enumerating plugins a second time.
-- No `plugins-declared` phase; `zdot_init` is the explicit line-in-the-sand.
-- Dead code (`zdot_load_deferred_plugins`, `_ZDOT_DEFER_SKIP_RECORD`) is removed.
-- Observability is preserved; the hook system already records what ran and when.
-
----
-
-## New `zdot_use` API
-
-### Existing form (unchanged)
+Defined in `core/plugins.zsh`. Declaration forms:
 
 ```zsh
-zdot_use <spec>              # clone only, no load hook
-zdot_use <spec> fpath        # clone + add to fpath, no load hook
-zdot_use <spec> path         # clone + add to PATH, no load hook
+# Hook-generating forms (preferred)
+zdot_use_plugin <spec> hook  [--name <n>] [--provides <p>] [--config <fn>] [--context <c>...]
+                             [--group <g>]... [--requires-group <g>] [--provides-group <g>]
+zdot_use_plugin <spec> defer [...same...] [--requires <phase>]
+zdot_use_plugin <spec> defer-prompt [...same as defer...]
+
+# Legacy forms (record the spec for cloning only; no hook)
+zdot_use_plugin <spec>                       # kind=normal
+zdot_use_plugin <spec> normal|fpath|path
 ```
 
-`<spec>` is either `user/repo` (GitHub shorthand) or an absolute path.
+`<spec>` is `user/repo` (GitHub shorthand, optionally `@ref`-pinned), an absolute
+path, or a bundle spec such as `omz:plugins/git` / `pz:modules/git`.
 
-### New subcommand forms
+The hook-generating forms do three things:
+
+1. Record the spec for the clone phase (`_ZDOT_PLUGINS_ORDER` / `_ZDOT_PLUGINS`).
+2. Generate a private loader function `_zdot_autoload_<name-or-spec>` that runs
+   the optional `--config` function and then `zdot_load_plugin <spec>`. The
+   `--config <fn>` callback is invoked as `<fn> <plugin-path> <spec>` *before*
+   the plugin is sourced — its purpose is configuration that must precede
+   sourcing.
+3. Register the loader via `zdot_register_hook`, forwarding `--provides`,
+   `--group`, `--requires-group`, `--provides-group`, and the contexts
+   (default: `interactive noninteractive`).
+
+The subcommand selects the scheduling mode:
+
+- `hook` — synchronous: the loader runs in the eager pass of the execution plan.
+  `--requires` is rejected here; eager ordering is expressed by other hooks
+  requiring this plugin's `--provides` phase.
+- `defer` — adds `--deferred`: the loader runs post-prompt via the deferred
+  drain. `--requires <phase>` gates when it becomes eligible.
+- `defer-prompt` — deferred variant that keeps prompt redraw enabled, for
+  plugins that change the prompt (emits `--deferred-prompt`).
+
+**Bundle auto-requires:** for `defer`/`defer-prompt`, if a registered bundle
+handler owns the spec and the bundle declared `--provides <phase>` at
+registration, that phase is auto-injected as the hook's `--requires` (an
+explicit `--requires` from the caller wins). Why: a consumer declaring
+`zdot_use_plugin omz:plugins/git defer` should not need to know the bundle's
+internal initialization phase token.
+
+## The hook registration model
+
+`zdot_register_hook` (`core/hooks.zsh`) is the single primitive everything else
+compiles down to:
 
 ```zsh
-zdot_use <spec> hook [options]    # clone + register a synchronous load hook
-zdot_use <spec> defer [options]   # clone + register a deferred load hook
+zdot_register_hook <fn> <context...> \
+    [--requires <phase>...] [--provides <phase>]... [--optional] \
+    [--after <target>...] [--before <target>...] \
+    [--name <label>] [--deferred | --deferred-prompt] \
+    [--group <g>]... [--requires-group <g>] [--provides-group <g>] \
+    [--variant <v>]... [--variant-exclude <v>]...
 ```
 
-Both forms:
-
-1. Register the clone (same as bare `zdot_use`).
-2. Generate a private loader function.
-3. Register that function as a hook via `zdot_hook_register`.
-
-The difference is that `defer` passes `--deferred` to `zdot_hook_register`, causing the
-loader to be enqueued via `zdot_defer` (i.e. `zsh-defer`) instead of running synchronously.
-
-### Shared options
-
-| Option | Description |
-|---|---|
-| `--name <slug>` | Name of the generated hook and the value passed to `--name` in `zdot_hook_register`. If omitted, derived from `--provides` (or from `<spec>` as a last resort). Used with `zdot_defer_order`. |
-| `--provides <phase>` | Phase token published after the plugin loads. Required if other hooks depend on this plugin being loaded. |
-| `--config <fn>` | Zero-argument function called immediately before `zdot_load_plugin` inside the generated hook. Use for per-plugin configuration that must precede sourcing. |
-| `--context <ctx>` | Space-separated context tokens (`interactive`, `noninteractive`). Forwarded to `zdot_hook_register`. Defaults to `interactive noninteractive`. |
-| `--group <name>` | Tags this hook as a member of the named group. May be repeated to assign multiple groups. Forwarded to `zdot_hook_register`. |
-
-### `defer`-only options
-
-| Option | Description |
-|---|---|
-| `--requires <phase>` | Phase that must be published before this hook is enqueued. The scheduler will not enqueue the deferred hook until `<phase>` is available. |
-
-`--requires` is **not valid** on `hook`. Non-deferred hooks fire at `zdot_init` time in
-dependency order; the scheduler handles ordering through `--provides`/`--requires` on other
-hooks. Passing `--requires` to `hook` is an error.
-
-### What the forms generate
-
-Given:
-
-```zsh
-zdot_use olets/zsh-abbr defer \
-    --name zsh-abbr-load \
-    --provides abbr-ready \
-    --requires omz-plugins-loaded \
-    --config _zdot_abbr_config
-```
-
-The implementation produces the equivalent of:
-
-```zsh
-function _zdot_autoload_zsh-abbr-load() {
-    _zdot_abbr_config
-    zdot_load_plugin olets/zsh-abbr
-}
-
-zdot_hook_register _zdot_autoload_zsh-abbr-load interactive noninteractive \
-    --deferred \
-    --name zsh-abbr-load \
-    --provides abbr-ready \
-    --requires omz-plugins-loaded
-```
-
-For `hook` (no `--deferred`, no `--requires`):
-
-```zsh
-zdot_use omz:plugins/git hook \
-    --name omz-git \
-    --provides omz-git-loaded
-```
-
-Produces:
-
-```zsh
-function _zdot_autoload_omz-git() {
-    zdot_load_plugin omz:plugins/git
-}
-
-zdot_hook_register _zdot_autoload_omz-git interactive noninteractive \
-    --name omz-git \
-    --provides omz-git-loaded
-```
-
----
-
-## Hook Groups
-
-Hook groups provide a way to express bulk dependency relationships without enumerating every
-member hook individually. A group is purely a membership tag: belonging to a group does not
-imply any implicit phase token or ordering between members of the same group.
-
-### New options for `zdot_hook_register`
-
-| Option | Description |
-|---|---|
-| `--group <name>` | Tags this hook as a member of the named group. A hook can belong to multiple groups. Has no ordering effect on its own. |
-| `--requires-group <name>` | At DAG-build time, expands to `--requires <phase>` for every `--provides` token published by hooks tagged `--group <name>`. |
-| `--provides-group <name>` | At DAG-build time, injects `--requires <this hook's provides>` into every hook currently tagged `--group <name>`. Requires `--provides` on the same registration. |
-
-All group expansion happens inside `zdot_init` during DAG construction. Groups are resolved
-after all hooks are registered (including those registered by bundle `--init-fn` functions
-in the bundle init pass). Groups are never resolved eagerly.
-
-### Group registry data structures
-
-Two associative arrays track group membership. Both are populated at hook registration time
-and serialized to the execution plan cache.
-
-```zsh
-# Forward map: hook_id → space-separated group names
-# Used by zdot_show_hooks for display. Expanded with ${=var}.
-typeset -gA _ZDOT_HOOK_GROUPS      # hook_id → "group1 group2 ..."
-
-# Reverse index: group_name → space-separated hook_ids
-# Used at DAG-build time to expand --requires-group / --provides-group.
-typeset -gA _ZDOT_GROUP_MEMBERS    # group_name → "hook_id1 hook_id2 ..."
-```
-
-**Setting** (at registration time, when `--group <name>` is parsed):
-
-```zsh
-# Append group name to forward map
-_ZDOT_HOOK_GROUPS[$hook_id]+=" $group_name"
-_ZDOT_HOOK_GROUPS[$hook_id]="${_ZDOT_HOOK_GROUPS[$hook_id]# }"
-
-# Append hook_id to reverse index
-_ZDOT_GROUP_MEMBERS[$group_name]+=" $hook_id"
-_ZDOT_GROUP_MEMBERS[$group_name]="${_ZDOT_GROUP_MEMBERS[$group_name]# }"
-```
-
-**Reading** (at DAG-build time, when `--requires-group <name>` is processed):
-
-```zsh
-for member_id in ${=_ZDOT_GROUP_MEMBERS[$group_name]}; do
-    # inject --requires for each --provides token on $member_id
-    for phase in ${=_ZDOT_HOOK_PROVIDES[$member_id]}; do
-        # add edge: current hook requires $phase
-    done
-done
-```
-
-**Cache serialization** — `zdot_cache_save_plan` adds these lines inside the hook
-metadata loop for `_ZDOT_HOOK_GROUPS`, and a separate loop for `_ZDOT_GROUP_MEMBERS`:
-
-```zsh
-# Inside per-hook_id loop (alongside _ZDOT_HOOK_CONTEXTS etc.):
-echo "_ZDOT_HOOK_GROUPS[$hook_id]='${_ZDOT_HOOK_GROUPS[$hook_id]}'"
-
-# Separate block after hook metadata, iterating over group names:
-echo "typeset -gA _ZDOT_GROUP_MEMBERS"
-for group_name in "${(@k)_ZDOT_GROUP_MEMBERS}"; do
-    echo "_ZDOT_GROUP_MEMBERS[$group_name]='${_ZDOT_GROUP_MEMBERS[$group_name]}'"
-done
-```
-
-The cache version constant in `core/cache.zsh` must be bumped from `"8"` to `"9"` when
-this serialization is added.
-
-### Semantics
-
-**`--group <name>`** is a membership annotation. It can be combined with any other options.
-
-**`--requires-group <name>`** reads the current membership of `<name>` and injects one
-`--requires` edge per `--provides` token found on a member. This means the registering hook
-will not fire until every hook in the group has published its phase.
-
-**`--provides-group <name>`** is the inverse: it makes every current member of `<name>`
-depend on this hook's `--provides` phase. Use it to insert a gate that the entire group
-must wait for.
-
-"Current membership" means membership at DAG-build time (inside `zdot_init`), not at
-`zdot_hook_register` call time. Hooks registered after the DAG is built are not included.
-
-### Example: compinit after all deferred plugins
-
-```zsh
-# Each deferred plugin joins the 'deferred-plugins' group and publishes its own phase.
-zdot_use olets/zsh-abbr -defer \
-    --name zsh-abbr-load \
-    --provides abbr-ready \
-    --group deferred-plugins
-
-zdot_use zdharma-continuum/fast-syntax-highlighting -defer \
-    --name fsh-load \
-    --provides fsh-ready \
-    --group deferred-plugins
-
-# compinit fires only after every member of deferred-plugins has published.
-zdot_hook_register _zdot_compinit interactive noninteractive \
-    --deferred \
-    --requires-group deferred-plugins \
-    --provides compinit-done
-```
-
-At DAG-build time, `--requires-group deferred-plugins` expands to:
-```
---requires abbr-ready --requires fsh-ready
-```
-
-No manual update is required when a plugin is added or removed; the group tag does the
-bookkeeping.
-
-### Example: gating an entire group on a single prerequisite
-
-```zsh
-# Mark every OMZ plugin load hook as part of 'omz-plugins'.
-zdot_use omz:plugins/git    -hook --name omz-git    --provides omz-git-loaded    --group omz-plugins
-zdot_use omz:plugins/docker -hook --name omz-docker --provides omz-docker-loaded --group omz-plugins
-
-# OMZ lib must be loaded before any omz-plugins member fires.
-zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
-    --provides omz-lib-loaded \
-    --provides-group omz-plugins
-```
-
-At DAG-build time, `--provides-group omz-plugins` injects
-`--requires omz-lib-loaded` into both `omz-git-loaded` and `omz-docker-loaded`.
-
-### What groups do not do
-
-- Groups do not impose ordering _between_ members. Members may fire in any order relative
-  to each other (subject to their own `--requires`/`--provides` edges).
-- Groups do not create implicit phase tokens. There is no `deferred-plugins-done` token
-  unless a hook explicitly `--provides` it.
-- Groups cannot be nested or composed; they are flat membership sets.
-
----
-
-## `zdot_init`
-
-`zdot_init` is a new function that replaces the `plugins-declared` phase as the explicit
-synchronisation point between declarations and loading.
-
-### Calling convention
-
-```zsh
-# lib/plugins/plugins.zsh
-
-zdot_use omz:lib
-zdot_use omz:plugins/git -hook --name omz-git --provides omz-git-loaded
-# ... all declarations ...
-
-zdot_init   # <-- the line in the sand
-```
-
-After `zdot_init` returns (or yields to the scheduler), all clone and load activity is
-either complete or enqueued.
-
-### What `zdot_init` does
-
-1. **Clone all repos** — calls the equivalent of `zdot_plugins_clone_all`. Synchronous;
-   all plugin source is on disk before any hooks fire.
-2. **Bundle init pass** — for each entry in `$_ZDOT_BUNDLE_HANDLERS`, if
-   `$_ZDOT_BUNDLE_INIT_FN[name]` is set, calls that function. Bundle init functions may
-   call `zdot_hook_register` freely to register additional hooks (e.g. internal OMZ
-   lifecycle hooks). They must not call `zdot_init` recursively.
-3. **Build the DAG** — resolves all `--group`, `--requires-group`, and `--provides-group`
-   annotations into concrete `--requires`/`--provides` edges. Includes hooks registered
-   in step 2.
-4. **Fire non-deferred hooks** — runs all hooks that were registered without `--deferred`,
-   in DAG dependency order.
-5. **Enqueue deferred hooks** — passes all `--deferred` hooks to `zdot_defer` in DAG
-   dependency order, respecting `--requires` constraints.
-
-### Calling convention
-
-```zsh
-# lib/plugins/plugins.zsh
-
-zdot_use omz:lib
-zdot_use omz:plugins/git -hook --name omz-git --provides omz-git-loaded
-# ... all declarations ...
-
-zdot_init   # <-- the line in the sand
-```
-
-After `zdot_init` returns (or yields to the scheduler), all clone and load activity is
-either complete or enqueued.
-
-### Replaces
-
-- The `plugins-declared` phase token.
-- The `--requires plugins-declared` on the clone hook and any hook that previously needed
-  to wait for all declarations to be made.
-- Any `zdot_execute_all` or equivalent function that previously kicked off loading.
-
----
-
-## Plugin Bundle Interface
-
-### Extended `zdot_bundle_register`
-
-`zdot_bundle_register` gains two optional flags:
-
-```zsh
-zdot_bundle_register <name> [--init-fn <fn>] [--provides <phase>]
-```
-
-| Flag | Description |
-|---|---|
-| `--init-fn <fn>` | Zero-argument function called by `zdot_init` during the bundle init pass (step 2). May call `zdot_hook_register` freely to register additional internal lifecycle hooks. Must not call `zdot_init` recursively. |
-| `--provides <phase>` | Phase token considered published once the bundle's `--init-fn` has returned. Used by `zdot_use` to auto-inject `--requires` on specs that belong to this bundle. |
-
-The values are stored in two new associative arrays in `core/plugins.zsh`:
-
-```zsh
-typeset -gA _ZDOT_BUNDLE_INIT_FN    # bundle name → init function name
-typeset -gA _ZDOT_BUNDLE_PROVIDES   # bundle name → phase token
-```
-
-### Updated four-function protocol
-
-The four handler functions remain required and are identified by naming convention. The
-`--init-fn` is a free-standing function name supplied at registration time — not a
-naming-convention slot.
-
-| Function | Required | Called by | Purpose |
-|---|---|---|---|
-| `zdot_bundle_<name>_match <spec>` | yes | `_zdot_bundle_handler_for` | returns 0 if this handler owns the spec |
-| `zdot_bundle_<name>_path <spec>` | yes | `zdot_plugin_path` | sets `REPLY` to the filesystem path |
-| `zdot_bundle_<name>_clone <spec>` | yes | `zdot_plugin_clone` | ensures the plugin is on disk |
-| `zdot_bundle_<name>_load <spec>` | yes | `zdot_load_plugin` | sources or activates the plugin |
-
-### Auto-requires in `zdot_use`
-
-When `zdot_use <spec> -hook` or `zdot_use <spec> -defer` is called:
-
-1. `_zdot_bundle_handler_for <spec>` identifies the handler name (e.g. `omz`).
-2. If `$_ZDOT_BUNDLE_PROVIDES[<handler>]` is non-empty, `zdot_use` auto-injects
-   `--requires <phase>` into the generated `zdot_hook_register` call.
-3. An explicit `--requires` passed by the caller always wins; the auto-requires is
-   silently skipped if the caller has already supplied one.
-
-This means that:
-
-```zsh
-zdot_use omz:plugins/git -hook --name omz-git --provides omz-git-loaded
-```
-
-automatically becomes equivalent to:
-
-```zsh
-zdot_hook_register _zdot_autoload_omz-git interactive noninteractive \
-    --name omz-git \
-    --provides omz-git-loaded \
-    --requires omz-bundle-initialized
-```
-
-without the caller having to know the bundle's phase token name.
-
-### Example registration
-
-```zsh
-# core/plugin-bundles/omz.zsh
-zdot_bundle_register omz \
-    --init-fn  zdot_bundle_omz_init \
-    --provides omz-bundle-initialized
-```
-
-```zsh
-# core/plugin-bundles/pz.zsh
-zdot_bundle_register pz \
-    --init-fn  zdot_bundle_pz_init \
-    --provides pz-bundle-initialized
-```
-
----
-
-## OMZ Bundle Init
-
-### Overview
-
-The ad-hoc `zdot_hook_register` calls currently at the bottom of `core/plugin-bundles/omz.zsh`
-are replaced by a single init function, `zdot_bundle_omz_init`, called by `zdot_init`
-during the bundle init pass.
-
-### `zdot_bundle_omz_init` — execution order
-
-```
-zdot_bundle_omz_init:
-  1. zdot_omz_check_for_upgrade
-       Called here, before any OMZ machinery is initialised, matching
-       the behaviour of oh-my-zsh.sh and use-omz.zsh. Previously defined
-       in omz.zsh but never called anywhere; this is the call site.
-
-  2. Set OMZ environment variables and state:
-       ZSH_CUSTOM, ZSH_CACHE_DIR, theme state vars, async-prompt flags.
-       (This work previously happened at file-source time or in _zdot_omz_load_lib;
-       moving it here keeps file-source time side-effect-free.)
-
-  3. zdot_hook_register _zdot_omz_load_lib interactive noninteractive \
-         --provides omz-lib-loaded \
-         --provides-group omz-plugins
-
-  4. zdot_hook_register zdot_omz_theme_init interactive noninteractive \
-         --requires omz-lib-loaded \
-         --provides omz-theme-ready
-
-  5. zdot_hook_register _zdot_omz_setup_prompt_funcs interactive noninteractive \
-         --requires omz-lib-loaded \
-         --provides omz-prompt-funcs-ready
-```
-
-Step 3 uses `--provides-group omz-plugins` so that any OMZ plugin load hook tagged
-`--group omz-plugins` automatically gets `--requires omz-lib-loaded` injected at DAG-build
-time without each plugin declaration having to spell it out.
-
-### What is removed from `omz.zsh`
-
-- The three bare `zdot_hook_register` calls at the bottom of the file (the ones that
-  registered `_zdot_omz_load_lib`, `zdot_omz_theme_init`, and `_zdot_omz_setup_prompt_funcs`
-  directly at file-source time).
-- The `zdot_bundle_register omz` call is updated in-place to add `--init-fn` and
-  `--provides`; the existing `zdot_use_bundle ohmyzsh/ohmyzsh` call below it is unchanged.
-
-### `omz-init` group — dissolved
-
-A previously discussed `omz-init` group is not needed: all option-setting now happens
-directly inside `zdot_bundle_omz_init` (step 2) before the `zdot_hook_register` calls,
-so no group is required to sequence it.
-
-### PZ bundle init — same pattern
-
-`core/plugin-bundles/pz.zsh` follows the identical pattern:
-
-```
-zdot_bundle_pz_init:
-  1. Environment / state setup (ZSH_PREZTO_MODULES, etc.)
-  2. zdot_hook_register _zdot_pz_load_init interactive noninteractive \
-         --requires plugins-cloned \
-         --provides pz-init-loaded
-```
-
-The existing bare `zdot_hook_register _zdot_pz_load_init` call in `pz.zsh` is replaced
-by `zdot_bundle_pz_init` registered via `--init-fn`.
-
----
-
-## What Is Removed
-
-| Removed | Why |
-|---|---|
-| `zdot_load_deferred_plugins` (`core/plugins.zsh:514`) | Dead code; `_plugins_load_deferred()` already bypassed it |
-| `zdot_load_all_plugins` (`core/plugins.zsh:504`) | Superseded by `zdot_init` |
-| `_ZDOT_DEFER_SKIP_RECORD` global (`core/plugins.zsh:26`) | Was a compensating hack for `zdot_load_deferred_plugins` |
-| `kind=defer` / `kind=normal` internal tracking | Replaced by hook registration |
-| `plugins-declared` phase token | Replaced by `zdot_init` |
-| `zdot_use_defer` (eventually) | Replaced by `zdot_use ... -defer`; kept as a deprecation alias initially |
-| `_plugins_load_deferred()` (`lib/plugins/plugins.zsh:117–131`) | Replaced by per-plugin `-defer` declarations |
-| `zdot_hook_register` block for `_plugins_load_deferred` (`lib/plugins/plugins.zsh:133–137`) | Replaced by per-plugin `-defer` declarations |
-| `--provides plugins-declared` on `_plugins_configure` | Replaced by `zdot_init` |
-| `--requires plugins-declared` on the core clone hook (`core/plugins.zsh:658`) | Replaced by `zdot_init` triggering clones directly |
-
----
-
-## Migration: `lib/plugins/plugins.zsh`
-
-### Before
-
-```zsh
-# zdot_use_defer calls scattered through the file
-zdot_use_defer olets/zsh-abbr
-zdot_use_defer zdharma-continuum/fast-syntax-highlighting
-# ... etc ...
-
-# _plugins_load_deferred — manual re-enumeration
-function _plugins_load_deferred() {
-    zdot_load_plugin olets/zsh-abbr
-    zdot_load_plugin zdharma-continuum/fast-syntax-highlighting
-    # ...
-    zdot_defer -q zdot_compinit_defer
-}
-zdot_hook_register _plugins_load_deferred interactive noninteractive \
-    --deferred \
-    --requires omz-plugins-loaded \
-    --provides plugins-loaded
-```
-
-### After
-
-```zsh
-zdot_use olets/zsh-abbr -defer \
-    --name zsh-abbr-load \
-    --provides abbr-ready \
-    --requires omz-plugins-loaded
-
-zdot_use zdharma-continuum/fast-syntax-highlighting -defer \
-    --name fsh-load \
-    --provides fsh-ready \
-    --requires omz-plugins-loaded
-
-# ... other deferred plugins ...
-
-zdot_init
-```
-
-Each plugin carries its own hook declaration. The `_plugins_load_deferred()` function and
-its `zdot_hook_register` block are deleted entirely. `zdot_compinit_defer` is handled
-separately (either as its own `-defer` declaration or as a hook that `--requires` the last
-deferred plugin's `--provides` phase).
-
-### OMZ plugins
-
-OMZ plugins that were loaded as a batch by `_plugins_load_omz` can stay as a batch or be
-converted to individual `-hook` declarations depending on whether per-plugin phase
-granularity is wanted. The batch approach is acceptable; convert only if ordering matters.
-
----
-
-## Observability
-
-No regression. The hook system already records:
-
-- Hook function name
-- `--name` slug
-- `--provides` phase
-- Whether deferred or not
-- Invocation sequence
-
-`zdot_show_defer_queue` and `zdot_show_hooks` (or equivalent) continue to surface this
-information. The `_zdot_defer_record` parallel-array machinery remains in place for
-deferred hooks; it is populated by the generated loader functions (which call `zdot_defer`)
-exactly as before. `_ZDOT_DEFER_SKIP_RECORD` is removed because there is no longer any
-inline recording path that conflicts with it.
-
----
-
-## Files Affected
-
-### `core/plugins.zsh`
-
-| Change | Detail |
-|---|---|
-| `zdot_use` | Add `-hook` and `-defer` subcommand parsing; generate loader function and call `zdot_hook_register`; auto-inject `--requires <phase>` from `_ZDOT_BUNDLE_PROVIDES` when spec matches a bundle handler |
-| `zdot_use_defer` | Rewrite as deprecation alias: `zdot_use "$1" -defer` |
-| `zdot_load_all_plugins` | Remove |
-| `zdot_load_deferred_plugins` | Remove |
-| `_ZDOT_DEFER_SKIP_RECORD` | Remove global declaration and all references |
-| Core clone hook (line 658) | Remove `--requires plugins-declared`; `zdot_init` triggers clones directly |
-| `zdot_init` | Add new function (5-step: clone → bundle init pass → DAG build → fire hooks → enqueue deferred) |
-| `_ZDOT_BUNDLE_INIT_FN` | Add new global associative array: bundle name → init function name |
-| `_ZDOT_BUNDLE_PROVIDES` | Add new global associative array: bundle name → phase token published after bundle init |
-| `zdot_bundle_register` | Extend to parse and store `--init-fn <fn>` and `--provides <phase>` into the new arrays |
-
-### `core/plugin-bundles/omz.zsh`
-
-| Change | Detail |
-|---|---|
-| `zdot_bundle_register omz` call | Add `--init-fn zdot_bundle_omz_init --provides omz-bundle-initialized` |
-| Three ad-hoc `zdot_hook_register` calls | Remove; replaced by `zdot_bundle_omz_init` |
-| `zdot_bundle_omz_init` | Add new function: calls `zdot_omz_check_for_upgrade`, sets state vars, registers the three OMZ hooks via `zdot_hook_register` |
-| `zdot_omz_check_for_upgrade` | No change to definition; now called inside `zdot_bundle_omz_init` |
-
-### `core/plugin-bundles/pz.zsh`
-
-| Change | Detail |
-|---|---|
-| `zdot_bundle_register pz` call | Add `--init-fn zdot_bundle_pz_init --provides pz-bundle-initialized` |
-| Ad-hoc `zdot_hook_register _zdot_pz_load_init` call | Remove; replaced by `zdot_bundle_pz_init` |
-| `zdot_bundle_pz_init` | Add new function: sets Prezto state vars, registers `_zdot_pz_load_init` hook via `zdot_hook_register` |
-
-### `lib/plugins/plugins.zsh`
-
-| Change | Detail |
-|---|---|
-| `_plugins_configure` hook | Remove `--provides plugins-declared` |
-| `zdot_use_defer` calls | Replace with `zdot_use ... -defer --name ... --provides ... --requires ...` |
-| `_plugins_load_deferred()` | Remove entirely |
-| `zdot_hook_register` for `_plugins_load_deferred` | Remove entirely |
-| End of file | Add `zdot_init` call |
-
-### `docs/PLUGIN_IMPLEMENTATION.md`
-
-Review and update the "Phase Contract" section to reflect the removal of `plugins-declared`
-and the introduction of `zdot_init`.
-
----
-
-## Implementation Order
-
-1. Add `_ZDOT_BUNDLE_INIT_FN` and `_ZDOT_BUNDLE_PROVIDES` associative arrays to `core/plugins.zsh`.
-2. Extend `zdot_bundle_register` to parse and store `--init-fn` and `--provides` into the new arrays.
-3. Add `-hook` / `-defer` parsing and hook generation to `zdot_use` in `core/plugins.zsh`, including auto-inject of `--requires` from `_ZDOT_BUNDLE_PROVIDES`.
-4. Add `zdot_init` to `core/plugins.zsh` (5-step: clone → bundle init pass → DAG build → fire hooks → enqueue deferred).
-5. Update the core clone hook to remove `--requires plugins-declared`.
-6. Remove `zdot_load_all_plugins`, `zdot_load_deferred_plugins`, `_ZDOT_DEFER_SKIP_RECORD`.
-7. Rewrite `zdot_use_defer` as a deprecation alias.
-8. Migrate `core/plugin-bundles/omz.zsh`: update `zdot_bundle_register omz` call, write `zdot_bundle_omz_init` (including `zdot_omz_check_for_upgrade` call and three hook registrations), remove the three ad-hoc `zdot_hook_register` calls.
-9. Migrate `core/plugin-bundles/pz.zsh`: update `zdot_bundle_register pz` call, write `zdot_bundle_pz_init`, remove the ad-hoc `zdot_hook_register _zdot_pz_load_init` call.
-10. Rewrite `lib/plugins/plugins.zsh`: replace `zdot_use_defer` calls with `zdot_use ... -defer`, remove `_plugins_load_deferred()` and its hook registration, remove `--provides plugins-declared` from `_plugins_configure`, add `zdot_init` at end.
-11. Update `docs/PLUGIN_IMPLEMENTATION.md`.
-12. Smoke-test: new shell, `zdot_show_hooks`, verify load order matches expectations.
+It sets `REPLY` to the new hook id. The essentials for understanding plugins:
+
+- **Contexts** are shell-kind filters: `interactive`, `noninteractive`, `login`,
+  `nonlogin`. A hook absent from the current context simply never enters the
+  plan.
+- **Phases** are string tokens. `--provides` publishes one when the hook
+  succeeds; `--requires` is a hard dependency edge (missing provider is an
+  error unless the hook is `--optional`). Phase providers are unique per
+  context — two hooks providing the same phase in the same context is a
+  registration error, which keeps the graph unambiguous. `tool:` phases (via
+  the `--provides-tool`/`--requires-tool` sugar) are the first-registered-wins
+  exception.
+- **Soft ordering** — `--after`/`--before` order against a phase or hook name
+  if it exists, and are silent no-ops if it does not. `zdot_defer_order`
+  expresses the same thing externally, between named hooks.
+- **Deferral** — `--deferred` hooks are excluded from the eager pass and
+  dispatched post-prompt. A non-deferred hook that requires a phase provided
+  only by a deferred hook is *force-deferred*, transitively, with a warning
+  (silenceable via `zdot_allow_defer`). Why: a dependency on late work must
+  move the dependent later; silently running it early with the phase missing
+  would be worse than warning.
+
+`zdot_build_execution_plan` runs Kahn's algorithm over the registered hooks
+(filtered by context and variant) and produces `_ZDOT_EXECUTION_PLAN` plus its
+deferred subset. `zdot_execute_all` runs the eager portion in plan order, then
+seeds the deferred drain: `_zdot_run_deferred_phase_check` dispatches every
+deferred hook whose required phases are present, and each completed hook re-runs
+the check — a chain reaction that executes the deferred DAG in dependency order
+with no polling loop, plus stall detection when a required phase can never
+arrive.
+
+## Groups and barrier synthesis
+
+A group is a flat membership tag used to express bulk dependencies without
+enumerating members:
+
+- `--group <g>` — joins group `<g>` (repeatable; membership only, no ordering
+  between members).
+- `--requires-group <g>` — this hook runs after *every* member of `<g>` (edge
+  from the group's end barrier).
+- `--provides-group <g>` — this hook runs before *every* member of `<g>`: the
+  group's begin barrier waits on it (the mirror image of `--requires-group`).
+  The provider is not itself a member.
+
+Groups resolve late, in `_zdot_init_resolve_groups` (`core/hooks.zsh`), called
+by `zdot_init` *after* the bundle init pass — so membership is complete,
+including hooks registered by bundle init functions, before any edges are
+derived. Resolution synthesises two no-op **barrier hooks** per group `G`:
+`_zdot_group_begin_G` (provides `_group_begin_G`) and `_zdot_group_end_G`
+(provides `_group_end_G`). Each member requires the begin phase and provides a
+per-member phase `_group_member_G_<hook_id>` that the end barrier requires,
+context-restricted to that member's contexts; `--requires-group G` becomes a
+plain `--requires _group_end_G`.
+
+**Why barriers instead of edge expansion:** the group becomes two ordinary nodes
+in the same DAG, so every existing mechanism — topological sort, force-deferral,
+context filtering, plan caching, introspection — handles groups with no special
+cases. Adding or removing a member changes nothing outside the barrier wiring.
+
+Two group names are reserved and get extra ordering in the planner: `pre-defer`
+(members run as the last eager step, just before the first prompt) and
+`finally` (members run after the deferred drain has quiesced). Bundles lean on
+ordinary groups for their configuration windows: omz uses `omz-configure` and
+`omz-plugins`, pz uses `pz-configure`, so user `zstyle`/configuration hooks can
+join a group and be guaranteed to run before the bundle consumes the settings.
+
+## The bundle handler registry
+
+Bundles exist because some "plugins" are *sub-specs of one shared repository*
+with their own path layout, load semantics, and initialization lifecycle —
+oh-my-zsh (`omz:lib`, `omz:plugins/<name>`) and Prezto (`pz:modules/<name>`)
+being the two shipped handlers (`core/plugin-bundles/omz.zsh`, `pz.zsh`).
+Without bundles, every OMZ-ism would leak into `core/plugins.zsh`.
+
+`zdot_register_bundle <name> [--init-fn <fn>] [--provides <phase>]` registers a
+handler. A handler owns specs via a naming-convention contract:
+
+| Function | Required | Purpose |
+|---|---|---|
+| `zdot_bundle_<name>_match <spec>` | yes | returns 0 if this handler owns the spec |
+| `zdot_bundle_<name>_path <spec>`  | yes | sets `REPLY` to the on-disk path |
+| `zdot_bundle_<name>_clone <spec>` | yes | ensures the plugin is on disk |
+| `zdot_bundle_<name>_load <spec>`  | yes | sources/activates the plugin |
+| `zdot_bundle_<name>_repo/_url/_name` | no | git dir / clone URL / display label for update tooling |
+
+`zdot_plugin_path`, `zdot_plugin_clone`, `zdot_load_plugin`, etc. each probe
+`_zdot_bundle_handler_for` and delegate when a handler matches; plain
+`user/repo` specs fall through to the GitHub defaults. The shared backing repo
+is registered with `zdot_use_bundle <repo>` so cleanup tooling does not treat it
+as an orphan.
+
+The two registration flags carry the lifecycle:
+
+- `--init-fn <fn>` — called by `zdot_init` during the bundle init pass. Its job
+  is to register the bundle's internal hooks (it must not call `zdot_init`).
+  Deferring these registrations into an init function — rather than doing them
+  at file-source time — means they happen after all user declarations and
+  before group resolution, so group-based configuration windows
+  (`omz-configure`) see complete membership. omz registers three hooks here:
+  setup (`--requires-group omz-configure --provides omz-bundle-initialized`),
+  lib load (`--requires omz-bundle-initialized --provides omz-lib-loaded
+  --provides-group omz-plugins`), and theme init (`--requires omz-lib-loaded
+  --provides omz-theme-ready`). pz registers one
+  (`_zdot_pz_load_init --requires plugins-cloned --requires-group pz-configure
+  --provides pz-bundle-initialized pz-init-loaded`).
+- `--provides <phase>` — the phase consumers of this bundle's specs implicitly
+  depend on; it feeds the auto-requires injection in `zdot_use_plugin`
+  described above. omz registers `--provides omz-bundle-initialized`; pz
+  currently registers no `--provides`.
+
+## `zdot_init` — orchestration
+
+`zdot_init` (`core/init.zsh`) is idempotent (`_ZDOT_INIT_DONE`) and runs, in
+order:
+
+1. **Clone** — executes the pre-registered `plugins-cloned-init` hook
+   (`--provides plugins-cloned`), which calls `zdot_plugins_clone_all`. All
+   source is on disk before anything fires.
+2. **Bundle init pass** — `_zdot_init_bundles` calls each registered bundle's
+   `--init-fn`.
+3. **Group resolution** — `_zdot_init_resolve_groups` synthesises barriers and
+   concrete edges. Runs every shell, even on plan-cache hits, because the
+   barrier hook ids it captures are deliberately not serialized.
+4. **Plan and execute** — `load_cache` restores the cached execution plan, or
+   `zdot_build_execution_plan` + `zdot_cache_save_plan` build and cache it
+   (`core/cache.zsh`, versioned via `_ZDOT_CACHE_VERSION`); then
+   `zdot_execute_all` runs the eager plan and enqueues the deferred drain.
+5. **Compile** — `zdot_cache_compile_all` byte-compiles after execution, since
+   hooks may generate new `.zsh` files.
+
+**Why a single trigger:** `zdot_init` is the explicit line in the sand between
+declaration and execution — the user's `.zshrc` makes all `zdot_use_plugin` /
+`zdot_register_hook` declarations and then calls `zdot_init` exactly once at
+the end. There is no "declarations finished" phase token to remember to provide,
+no implicit kick-off a module could race; everything before the call is pure
+registration, and everything after is driven by one dependency graph built from
+a complete picture. This replaced the earlier `plugins-declared` phase and the
+hand-enumerated deferred-load functions that duplicated the declarations.
+
+## Alternatives considered
+
+- **Per-plugin load lists** (the pre-redesign state): deferred plugins were
+  re-enumerated in a manual loader function. Rejected because every addition had
+  to be made twice and the two lists drifted.
+- **A `plugins-declared` phase instead of `zdot_init`:** rejected because a
+  phase has to be provided by *some* hook, which reintroduces the question of
+  who runs last; an explicit function call is unambiguous.
+- **Eager group resolution at registration time:** rejected because membership
+  is incomplete until the bundle init pass; late resolution inside `zdot_init`
+  sees the whole graph.

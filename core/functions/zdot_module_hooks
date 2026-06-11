@@ -5,7 +5,7 @@
 # primitive — it is called interactively or from debug/test scripts.
 #
 # Module membership is read from `_ZDOT_HOOK_MODULES`, which is populated by
-# `zdot_hook_register` when hooks are declared.  For each hook the output
+# `zdot_register_hook` when hooks are declared.  For each hook the output
 # shows the function name, its `provides` set, and its `requires` set so the
 # reader can quickly audit what a module contributes to the dependency graph.
 #

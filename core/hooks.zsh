@@ -298,10 +298,12 @@ zdot_register_hook() {
             _ZDOT_GROUP_MEMBERS[$_hg]="${_ZDOT_GROUP_MEMBERS[$_hg]# }"
         done
     fi
+    # A provider is NOT a member: it precedes the group entirely. The group's
+    # begin barrier gains a dependency on the provider (wired in
+    # _zdot_init_resolve_groups), so every member runs after the provider —
+    # the mirror image of --requires-group (group-end → requirer).
     if [[ -n $hook_provides_group ]]; then
         _ZDOT_HOOK_PROVIDES_GROUP[$hook_id]="$hook_provides_group"
-        _ZDOT_GROUP_MEMBERS[$hook_provides_group]+=" $hook_id"
-        _ZDOT_GROUP_MEMBERS[$hook_provides_group]="${_ZDOT_GROUP_MEMBERS[$hook_provides_group]# }"
     fi
     [[ -n $hook_requires_group ]] && _ZDOT_HOOK_REQUIRES_GROUP[$hook_id]="$hook_requires_group"
 
@@ -1000,7 +1002,7 @@ zdot_build_execution_plan() {
 
         # Drain synthetic group-member bridge phase.
         #
-        # _zdot_init_resolve_groups (plugins.zsh) synthesises barrier hooks
+        # _zdot_init_resolve_groups (core/hooks.zsh) synthesises barrier hooks
         # that provide `_group_begin_G` and `_group_end_G` phases and injects
         # `_group_member_G_<hid_m>` into each member's _ZDOT_HOOK_PROVIDES.
         # Because those phases are in _ZDOT_HOOK_PROVIDES they are processed
@@ -1254,6 +1256,11 @@ zdot_build_execution_plan() {
 #   3. For every hook H with --requires-group G:
 #        • inject _group_end_G into _ZDOT_HOOK_REQUIRES[H]
 #
+#   4. For every hook P with --provides-group G (the mirror image of 3):
+#        • synthesise phase _group_provider_G_<hid_p>, append to _ZDOT_HOOK_PROVIDES[P]
+#        • inject it into _ZDOT_HOOK_REQUIRES of _zdot_group_begin_G
+#          (begin waits for every provider, so all members run after them)
+#
 # All synthetic phases are registered into _ZDOT_PHASE_PROVIDERS_BY_CONTEXT for
 # every context in the union so the DAG provider-check passes.
 _zdot_init_resolve_groups() {
@@ -1270,6 +1277,8 @@ _zdot_init_resolve_groups() {
     done
     for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
         _grp="${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}"
+        [[ -n $_grp ]] && _all_groups[$_grp]=1
+        _grp="${_ZDOT_HOOK_PROVIDES_GROUP[$_hid]:-}"
         [[ -n $_grp ]] && _all_groups[$_grp]=1
     done
 
@@ -1293,11 +1302,14 @@ _zdot_init_resolve_groups() {
                 _ctx_union[$_ctx]=1
             done
         done
-        # Always include contexts from hooks that require this group, so that
-        # the synthetic barriers are visible to the DAG context filter even
-        # when the requiring hook runs in a wider context than the members.
+        # Always include contexts from hooks that require or provide into this
+        # group, so that the synthetic barriers are visible to the DAG context
+        # filter even when those hooks run in a wider context than the members.
         for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
-            [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            if [[ "${_ZDOT_HOOK_REQUIRES_GROUP[$_hid]:-}" != "$_grp" && \
+                  "${_ZDOT_HOOK_PROVIDES_GROUP[$_hid]:-}" != "$_grp" ]]; then
+                continue
+            fi
             for _ctx in ${=_ZDOT_HOOK_CONTEXTS[$_hid]:-}; do
                 _ctx_union[$_ctx]=1
             done
@@ -1459,11 +1471,37 @@ _zdot_init_resolve_groups() {
             fi
         done
 
+        # -- Wire provides-group hooks to run before the begin barrier -------
+        # Mirror image of --requires-group: each provider P gets a synthetic
+        # `_group_provider_G_<hid_p>` phase, and the BEGIN barrier requires it —
+        # so every member (which requires _group_begin_G) runs after every
+        # provider. Same per-context gating as the member→end wiring: the edge
+        # only counts in shells where the provider participates, recorded via
+        # _ZDOT_HOOK_REQUIRES_CONTEXTS.
+        # (Initialise on declaration: re-declaring an existing local without an
+        # initialiser makes zsh echo the value — this line runs once per group.)
+        local _phase_provider=""
+        for _hid in "${(k)_ZDOT_HOOKS[@]}"; do
+            [[ "${_ZDOT_HOOK_PROVIDES_GROUP[$_hid]:-}" == "$_grp" ]] || continue
+            _phase_provider="_group_provider_${_grp}_${_hid}"
+            if [[ " ${_ZDOT_HOOK_PROVIDES[$_hid]:-} " != *" ${_phase_provider} "* ]]; then
+                _ZDOT_HOOK_PROVIDES[$_hid]+="${_ZDOT_HOOK_PROVIDES[$_hid]:+ }${_phase_provider}"
+            fi
+            for _reg_ctx in ${=_ZDOT_HOOK_CONTEXTS[$_hid]:-}; do
+                _ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_reg_ctx}:${_phase_provider}]=$_hid
+            done
+            if [[ " ${_ZDOT_HOOK_REQUIRES[$_hid_begin]:-} " != *" ${_phase_provider} "* ]]; then
+                _ZDOT_HOOK_REQUIRES[$_hid_begin]+="${_ZDOT_HOOK_REQUIRES[$_hid_begin]:+ }${_phase_provider}"
+                _ZDOT_HOOK_REQUIRES_CONTEXTS[${_hid_begin}:${_phase_provider}]="${_ZDOT_HOOK_CONTEXTS[$_hid]}"
+            fi
+        done
+
         # -- Group barriers: pre-accept structural force-deferral -----------
         # A group's begin/end barriers are synthetic, OPTIONAL gates. The end
-        # barrier's ONLY requires are its members' `_group_member_*` phases (see
-        # the wiring above; begin barriers have empty requires), so if any member
-        # is deferred the end barrier is force-deferred too. That is purely
+        # barrier's ONLY requires are its members' `_group_member_*` phases, and
+        # the begin barrier's only requires are `_group_provider_*` phases (see
+        # the wiring above), so if any member (or provider) is deferred the
+        # barrier is force-deferred too. That is purely
         # structural — the barrier mirrors its members by design, not an
         # unexpected dependency chain — so pre-accept the barriers for EVERY group
         # to keep the force-defer pass silent about them. The real signal is
@@ -1532,6 +1570,13 @@ _zdot_render_phase_list() {
                 _hid="hook_${_tok##*_hook_}"   # trailing hook_<N>, no var-in-pattern
                 [[ " ${_ZDOT_GROUP_MEMBERS[$_grp]:-} " == *" $_hid "* ]] || continue
                 _chip="%F{magenta}[group:${_grp}]%f"
+                ;;
+            _group_provider_*_hook_<->)
+                # Provider token (--provides-group): the hook precedes the
+                # group's begin barrier. One chip per group.
+                _grp=${_tok#_group_provider_}
+                _grp=${_grp%_hook_<->}
+                _chip="%F{magenta}[group:${_grp}:provider]%f"
                 ;;
             _group_begin_*)
                 _chip="%F{magenta}[group:${_tok#_group_begin_}:start]%f"

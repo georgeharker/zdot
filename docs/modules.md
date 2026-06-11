@@ -4,9 +4,10 @@ zdot ships a set of built-in modules in `modules/`. Each module is a
 self-contained directory with a main `.zsh` file and optional `functions/`
 subdirectory.
 
-User modules live separately (see [Module Search Path](../README.md#module-search-path))
-and shadow built-in modules of the same name. Use `zdot module clone <name>` to
-copy a built-in module to your user directory as a starting point.
+User modules live separately (see
+[Module Search Path](module-guide.md#module-search-path)) and shadow built-in
+modules of the same name. Use `zdot module clone <name>` to copy a built-in
+module to your user directory as a starting point.
 
 ---
 
@@ -21,10 +22,12 @@ bootstrap  →  env, sudo, history, secrets
          secrets       →  dotfiler, local_rc (overrides), uv (optional)
          bootstrap     →  brew / apt
                        →  omp-prompt | starship-prompt | omz-prompt  (provides prompt-ready)
-                       →  plugins     →  autocompletion, fzf, shell-extras, tmux, nodejs
+                       →  plugins     →  autocompletion, fzf, shell-extras, tmux, nodejs,
+                                         syntax-highlight, vim-mode, ai, update-nag
                                   omz  (OMZ bundle defaults; load with plugins)
                        →  venv        →  completions
                                       →  rust, bun, uv
+         prompt-ready  →  patina, syntax-highlight (fsh), vim-mode (post-init)
 ```
 
 `bootstrap-ready` is the default `--requires` for `zdot_simple_hook` and
@@ -254,6 +257,31 @@ Ships a default-if-unset hook in the `omz-configure` group:
 |---|---|---|
 | `':omz:update' mode` | `prompt` | OMZ-internal default |
 
+---
+
+### `update-nag`
+
+Loads a package-update reminder plugin (default:
+[zsh-pkg-update-nag](https://github.com/georgeharker/zsh-pkg-update-nag),
+running in background mode) that nags about pending package-manager updates.
+The plugin spec is read at **parse time**, so override it before the module
+is sourced — directly in `.zshrc` or via a `zdot_before_module` callback.
+Further plugin config (its `ZSH_PKG_UPDATE_NAG_*` env vars) belongs in
+`update-nag-configure` group hooks or
+`${XDG_CONFIG_HOME}/zsh-pkg-update-nag/config.zsh`.
+
+| | |
+|---|---|
+| **Provides** | `update-nag-configured`, `update-nag-loaded` |
+| **Requires** | group `update-nag-configure` |
+| **Context** | interactive only |
+
+**zstyle options:**
+
+| Key | Default | Description |
+|---|---|---|
+| `':zdot:update-nag' plugin` | `georgeharker/zsh-pkg-update-nag` | Plugin spec to clone and load (read at parse time) |
+
 Override anywhere in `.zshrc` with a plain `zstyle` line — the shipped
 default only applies if the style is unset. Or layer additional OMZ
 configuration via a hook in the group:
@@ -348,6 +376,91 @@ is launched by the `completions` module, not here.)
 
 ---
 
+### `syntax-highlight`
+
+Loads `fast-syntax-highlighting` and `fast-abbr-highlighting` as deferred
+plugins with a bespoke dependency chain (`fsh` waits for `prompt-ready`;
+`fast-abbr` waits for `fsh-ready` and `abbr-ready` from the autocompletion
+module). Post-init applies an fsh theme when the theme file is newer than the
+current one.
+
+| | |
+|---|---|
+| **Provides** | `syntax-highlight-*` phases, `fsh-ready`, `fast-abbr-ready` (plugin hooks) |
+| **Requires** | `plugins-cloned`; plugins: `prompt-ready`, `abbr-ready` |
+| **Context** | interactive (post-init); configure in both |
+
+**zstyle options:**
+
+| Key | Default | Description |
+|---|---|---|
+| `':zdot:syntax-highlight' fsh-theme` | `$XDG_CONFIG_HOME/fast-syntax-highlighting/tokyonight.ini` | Path to a `fast-syntax-highlighting` `.ini` theme; empty string disables theming |
+
+---
+
+### `patina`
+
+Activates [zsh-patina](https://github.com/georgeharker/zsh-patina), a
+Rust-based syntax-highlighting daemon, and registers its completion. Install
+the binary via Homebrew, apt, or cargo; the module adds `zsh-patina` to the
+brew/apt `verify-tools` lists at parse time and silently skips if the tool is
+absent. Configuration lives in `~/.config/zsh-patina/config.toml`, not
+zstyle.
+
+| | |
+|---|---|
+| **Provides** | `patina-ready` |
+| **Requires** | `bootstrap-ready`, `prompt-ready`, group `patina-configure`, tool `zsh-patina` (optional) |
+| **Context** | interactive only |
+| **zstyle** | none |
+
+---
+
+### `ai`
+
+OpenAI-compatible LLM integration (wraps the
+[zsh-ai](https://github.com/georgeharker/zsh-ai) plugin). Four keybind-driven
+ZLE widgets share one async backbone: `^Xa` ask (scratchpad → candidate
+commands), `^Xm` modify the current buffer, `^Xq` freeform question, `^Xi`
+fill-in-the-middle completion. Talks to any OpenAI-compatible endpoint
+(llama.cpp, ollama, LM Studio, vLLM, OpenRouter, …). The load phase creates
+the plugin's Python venv via `uv sync`, hence the `uv-configured`
+requirement. See [modules/ai/README.md](../modules/ai/README.md) for the
+full configuration walkthrough.
+
+| | |
+|---|---|
+| **Provides** | `ai-configured`, `ai-loaded` |
+| **Requires** | `plugins-cloned`, `secrets-loaded`, `uv-configured`; group `ai-configure` |
+| **Context** | interactive only |
+
+**zstyle options:**
+
+| Key | Description |
+|---|---|
+| `':zdot:ai' add-cli-to-path` | Prepend the plugin's `bin/` to `$PATH` for the `zsh-ai` CLI (default off) |
+| `':zdot:ai' api-key-env` | Forwarded to `:zsh-ai:* api_key_env` when unset upstream |
+| `':zsh-ai:*'` keys | Backstop defaults seeded for the plugin (`endpoint`, keybinds, …); any user value wins. Set model etc. via an `ai-configure` hook. |
+
+---
+
+### `vim-mode`
+
+Vi keybindings with cursor-shape and prompt integration (wraps the
+[zsh-vim-mode](https://github.com/georgeharker/zsh-vim-mode) plugin). The
+configure phase consumes the `vim-mode-configure` extension group; post-init
+wires prompt integration once `prompt-ready` is provided. See
+[modules/vim-mode/README.md](../modules/vim-mode/README.md).
+
+| | |
+|---|---|
+| **Provides** | `vim-mode-configured`, `vim-mode-loaded`, `vim-mode-post-configured` |
+| **Requires** | `plugins-cloned`, group `vim-mode-configure`; post-init: `prompt-ready` |
+| **Context** | interactive only |
+| **zstyle** | `':zdot:vim-mode'` keys (e.g. `prompt omz`) — see the module README |
+
+---
+
 ### `fzf`
 
 Loads the OMZ `fzf` plugin and `fzf-tab`; configures keybindings and
@@ -412,7 +525,7 @@ disabled in non-interactive shells and inside Neovim.
 
 | Key | Default | Description |
 |---|---|---|
-| `':zdot:nodejs' lazy-cmd` | `opencode mcp-hub copilot prettierd claude-code` | Commands that trigger lazy nvm load |
+| `':zdot:nodejs' lazy-cmd` | `opencode copilot prettierd claude` | Commands that trigger lazy nvm load |
 
 ---
 
@@ -565,5 +678,4 @@ and history search forward/backward.
 
 | Module | Notes |
 |---|---|
-| `old-plugins` | Legacy antidote-based plugin loader. Superseded by the current plugin system. Do not load alongside `plugins`. |
 | `test-debug` | Developer diagnostic module. Not for production use. |

@@ -15,7 +15,7 @@ quick start to complex plugin-loading lifecycles.
 - [User Extension Points](#user-extension-points)
 - [Common Patterns](#common-patterns)
 - [Registering in .zshrc](#registering-in-zshrc)
-- [API Reference](#api-reference)
+- [Further Reference](#further-reference)
 
 ---
 
@@ -529,35 +529,13 @@ zdot_register_hook _my_finally_b interactive noninteractive \
     --group finally --requires my-finally-a-done
 ```
 
-How the `pre-defer` and `finally` begin barriers are pushed last — and why the two differ:
-
-- **`pre-defer`** must stay **eager**. Its begin barrier is ordered after every
-  other eager hook with **synthetic Kahn-graph edges only** (via each
-  predecessor's `_defer_order_<hid>` bridge phase), never real `--requires`.
-  This is deliberate: the eager/deferred split isn't known until force-deferral
-  runs *after* the sort, so a real dependency on a hook that later promotes to
-  deferred would drag `pre-defer` into the deferred set too. Synthetic edges are
-  invisible to force-deferral, so they can't promote it. (For introspection, the
-  real, now-known-eager dependencies are recorded separately *after*
-  force-deferral — they document the order in `zdot hook graph`; they don't
-  enforce it.)
-- **`finally`** must run after *everything*, deferred work included, so its begin
-  barrier carries a **real `--requires` on every other in-plan hook** (each prior
-  hook H is made to provide `_group_member_finally_<H>`, and the begin barrier
-  requires it — the same member-phase mechanism a normal group's *end* barrier
-  uses, applied to the *begin* barrier here). `finally` is therefore deferred
-  **only if deferred hooks exist**: requiring a deferred hook's phase force-defers
-  the begin barrier, cascading the whole subgraph into the deferred set, and the
-  drain releases it last. If nothing is deferred, `finally` simply stays eager and
-  runs last in the eager pass (like `pre-defer`, one step later). When the cascade
-  does happen it is the whole point, not an accident, so the entire `finally`
-  subgraph is pre-accepted (`zdot_allow_defer`-style) and the force-defer pass
-  stays silent for it.
-
 Members respect their own `--requires` and each other's; they only fire in
 contexts where they survived into the execution plan. Both groups are standard
 barriers whose begin gate is ordered last — `pre-defer` last among eager,
-`finally` last of all.
+`finally` last of all. How the scheduler achieves that (synthetic Kahn-graph
+edges for `pre-defer`, a real requires-everything begin barrier for `finally`,
+and the intentional force-defer cascade) is internals — see
+[Implementation → Predefined group scheduling](implementation.md#predefined-group-scheduling-pre-defer-and-finally).
 
 ---
 
@@ -1028,55 +1006,11 @@ This triggers: clone -> bundle init -> group resolution -> plan -> execute.
 
 ---
 
-## API Reference
+## Further Reference
 
-### Sugar Functions
-
-| Function | Purpose |
-|----------|---------|
-| `zdot_simple_hook <name> [flags]` | Single-hook module sugar |
-| `zdot_define_module <name> [flags]` | Multi-phase module sugar |
-
-### Core Functions
-
-| Function | Purpose |
-|----------|---------|
-| `zdot_register_hook <fn> <ctx...> [flags]` | Register a hook |
-| `zdot_use_plugin <spec> [defer] [flags]` | Declare a plugin for cloning |
-| `zdot_load_plugin <spec>` | Load a plugin (call inside hook functions) |
-| `zdot_load_module <name>` | Load a module file |
-| `zdot_register_bundle <handler> [flags]` | Register a plugin bundle handler |
-| `zdot_register_completion_file <name> <cmd>` | Register a completion generator |
-| `zdot_register_completion_live <name> <cmd>` | Register a live completion |
-
-**`zdot_register_hook` variant flags:**
-
-| Flag | Effect |
-|------|--------|
-| `--variant <name>` | Only run in the named variant (repeatable for OR logic) |
-| `--variant-exclude <name>` | Skip in the named variant |
-
-`--variant` and `--variant-exclude` are mutually exclusive per call.
-Hooks with neither flag run in all variants (default/backward-compatible behaviour).
-
-### Module Utilities
-
-| Function | Purpose |
-|----------|---------|
-| `zdot_module_autoload_funcs [names]` | Autoload functions from `functions/` |
-| `zdot_module_dir` | Get current module's directory (sets `REPLY`) |
-| `zdot_module_path <name>` | Get a module's file path (sets `REPLY`) |
-| `zdot_verify_tools <tools...>` | Verify tools are available |
-| `zdot_has_tty` | Check if a TTY is available |
-| `zdot_interactive` | Check if shell is interactive |
-| `zdot_is_macos` / `zdot_is_platform <name>` | Platform checks |
-| `zdot_variant` | Print the active variant string (may be empty) |
-| `zdot_is_variant <name>` | Return 0 if active variant matches `<name>` |
-
-### Orchestration (in .zshrc)
-
-| Function | Purpose |
-|----------|---------|
-| `zdot_allow_defer <fn> [phases]` | Acknowledge force-deferred hook |
-| `zdot_defer_order <name1> <name2> [...]` | Order deferred hooks |
-| `zdot_init` | Build and execute the hook plan |
+Every function used in this guide — registration sugar, module utilities,
+plugin declaration, orchestration — is documented with its full flag set in
+the [API Reference](api-reference.md). Configuration options live in the
+[zstyle reference](zstyle-reference.md), and the shipped modules (useful as
+worked examples of every pattern here) are catalogued in
+[modules.md](modules.md).

@@ -6,6 +6,27 @@ zsh configuration. It assumes macOS or Linux with git and zsh already installed.
 
 ---
 
+## Why this setup?
+
+zdot organizes what's *inside* your `.zshrc`; dotfiler manages the rc files
+themselves -- your `.zshrc`/`.zshenv`, the rest of `~/.config`, and your user
+modules live as symlinks into one versioned git repo that reaches every
+machine. zdot registers as a dotfiler update hook, so a single login-time
+check updates your dotfiles, rc files, and zdot together; as a submodule, the
+exact zdot version is pinned in your dotfiles history. See
+[the README](../README.md#option-b-with-dotfiler-recommended) for the full
+rationale, and dotfiler's
+[zdot-integration](https://github.com/georgeharker/dotfiler/blob/main/docs/zdot-integration.md)
+and
+[how-updates-work](https://github.com/georgeharker/dotfiler/blob/main/docs/how-updates-work.md)
+docs for the update lifecycle (the two-round model, topologies, and release
+channels).
+
+Neither tool requires the other -- for standalone zdot, use the
+[README Quick Start](../README.md#option-a-standalone) instead.
+
+---
+
 ## What you end up with
 
 ```
@@ -74,8 +95,11 @@ Create `~/.dotfiles/.config/zsh/.zshrc`:
 # Source zdot
 source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
-# Load the modules you want — start minimal, add more later
+# Load the modules you want — start minimal, add more later.
+# xdg + bootstrap are the foundation; nearly everything depends on them.
 zdot_load_module xdg
+zdot_load_module bootstrap
+zdot_load_module env
 zdot_load_module history
 zdot_load_module brew         # macOS only
 zdot_load_module completions
@@ -180,7 +204,7 @@ use `dotfiler update` as normal.
 
 ## Further reading
 
-- [dotfiler Integration](../README.md#dotfiler-integration) — adding zdot to an existing dotfiler repo
 - [dotfiler zdot-integration.md](https://github.com/georgeharker/dotfiler/blob/main/docs/zdot-integration.md) — full reference: topology options, update lifecycle, symlink chain details
+- [using-plugins.md](using-plugins.md) — loading plugins and configuring shipped modules
 - [zstyle-reference.md](zstyle-reference.md) — all configuration options
 - [module-guide.md](module-guide.md) — writing your own modules
