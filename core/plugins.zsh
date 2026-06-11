@@ -290,7 +290,7 @@ zdot_use_plugin() {
     [[ -n "$opt_provides_group" ]] && hook_args+=( --provides-group  "$opt_provides_group" )
     if [[ $subcommand == defer || $subcommand == defer-prompt ]]; then
         [[ $subcommand == defer ]]         && hook_args+=( --deferred )
-        [[ $subcommand == defer-prompt ]] && hook_args+=( --defer-prompt )
+        [[ $subcommand == defer-prompt ]] && hook_args+=( --deferred-prompt )
         [[ -n "$opt_requires" ]] && hook_args+=( --requires "$opt_requires" )
     fi
 
@@ -536,7 +536,7 @@ zdot_plugins_clone_all() {
     # plugins are already on disk — skip all clone-checks entirely.
     if [[ "$old_sentinel" == "$current_specs" ]]; then
         # Populate _ZDOT_PLUGINS_PATH from cache dir without subshells so that
-        # zdot_load_deferred_plugins can use it even on the fast path.
+        # plugin loaders can resolve paths even on the fast path.
         local _fast_spec _fast_cache _fast_all_present=1
         _fast_cache=${_ZDOT_PLUGINS_CACHE}
         for _fast_spec in $_ZDOT_PLUGINS_ORDER; do
@@ -591,8 +591,8 @@ zdot_plugins_clone_all() {
 # Plugin Loading (on-demand)
 # ============================================================================
 
-# Load a plugin and provide a phase
-# Usage: zdot_load_plugin <spec> [--provides <phase>]
+# Load a plugin and optionally provide a phase on success.
+# Usage: zdot_load_plugin <spec> [provides-phase]   (second arg is positional)
 zdot_load_plugin() {
     local spec=${1%@*}   # strip @version; dedup key + path use the bare spec
     local provides_phase=$2

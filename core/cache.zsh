@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="22"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="23"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -459,6 +459,12 @@ load_cache() {
         zdot_verbose "zdot: cache: disabled, skipping plan load"
         return 1
     fi
+
+    # Resolve the variant BEFORE computing the plan suffix. On a cache hit
+    # zdot_build_context (the only other resolver call site) never runs, so
+    # without this a variant shell would silently load the default-variant
+    # plan. Idempotent: re-resolution on the miss path yields the same value.
+    zdot_resolve_variant
 
     # Generate context-specific filename
     _zdot_cache_context_suffix

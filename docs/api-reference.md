@@ -98,7 +98,7 @@ zdot_register_hook <function-name> <context...> [flags...]
 | `--deferred` | | Mark for post-prompt deferred execution |
 | `--deferred-prompt` | | Like `--deferred` but refreshes the prompt afterward |
 | `--group` | `<name>` | Add to a named group (may repeat). Three names are predefined: `bootstrap` (runs first), `pre-defer` (runs as the last eager step, before the deferred phase), and `finally` (runs last of all, after the deferred drain). See the [Module Guide](module-guide.md#predefined-groups-bootstrap-pre-defer-and-finally). |
-| `--provides-group` | `<name>` | Provide into a named group |
+| `--provides-group` | `<name>` | Run *before* the named group: the group's begin barrier waits for this hook, so every member runs after it. Mirror image of `--requires-group` (which waits for the group's end barrier). The provider is not a member |
 | `--requires-group` | `<name>` | Require all members of the named group to complete |
 | `--variant` | `<name>` | Only run when variant matches (may repeat; empty = all) |
 | `--variant-exclude` | `<name>` | Exclude when variant matches (takes priority over `--variant`) |
@@ -202,6 +202,8 @@ Registers up to five lifecycle hooks from a single call:
 | `--provides-tool` | `<tool>` | Tool provided by the load phase (may repeat) |
 | `--requires-tool` | `<tool>` | Tool required by the load phase (may repeat) |
 | `--requires` | `<phase...>` | Extra requirements for the load phase |
+| `--after` / `--after-tool` | `<target...>` / `<tool>` | Soft ordering for the load phase — same semantics as on [`zdot_register_hook`](#zdot_register_hook) |
+| `--before` / `--before-tool` | `<target...>` / `<tool>` | Soft ordering mirror, applied to the load phase |
 | `--auto-bundle-deps` | | Match each `--load-plugins` spec to a registered plugin-framework bundle handler and auto-wire the generated load hook. Per distinct handler found, injects `--group <handler>-plugins` and (if the handler declared one) `--requires <handler-provided-phase>`; always adds `--requires plugins-cloned`. No-op for specs no handler claims; ignored without `--load-plugins`. See [Module Guide → Bundle integration](module-guide.md#bundle-framework-integration-omz-prezto). |
 | `--group` | `<name>` | Explicit group for the load phase (may repeat) |
 | `--auto-configure-group` | | Expose the `<basename>-configure` extension group. The `--configure` fn (or `--load` fn, if no configure) becomes the CONSUMER (`--requires-group`), running after all user group hooks. Requires at least one of `--configure` / `--load`. |
@@ -486,11 +488,13 @@ fi
 List all loaded modules with their source directories.
 
 ```zsh
-zdot_module_list
+zdot_module_list [--before]
 ```
 
 Modules from the built-in dir are labelled "(modules)"; user-supplied modules
-show their directory path.
+show their directory path. With `--before`, each module also lists its
+registered [`zdot_before_module`](#zdot_before_module) callbacks — `--fn`
+entries with the registering origin, `--cmd` entries with the command body.
 
 ---
 
@@ -596,9 +600,12 @@ zdot_use_plugin <spec> [subcommand] [flags...]
 | `defer` | Register a deferred hook to load this plugin |
 | `defer-prompt` | Register a deferred hook with prompt refresh |
 
+All flags valid with `defer` are equally valid with `defer-prompt` — the two
+differ only in the prompt refresh after loading.
+
 | Flag | Argument | Valid With | Description |
 |------|----------|------------|-------------|
-| `--name` | `<n>` | hook, defer | Hook name label |
+| `--name` | `<n>` | hook, defer | Names the generated loader (`_zdot_autoload_<n>`), which is also the hook's effective label |
 | `--provides` | `<p>` | hook, defer | Phase provided on load |
 | `--config` | `<fn>` | hook, defer | Config function called before loading |
 | `--context` | `<ctx...>` | hook, defer | Contexts (default: `interactive noninteractive`) |
@@ -696,11 +703,12 @@ exist, returns immediately.
 Load a plugin by sourcing its `*.plugin.zsh` file.
 
 ```zsh
-zdot_load_plugin <spec>
+zdot_load_plugin <spec> [provides-phase]
 ```
 
 Handles deduplication, bundle handler delegation, fpath addition for `functions/`
-subdirectories, and optional bytecode compilation.
+subdirectories, and optional bytecode compilation. The optional second
+(positional) argument names a phase to provide once the plugin has loaded.
 
 ---
 
@@ -712,7 +720,50 @@ Resolve a plugin spec to its filesystem path.
 zdot_plugin_path <spec>
 ```
 
-Sets `REPLY` to the filesystem path.
+Sets `REPLY` to the on-disk path (the subdirectory for bundle sub-specs like
+`omz:plugins/git`, the repo root for plain `user/repo` specs). Any `@version`
+pin is stripped — it is a git ref, never part of the path. Dispatches to the
+owning bundle handler's `_path` hook when a bundle claims the spec.
+
+---
+
+### `zdot_plugin_repo`
+
+Resolve a plugin spec to the git working directory used for fetch/pull.
+
+```zsh
+zdot_plugin_repo <spec>
+```
+
+Sets `REPLY` to the repo directory. For bundle-owned specs this is the
+bundle's shared clone (e.g. the single OMZ repo for every `omz:` spec).
+Returns 1 if the owning bundle exposes no `_repo` hook.
+
+---
+
+### `zdot_plugin_url`
+
+Resolve a plugin spec to its upstream clone URL.
+
+```zsh
+zdot_plugin_url <spec>
+```
+
+Sets `REPLY` to the URL (`https://github.com/<spec>` for plain specs).
+Returns 1 if the owning bundle exposes no `_url` hook.
+
+---
+
+### `zdot_plugin_name`
+
+Resolve a plugin spec to a human-readable label suitable for output.
+
+```zsh
+zdot_plugin_name <spec>
+```
+
+Sets `REPLY` to the label: the bundle handler's name (or its `_name` hook
+result) for bundle specs, the spec itself for plain `user/repo` specs.
 
 ---
 
@@ -1105,7 +1156,7 @@ Display cache statistics.
 zdot_cache_stats
 ```
 
-Also available via CLI: `zdot cache stats`.
+Also available via CLI: `zdot cache status`.
 
 ---
 
@@ -1369,14 +1420,14 @@ zdot <noun> <verb> [args...]
 
 | Noun | Verbs | Description |
 |------|-------|-------------|
-| `cache` | `invalidate`, `stats` | Cache management |
-| `hook` | `list`, `status` | Hook introspection |
+| `cache` | `status`, `invalidate`, `compile` | Cache management |
+| `hook` | `list`, `plan`, `status`, `defer-queue`, `graph` | Hook introspection |
 | `phase` | `list` | Phase introspection |
-| `plugin` | `list`, `clean`, `remove`, `update`, `reclone` | Plugin management |
-| `module` | `list`, `hooks` | Module introspection |
-| `completion` | `refresh`, `dir` | Completion management |
+| `plugin` | `list`, `update`, `check-updates`, `clean`, `reclone` | Plugin management |
+| `module` | `list`, `clone` | Module introspection |
+| `completion` | `refresh` | Completion management |
 | `secret` | `refresh` | 1Password secrets |
-| `update` | `check`, `run` | Self-update |
+| `update` | `check-updates`, `apply` | Self-update |
 | `info` | | Environment info |
 | `debug` | | Debug diagnostics |
 | `bench` | | Startup benchmark |
@@ -1385,4 +1436,5 @@ zdot <noun> <verb> [args...]
 
 Tab completion is available (via the `_zdot` completion function).
 
-For full CLI documentation, see [commands.md](commands.md).
+The CLI reference in [commands.md](commands.md) is the authoritative
+per-command documentation; this table is just the map.

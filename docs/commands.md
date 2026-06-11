@@ -15,11 +15,13 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | Noun | Verbs |
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
-| `hook` | `list [-v] [-a]`, `plan`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [-v]` |
+| `hook` | `list [-v] [-a]`, `plan`, `status`, `defer-queue`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [-v]` |
+| `phase` | `list` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
 | `module` | `list`, `clone <name>` |
-| `completion` | `refresh` |
+| `completion` | `refresh [--force]` |
 | `secret` | `refresh` |
+| `update` | `check-updates [--force]`, `apply [--force]` |
 | `info` | *(no verb)* |
 | `debug` | *(no verb)* |
 | `bench` | *(no verb)* |
@@ -55,6 +57,10 @@ zdot hook list [-v] [-a]   # List registered hooks
 
 zdot hook plan             # Print the full execution plan in dependency order
 
+zdot hook status           # Show per-hook execution status (run / pending / skipped)
+
+zdot hook defer-queue      # Show the deferred dispatch queue (commands, hooks, delays)
+
 zdot hook graph --depends <name>   # Tree: what <name> requires (recursive)
 zdot hook graph --uses <name>      # Tree: what depends on <name> (recursive)
 zdot hook graph --all              # Full dependency graph for all hooks
@@ -84,7 +90,19 @@ _xdg_init─┬─_brew_init─┬─_op_init─┬─_dotfiler_init
 - DAG nodes printed once; later occurrences shown as `name ↑`.
 - Phase nodes with no provider appear as `[phase: foo] (no provider)`.
 
-**Implementation**: delegates to `zdot_hooks_list`, `zdot_show_plan`, and `zdot_hooks_graph` (core/hooks.zsh).
+**Implementation**: delegates to `zdot_hooks_list`, `zdot_show_plan`, `zdot_hooks_status`, `zdot_show_defer_queue`, and `zdot_hooks_graph` (core/hooks.zsh).
+
+---
+
+## phase
+
+Phase introspection.
+
+```
+zdot phase list            # List all known phases with provider and provided status
+```
+
+**Implementation**: delegates to `zdot_phases_list`.
 
 ---
 
@@ -168,6 +186,26 @@ zdot secret refresh   # Pull latest secrets from 1Password into the shell enviro
 ```
 
 **Implementation**: delegates to `refresh_shell_secrets`.
+
+---
+
+## update
+
+Self-update management. Requires update mode to be enabled
+(`zstyle ':zdot:update' mode` — see the
+[zstyle reference](zstyle-reference.md#self-update--zdotupdate)); with mode
+`disabled` the update hook is not loaded and these verbs report an error.
+
+```
+zdot update check-updates [--force]   # Run the update check now (respecting the configured mode)
+zdot update apply [--force]           # Check and apply, forcing auto mode for this invocation
+```
+
+`--force` bypasses the frequency rate-limit by clearing the check timestamp.
+`apply` temporarily sets mode to `auto` so the update proceeds without
+prompting, then restores your configured mode.
+
+**Implementation**: delegates to `_zdot_update_handle_update` (core/update.zsh).
 
 ---
 

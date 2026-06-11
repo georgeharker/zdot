@@ -1,3 +1,8 @@
 .codecompanion
 .DS_Store
 *.zwc
+/_site/
+/.quarto/
+
+**/*.quarto_ipynb
+_quarto-deploy.yml

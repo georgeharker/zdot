@@ -433,8 +433,9 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
             --provides omz-bundle-initialized \
             --requires-group omz-configure
 
-        # Load omz:lib; --provides-group omz-plugins means any hook tagged
-        # --group omz-plugins gets --requires omz-lib-loaded injected.
+        # Load omz:lib. --provides-group omz-plugins orders this hook before
+        # the group's begin barrier, so every omz-plugins member loads after
+        # the lib stubs are in place.
         zdot_register_hook _zdot_omz_load_lib interactive noninteractive \
             --requires omz-bundle-initialized \
             --provides omz-lib-loaded \

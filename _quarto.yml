@@ -1,0 +1,71 @@
+project:
+  type: website
+  render:
+    - index.md
+    - README.md
+    - docs/README.md   # README files must be listed explicitly; globs skip them
+    - docs/*.md
+    # docs/design/ is deliberately NOT rendered: design/decision records stay
+    # repo-only until reviewed for user visibility.
+    # Module READMEs are linked from the docs (modules.md, zstyle-reference.md)
+    # and must render or those links 404 on the site. Listed explicitly —
+    # README files are skipped by globs. check-docs.zsh's reachability pass
+    # fails CI if a linked README is missing from this list.
+    - modules/ai/README.md
+    - modules/apt/README.md
+    - modules/autocompletion/README.md
+    - modules/brew/README.md
+    - modules/dotfiler/README.md
+    - modules/fzf/README.md
+    - modules/nodejs/README.md
+    - modules/secrets/README.md
+    - modules/update-nag/README.md
+    - modules/venv/README.md
+    - modules/vim-mode/README.md
+
+# gfm_auto_identifiers makes heading anchors match GitHub's slugs (e.g.
+# #cache--zdotcache), which all cross-doc links use. Keep pandoc's full
+# markdown reader otherwise — `from: gfm` breaks Quarto's navigation divs.
+from: markdown+gfm_auto_identifiers
+
+website:
+  title: "zdot"
+  search: true
+  sidebar:
+    style: docked
+    logo: docs/images/zdot.png
+    logo-alt: "zdot logo"
+    tools:
+      - icon: github
+        href: https://github.com/georgeharker/zdot
+        text: GitHub repository
+    contents:
+      - text: "Home"
+        href: index.md
+      - text: "Overview (README)"
+        href: README.md
+      - text: "Documentation Index"
+        href: docs/README.md
+      - section: "Guides"
+        contents:
+          - docs/quickstart-dotfiler.md
+          - docs/using-plugins.md
+          - docs/module-guide.md
+          - docs/advanced.md
+      - section: "Reference"
+        contents:
+          - docs/api-reference.md
+          - docs/zstyle-reference.md
+          - docs/commands.md
+          - docs/modules.md
+          - docs/compinit.md
+      - section: "Internals"
+        contents:
+          - docs/implementation.md
+          - docs/plugin-implementation.md
+
+format:
+  html:
+    theme: pulse
+    toc: true
+    embed-resources: true

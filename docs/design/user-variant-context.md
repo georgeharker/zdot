@@ -1,456 +1,185 @@
 # Design: User-Defined Variant Contexts
 
-Date: 2026-03-16
-Status: Implemented (2026-03-17)
+> Validated against `core/` on 2026-06-10. Implemented as designed (originally 2026-03-17); pre-implementation text in git history.
 
-Implementation notes:
-- §5.3 `_zdot_variant_match` implemented as designed.
-- §5.3 also added `_zdot_context_match` helper (symmetric refactor of the
-  existing inline context-match loop in `zdot_build_execution_plan`).
-- Group barrier variant inheritance added beyond the original design:
-  `_zdot_init_resolve_groups` computes `_ZDOT_HOOK_VARIANTS` and
-  `_ZDOT_HOOK_VARIANT_EXCLUDES` for synthetic begin/end barriers from
-  their members (include = union, exclude = intersection), closing the
-  gap where all-excluded members would leave barrier hooks active.
-- §5.4 `_zdot_build_variant_provider_index` implemented as designed.
-- §5.5 `_zdot_cache_context_suffix` extended to three-part key
-  (`interactive_nonlogin_default`, etc.).  Cache version bumped required
-  (pre-existing note; version currently "19").
-- §5.6 `--variant`/`--variant-exclude` forwarded through
-  `zdot_define_module` to all phase registrations.
+The variant system adds a third, user-defined dimension to zdot's shell
+context. The base context is the detected pair
+`(interactive | noninteractive) × (login | nonlogin)`; the variant extends it
+with an arbitrary user label — `work`, `small`, `server` — so a machine or
+session can opt hooks in or out without editing module code.
 
----
+Usage examples live in [Variants](../advanced.md#variants); flag tables live
+in the [API reference](../api-reference.md). This document states the design
+and the rationale.
 
-## 1. The Problem
+## The Model
 
-zdot's context model is currently a **two-dimensional pair**:
+- The variant is a **single word** chosen by the user, not a fixed enumeration.
+- **Exactly one variant is active** per shell session (possibly the empty
+  string, meaning "default"). It is resolved once and never changes.
+- Hooks carry optional include/exclude variant constraints. A hook with no
+  constraint runs in every variant — pre-variant configurations behave
+  identically.
 
-```
-(interactive | noninteractive)  ×  (login | nonlogin)
-```
+**Why exactly one variant:** a single label keeps the cache keyspace, the
+match predicate, and the mental model linear. Composite needs are expressed
+as composite labels (`work-laptop`) rather than sets, which would force
+power-set cache keys and ambiguous include/exclude semantics.
 
-This produces four possible runtime contexts.  The pair is detected
-automatically from shell flags and never changes.
+## Resolution — `core/ctx.zsh`
 
-A third dimension is needed — a **user variant** — so that a user can
-say "on my small laptop, skip heavy tools" or "at work, load extra
-corporate modules".  This dimension is:
+`zdot_resolve_variant` resolves the active variant once, with this priority:
 
-- **User-defined**: the label names are arbitrary strings, not a fixed
-  enumeration.
-- **Machine-specific**: typically detected by hostname, environment
-  variable, or an explicit file.
-- **Orthogonal**: independent from interactivity and login status.
-- **Optional**: absent variant means "default" / no filtering applied.
+1. `$ZDOT_VARIANT` environment variable — highest, so wrapper scripts and
+   parent processes can override everything.
+2. `zstyle ':zdot:variant' name <value>` — declarative `.zshrc` config.
+3. A user-defined `zdot_detect_variant` function, which sets `REPLY`
+   (hostname dispatch, file probes, etc.).
+4. Otherwise the empty string: the default variant.
 
----
+It is called from `zdot_build_context`, which composes
+`_ZDOT_CURRENT_CONTEXT` and appends a `variant:<name>` token **only when the
+variant is non-empty**. The prefix keeps variant tokens from colliding with
+`interactive`/`login` tokens, and the conditional append keeps
+`_ZDOT_CURRENT_CONTEXT` backward-compatible for consumers that only inspect
+the base pair.
 
-## 2. Design Goals
+Runtime queries: `zdot_variant` prints the active variant (possibly empty);
+`zdot_is_variant <name>` is the boolean guard for use inside hook bodies.
 
-1. A user can register hooks that only run in specific variants.
-2. A user can register hooks that run in all-but certain variants.
-3. Hooks with no variant constraint run in all variants (backward compat).
-4. The variant propagates through the dependency / phase system exactly
-   like the interactivity/login dimensions.
-5. The execution plan cache is per (interactivity × login × variant).
-6. The user sets the variant **before** `zdot_init` is called — zdot
-   reads it once at plan-build time.
-7. The variant identifier is a single word (alphanumeric + hyphens).
-8. At most one variant is active at a time (single-dimension extension).
+**Why resolve at plan-build time, not source time:** hooks are registered as
+files are sourced, before the user's `.zshrc` has necessarily finished
+expressing its variant choice. Resolving once inside `zdot_build_context`
+(the first step of `zdot_build_execution_plan`) guarantees every registration
+is visible before any variant-dependent decision is made.
 
----
-
-## 3. User API
-
-### 3.1 Setting the Variant
-
-The user sets the variant in `.zshrc` (or an early-sourced file) before
-calling `zdot_init`.  zdot checks, in order:
-
-1. `$ZDOT_VARIANT` environment variable (highest priority — allows
-   override from parent process / wrapper scripts).
-2. `zstyle ':zdot:variant' name <value>` — declarative config.
-3. A user-supplied detection function `zdot_detect_variant` — if the
-   function exists, zdot calls it; it must set `REPLY`.
-4. If none of the above: variant is the empty string (default).
-
-```zsh
-# Option A — env var (set in .zshenv or a wrapper):
-export ZDOT_VARIANT=work
-
-# Option B — zstyle in .zshrc before zdot_init:
-zstyle ':zdot:variant' name small
-
-# Option C — logic function (most flexible), defined before zdot_init:
-zdot_detect_variant() {
-    case $HOST in
-        (macbook-pro)   REPLY=work ;;
-        (raspberry*)    REPLY=small ;;
-        (*)             REPLY="" ;;
-    esac
-}
-```
-
-### 3.2 Registering a Hook with a Variant Constraint
-
-A new `--variant` flag is added to `zdot_register_hook` (and by
-extension to `zdot_simple_hook` / `zdot_define_module`).
-
-```zsh
-# Only run on the 'work' variant:
-zdot_register_hook _vpn_init interactive noninteractive \
-    --variant work \
-    --requires brew-ready \
-    --provides vpn-ready
-
-# Run everywhere EXCEPT 'small':
-zdot_register_hook _heavy_tools_init interactive \
-    --variant-exclude small \
-    --requires brew-ready
-
-# No --variant flag = runs in ALL variants (unchanged semantics):
-zdot_register_hook _xdg_init interactive noninteractive \
-    --provides xdg-configured
-```
-
-`--variant` and `--variant-exclude` are mutually exclusive on a single
-call.  Multiple `--variant` values can be listed to express "any of":
-
-```zsh
-zdot_register_hook _corp_tools_init interactive \
-    --variant work --variant contractor \
-    --requires brew-ready
-```
-
-### 3.3 Querying the Variant at Runtime
-
-```zsh
-zdot_variant()          # returns the active variant string (may be empty)
-zdot_is_variant <name>  # returns 0/1 — guard inside hook bodies
-```
-
----
-
-## 4. Internal Representation
-
-### 4.1 Global State (core/core.zsh additions)
+## Global State — `core/core.zsh`
 
 ```zsh
 typeset -g _ZDOT_VARIANT=""            # Active variant string (empty = default)
-typeset -g _ZDOT_VARIANT_DETECTED=0   # 1 once zdot_resolve_variant has run
+typeset -g _ZDOT_VARIANT_DETECTED=0    # 1 once zdot_resolve_variant has run
+typeset -g _ZDOT_VARIANT_INDEX_BUILT=0 # 1 once _zdot_build_variant_provider_index has run
 ```
 
-### 4.2 Per-Hook Variant Storage (core/hooks.zsh additions)
+`_ZDOT_VARIANT_INDEX_BUILT` gates which provider registry lookups consult
+(see below); it is set only on the plan-build path, never by a cache load.
+
+## Hook Registration — `core/hooks.zsh`
+
+`zdot_register_hook` parses `--variant <name>` and `--variant-exclude <name>`
+in its raw-argument pre-pass. Both flags repeat; multiple `--variant` values
+mean "any of". Constraints are stored per hook:
 
 ```zsh
-typeset -gA _ZDOT_HOOK_VARIANTS=()        # hook_id -> "v1 v2 ..."  (include list)
-typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES=() # hook_id -> "v1 v2 ..." (exclude list)
+typeset -gA _ZDOT_HOOK_VARIANTS          # hook_id -> "v1 v2 ..." (include; empty = all)
+typeset -gA _ZDOT_HOOK_VARIANT_EXCLUDES  # hook_id -> "v1 v2 ..." (exclude)
 ```
 
-Empty include list = matches all variants.
+`_zdot_variant_match <hook_id>` decides whether a hook runs in the active
+variant:
 
-### 4.3 Phase Provider Registry (core/hooks.zsh)
+1. If the active variant appears in the hook's exclude list, the hook is out.
+2. An empty include list matches all variants.
+3. A non-empty include list must contain the active variant.
 
-The existing `_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` key format is:
+**Why exclude beats include:** exclusion expresses "this must never load
+here" (a heavy tool on a small machine), and a safety constraint must not be
+defeated by a broader include added later or inherited from a barrier.
+Checking the exclude first makes the conservative answer win.
 
-```
-"<ctx_token>:<phase>"   e.g. "interactive:brew-ready"
-```
+## Plan Filtering and the Provider Index
 
-With variants, this expands to a three-part key:
+`zdot_build_execution_plan` filters each hook through `_zdot_context_match`
+and then `_zdot_variant_match` before it enters the dependency graph — a
+variant-excluded hook simply does not exist in this shell's plan.
 
-```
-"<ctx_token>:<variant>:<phase>"   e.g. "interactive:work:vpn-ready"
-```
-
-For hooks with no variant constraint (empty variant), the key uses the
-sentinel `"*"`:
-
-```
-"interactive:*:xdg-configured"
-```
-
-Look-up logic: when resolving a required phase in context `ctx` /
-variant `v`, check both `"ctx:v:phase"` and `"ctx:*:phase"`.
-
----
-
-## 5. Implementation Plan
-
-### 5.1 core/ctx.zsh — variant detection
-
-Add:
+Phase providers are registered at source time under two-part keys in
+`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` (`"<context>:<phase>"`). The variant is
+unknown at that point, so the registry is never variant-keyed. Instead, after
+the variant is resolved, `_zdot_build_variant_provider_index` builds a
+filtered view:
 
 ```zsh
-# Resolve and store the active user variant.
-# Called once from zdot_build_context (before plan build).
-# Priority: $ZDOT_VARIANT env > zstyle ':zdot:variant' name > zdot_detect_variant()
-zdot_resolve_variant() {
-    if [[ -n "${ZDOT_VARIANT:-}" ]]; then
-        _ZDOT_VARIANT="$ZDOT_VARIANT"
-    elif zstyle -s ':zdot:variant' name _ZDOT_VARIANT; then
-        : # zstyle set it
-    elif (( ${+functions[zdot_detect_variant]} )); then
-        REPLY=""
-        zdot_detect_variant
-        _ZDOT_VARIANT="$REPLY"
-    else
-        _ZDOT_VARIANT=""
-    fi
-    _ZDOT_VARIANT_DETECTED=1
-}
-
-zdot_variant() { print -r -- "$_ZDOT_VARIANT" }
-
-zdot_is_variant() { [[ "$_ZDOT_VARIANT" == "$1" ]] }
+_ZDOT_PHASE_PROVIDERS_ACTIVE   # same keys, only hooks passing _zdot_variant_match
 ```
 
-Extend `zdot_build_context` to call `zdot_resolve_variant` and append
-the variant to `_ZDOT_CURRENT_CONTEXT`:
+and sets `_ZDOT_VARIANT_INDEX_BUILT=1`. `_zdot_has_provider_in_contexts` uses
+the active index when that flag is set and falls back to the full registry
+otherwise — so introspection tools (`zdot_hooks_list` and friends) running
+after a cache fast-path load still see every registered provider.
 
-```zsh
-zdot_build_context() {
-    # ... existing interactive/login logic ...
+**Why the index is variant-filtered at plan time:** required-phase resolution
+must not be satisfied by a provider the variant filter is about to remove.
+Without the filtered view, a hook could pass dependency checks against a
+provider that never runs, producing a plan that silently stalls; with it, a
+missing provider is reported (or the requiring hook is skipped if
+`--optional`) at plan-build, exactly as for context mismatches.
 
-    zdot_resolve_variant
+## Group Barrier Inheritance — `_zdot_init_resolve_groups`
 
-    if [[ -n "$_ZDOT_VARIANT" ]]; then
-        _ZDOT_CURRENT_CONTEXT+=" variant:$_ZDOT_VARIANT"
-    fi
-    # When variant is empty, nothing extra is appended — backward compat.
-}
-```
+Groups are implemented with synthetic begin/end barrier hooks. Barriers
+derive their variant constraints from their members:
 
-The `variant:` prefix distinguishes variant tokens from interactivity /
-login tokens in `_ZDOT_CURRENT_CONTEXT` and avoids collisions.
+- **Include = union** of member include lists; if any member has an empty
+  include list (matches all variants), the barrier's include list is also
+  empty — one open member keeps the barrier open.
+- **Exclude = intersection**: a variant is excluded by the barrier only if
+  **every** member excludes it (computed by counting per-variant exclusions
+  against the member count).
 
-### 5.2 core/hooks.zsh — registration
+Both lists are written into `_ZDOT_HOOK_VARIANTS` /
+`_ZDOT_HOOK_VARIANT_EXCLUDES` for the begin and end barrier hook ids, so
+barriers flow through `_zdot_variant_match` like ordinary hooks.
 
-In the pre-pass of `zdot_register_hook`, parse `--variant` and
-`--variant-exclude`:
+**Why barriers inherit member variants:** a barrier should run iff at least
+one member runs. Without inheritance, a group whose members are all filtered
+out in the active variant would leave live barrier hooks with dangling phase
+edges — ordering constraints against hooks that no longer exist in the plan.
 
-```zsh
-local -a hook_variants=()
-local -a hook_variant_excludes=()
+## Plan Cache — `core/cache.zsh`
 
-# inside the _raw_args loop:
-elif [[ ${_raw_args[$_i]} == --variant ]]; then
-    (( _i++ ))
-    hook_variants+=("${_raw_args[$_i]}")
-elif [[ ${_raw_args[$_i]} == --variant-exclude ]]; then
-    (( _i++ ))
-    hook_variant_excludes+=("${_raw_args[$_i]}")
-```
-
-After hook_id assignment:
-
-```zsh
-_ZDOT_HOOK_VARIANTS[$hook_id]="${hook_variants[*]}"
-_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]="${hook_variant_excludes[*]}"
-```
-
-### 5.3 core/hooks.zsh — plan building
-
-Add a helper function `_zdot_variant_match`:
-
-```zsh
-# Returns 0 if hook_id should run in the active variant.
-_zdot_variant_match() {
-    local hook_id="$1"
-    local active_variant="$_ZDOT_VARIANT"
-
-    local includes=(${=_ZDOT_HOOK_VARIANTS[$hook_id]})
-    local excludes=(${=_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]})
-
-    # Exclude list takes priority.
-    if (( ${#excludes} > 0 )); then
-        [[ " ${excludes[*]} " =~ " ${active_variant} " ]] && return 1
-    fi
-
-    # If no include list: matches all variants.
-    (( ${#includes} == 0 )) && return 0
-
-    # Include list present: must match.
-    [[ " ${includes[*]} " =~ " ${active_variant} " ]]
-}
-```
-
-In `zdot_build_execution_plan`, after the existing `context_match`
-check, add:
-
-```zsh
-# Variant filter
-if ! _zdot_variant_match "$hook_id"; then
-    continue
-fi
-```
-
-### 5.4 core/hooks.zsh — phase provider registration
-
-In `_zdot_register_phase_provider` (or wherever
-`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` is written), use the three-part key:
-
-```zsh
-local variant_key="${_ZDOT_VARIANT:-*}"
-# (At registration time _ZDOT_VARIANT may not be set yet — see §6 below)
-```
-
-**Problem**: hooks are registered at source time (before `zdot_init`
-resolves the variant), but providers need to be indexed per-variant.
-
-**Solution**: defer the variant-keyed index to plan-build time.  During
-registration, store providers in the existing two-part key (or a
-separate un-keyed store); at plan-build time (inside
-`zdot_build_execution_plan`, after `zdot_resolve_variant` has run),
-rebuild the lookup table with three-part keys.  This matches the
-existing pattern where `_zdot_cache_context_suffix` is also called at
-plan-build time.
-
-Alternatively: register under a sentinel key and expand at plan-build.
-
-Concrete approach — maintain the existing two-part registry for
-registration; add a **variant-filtered view** at plan-build:
-
-```zsh
-# At plan-build time, after variant is resolved:
-_zdot_build_variant_provider_index() {
-    local active_variant="${_ZDOT_VARIANT:-}"
-    typeset -gA _ZDOT_PHASE_PROVIDERS_ACTIVE=()
-
-    for key in ${(k)_ZDOT_PHASE_PROVIDERS_BY_CONTEXT}; do
-        local hook_id="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$key]}"
-        # Only include providers whose hooks match the active variant
-        if _zdot_variant_match "$hook_id"; then
-            _ZDOT_PHASE_PROVIDERS_ACTIVE[$key]="$hook_id"
-        fi
-    done
-}
-```
-
-Replace `_zdot_has_provider_in_contexts` lookups to use
-`_ZDOT_PHASE_PROVIDERS_ACTIVE` instead of
-`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT` during plan building.
-
-### 5.5 core/cache.zsh — context suffix
-
-Extend `_zdot_cache_context_suffix` to include the variant:
-
-```zsh
-_zdot_cache_context_suffix() {
-    local interactive_str login_str variant_str
-
-    interactive_str=$([[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] && echo interactive || echo noninteractive)
-    login_str=$([[ $_ZDOT_IS_LOGIN -eq 1 ]] && echo login || echo nonlogin)
-    variant_str="${_ZDOT_VARIANT:-default}"
-
-    REPLY="${interactive_str}_${login_str}_${variant_str}"
-}
-```
-
-Plan files become:
-```
-execution_plan_interactive_nonlogin_work.zsh
-execution_plan_interactive_nonlogin_default.zsh
-execution_plan_interactive_nonlogin_small.zsh
-```
-
-Cache invalidation: bump `_ZDOT_CACHE_VERSION` (a new variant dimension
-means old plans must be discarded).
-
-### 5.6 zdot_simple_hook / zdot_define_module passthrough
-
-Both sugar functions call `zdot_register_hook` internally; they need to
-accept and forward `--variant` / `--variant-exclude`:
-
-```zsh
-# zdot_simple_hook: add to the flags forwarded to zdot_register_hook
-# zdot_define_module: add to the per-phase flags parsed and forwarded
-```
-
-The `zdot_define_module` macro has a richer argument structure (separate
-flags for each phase); `--variant` can be applied at the module level
-(propagated to all phases) or overridden per-phase.
-
----
-
-## 6. Registration-Time vs Plan-Time Concerns
-
-| Concern | Time | Notes |
-|---|---|---|
-| `_ZDOT_HOOK_VARIANTS` populated | Registration (source time) | Always safe |
-| `_ZDOT_VARIANT` resolved | `zdot_build_context()` — plan-build | Before Kahn's sort |
-| Provider index built | `zdot_build_execution_plan()` | After variant resolved |
-| Cache suffix computed | Same as above | Uses `_ZDOT_VARIANT` |
-| Cache saved | End of `zdot_init` | Three-part suffix |
-
-No changes needed to deferred execution: by the time deferred hooks
-run, `_ZDOT_VARIANT` is already set and `_ZDOT_PHASES_PROVIDED` is
-maintained correctly.
-
----
-
-## 7. Introspection / CLI
-
-The existing `zdot_hooks_list` and `zdot_show_plan` functions should
-display the active variant and, per hook, any variant constraints:
+`_zdot_cache_context_suffix` produces a three-part key:
 
 ```
-zdot hooks list
-  hook_5  _vpn_init         [interactive noninteractive] [variant: work]  requires: brew-ready
-  hook_6  _heavy_tools_init [interactive]               [variant-excl: small] requires: brew-ready
-
-Active context: interactive nonlogin  variant: work
+<interactive|noninteractive>_<login|nonlogin>_<variant>
 ```
 
----
+with `default` substituted for the empty variant, giving plan files such as
+`plans/execution_plan_interactive_nonlogin_work.zsh`. Introducing the third
+part required a `_ZDOT_CACHE_VERSION` bump (the version has moved on since;
+it is an opaque monotonic counter).
 
-## 8. Backward Compatibility
+**Why the variant is part of the cache key:** the variant changes which hooks
+are in the plan, so plans for different variants are different artifacts.
+Keying the file by variant lets one machine keep warm caches for several
+variants side by side instead of thrashing a single file.
 
-- Hooks with no `--variant` / `--variant-exclude` flags are unaffected.
-- `_ZDOT_CURRENT_CONTEXT` gains an optional third token only when
-  `_ZDOT_VARIANT` is non-empty, so existing consumers that iterate
-  `current_contexts` and match `interactive` / `noninteractive` /
-  `login` / `nonlogin` still work — `variant:work` simply never matches
-  those patterns.
-- Cache files with old two-part names are superseded by new three-part
-  names after the version bump; old files are stale and harmlessly
-  ignored.
+The serialized plan also records `_ZDOT_HOOK_VARIANTS` and
+`_ZDOT_HOOK_VARIANT_EXCLUDES` (non-empty entries only), plus
+`_ZDOT_VARIANT` and `_ZDOT_VARIANT_DETECTED=1`, so a cache-loaded shell
+answers `zdot_variant` / `zdot_is_variant` correctly. It deliberately does
+**not** set `_ZDOT_VARIANT_INDEX_BUILT`: the filtering already happened when
+the plan was built, and post-load tooling should consult the full provider
+registry.
 
----
+## Module Sugar Passthrough — `core/modules.zsh`
 
-## 9. Open Questions
+`zdot_define_module` accepts `--variant` / `--variant-exclude` at the module
+level, collects them into a forwarded argument vector, and appends it to
+**every** phase registration the module makes (configure, load, plugin
+loaders, post-init, interactive-init, noninteractive-init). The constraint is
+module-granular by design: a module either belongs on this variant or it does
+not; per-phase variant splits would re-create the dangling-edge problem that
+barrier inheritance exists to solve.
 
-1. **Multiple variants / variant sets**: Should a user be able to
-   combine variants (e.g. `work+small`)?  Current design: single
-   variant, composable via hyphen (`work-small`).
+`zdot_simple_hook` needs no special handling — unrecognized flags pass
+through verbatim to `zdot_register_hook`, which parses the variant flags
+itself.
 
-2. **Variant inheritance**: Should `work` automatically include all
-   hooks for the default variant?  Current design: yes, because hooks
-   with no `--variant` flag match all variants.
+## Backward Compatibility
 
-3. **Runtime variant changes**: Out of scope.  Variant is immutable per
-   shell session.
-
-4. **zdot_defer_order interaction**: Ordering constraints between hooks
-   that have different variant constraints — are they silently ignored
-   if one hook is filtered out?  Proposed: yes, same as if the hook
-   were filtered by context.
-
-5. **zdot_detect_variant error handling**: What if the function throws?
-   Proposed: log a warning and fall back to empty variant.
-
----
-
-## 10. File Change Summary
-
-| File | Change |
-|---|---|
-| `core/ctx.zsh` | Add `zdot_resolve_variant`, `zdot_variant`, `zdot_is_variant`; extend `zdot_build_context` |
-| `core/core.zsh` | Add `_ZDOT_VARIANT`, `_ZDOT_VARIANT_DETECTED` globals |
-| `core/hooks.zsh` | Parse `--variant`/`--variant-exclude`; add `_zdot_variant_match`; add `_zdot_build_variant_provider_index`; filter in plan builder |
-| `core/cache.zsh` | Extend `_zdot_cache_context_suffix`; bump `_ZDOT_CACHE_VERSION` |
-| `core/modules.zsh` | Forward `--variant`/`--variant-exclude` through `zdot_define_module` |
-| `core/functions/zdot_hooks_list` | Display variant constraints |
-| `core/functions/zdot_show_plan` | Show active variant |
-| `docs/IMPLEMENTATION.md` | Document new dimension |
-| `README.md` | User-facing variant docs |
+- Hooks and modules with no variant flags are untouched: empty include list
+  matches every variant, including the default.
+- `_ZDOT_CURRENT_CONTEXT` gains its `variant:` token only when a variant is
+  active, so existing token consumers are unaffected.
+- Old two-part plan-cache files are orphaned by the version bump and ignored.

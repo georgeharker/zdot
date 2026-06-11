@@ -4,7 +4,8 @@ This document provides technical implementation details for the zdot system. It 
 
 **Audience**: Developers working on the zdot core system or advanced users who want to understand internals.
 
-**For users**: See [README.md](./README.md) for module creation and usage guide.
+**For users**: See the [README](../README.md) for setup and the
+[Module Writer's Guide](module-guide.md) for module creation.
 
 ## Table of Contents
 
@@ -79,14 +80,14 @@ This document provides technical implementation details for the zdot system. It 
 
 ```
 zdot/
-├── zdot.zsh                         # Entry point (66 lines)
+├── zdot.zsh                         # Entry point
 ├── core/
 │   ├── core.zsh                     # Core bootstrap (sources other core modules)
 │   ├── cache.zsh                    # Cache invalidation & compilation
 │   ├── completions.zsh              # Completion helpers (compdump management)
 │   ├── functions.zsh                # Function autoloading setup
-│   ├── hooks.zsh                    # Hook system (943 lines)
-│   ├── logging.zsh                  # Logging functions (56 lines)
+│   ├── hooks.zsh                    # Hook system
+│   ├── logging.zsh                  # Logging functions
 │   ├── modules.zsh                  # Module loading pipeline (zdot_load_module, _zdot_build_module_search_path, _zdot_load_module_file)
 │   ├── plugins.zsh                  # Plugin loading (antidote + zsh-defer) + sugar functions (zdot_define_module, zdot_simple_hook)
 │   ├── utils.zsh                    # Utility functions (zdot_interactive, zdot_login, …)
@@ -143,7 +144,7 @@ fi
 
 **Key Functions:**
 
-##### `zdot_register_hook()` (lines 29-102)
+##### `zdot_register_hook()`
 
 Registers a hook with the system.
 
@@ -158,7 +159,7 @@ Registers a hook with the system.
 - Validates context values
 - Ensures at least one context is specified
 
-##### `zdot_build_execution_plan()` (lines 104-198)
+##### `zdot_build_execution_plan()`
 
 Builds ordered execution plan via topological sort.
 
@@ -181,7 +182,7 @@ Builds ordered execution plan via topological sort.
 - Missing optional dependencies (hooks skipped gracefully)
 - Missing required dependencies (warnings issued)
 
-##### `zdot_execute_all()` (lines 273-314)
+##### `zdot_execute_all()`
 
 Executes hooks in planned order.
 
@@ -307,7 +308,7 @@ Lists all loaded modules from `_ZDOT_MODULES_LOADED`, annotating each with its s
 - Validate hook requirements
 - Show context filtering
 
-**Algorithm** (lines 48-115):
+**Algorithm**:
 1. Detect current shell context
 2. Parse `--all` flag for showing all contexts
 3. Categorize each hook:
@@ -318,13 +319,13 @@ Lists all loaded modules from `_ZDOT_MODULES_LOADED`, annotating each with its s
 5. Collect unplanned hooks
 6. Detect error hooks via requirement validation
 
-**Requirement Validation** (lines 77-92):
+**Requirement Validation**:
 A requirement is **satisfiable** if ANY of:
 1. Provided by a hook (`_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[$ctx:$req]` for each active context)
 
 If any requirement is unsatisfiable, hook is flagged as error.
 
-**Display Format** (lines 117-220):
+**Display Format**:
 ```
 Hooks by Phase:
 
@@ -668,6 +669,35 @@ zdot_register_hook _cleanup interactive --group finally
 
 See the [Module Guide → Predefined groups](module-guide.md#predefined-groups-bootstrap-pre-defer-and-finally) for the full design and the companion `pre-defer` group.
 
+## Predefined Group Scheduling: pre-defer and finally
+
+The `pre-defer` and `finally` groups use the same begin/member/end barrier
+synthesis as every other group; what's special is only how each group's begin
+barrier is pushed last. The two mechanisms differ deliberately:
+
+- **`pre-defer`** must stay **eager**. Its begin barrier is ordered after every
+  other eager hook with **synthetic Kahn-graph edges only** (via each
+  predecessor's `_defer_order_<hid>` bridge phase), never real `--requires`.
+  This is deliberate: the eager/deferred split isn't known until force-deferral
+  runs *after* the sort, so a real dependency on a hook that later promotes to
+  deferred would drag `pre-defer` into the deferred set too. Synthetic edges are
+  invisible to force-deferral, so they can't promote it. (For introspection, the
+  real, now-known-eager dependencies are recorded separately *after*
+  force-deferral — they document the order in `zdot hook graph`; they don't
+  enforce it.)
+- **`finally`** must run after *everything*, deferred work included, so its begin
+  barrier carries a **real `--requires` on every other in-plan hook** (each prior
+  hook H is made to provide `_group_member_finally_<H>`, and the begin barrier
+  requires it — the same member-phase mechanism a normal group's *end* barrier
+  uses, applied to the *begin* barrier here). `finally` is therefore deferred
+  **only if deferred hooks exist**: requiring a deferred hook's phase force-defers
+  the begin barrier, cascading the whole subgraph into the deferred set, and the
+  drain releases it last. If nothing is deferred, `finally` simply stays eager and
+  runs last in the eager pass (like `pre-defer`, one step later). When the cascade
+  does happen it is the whole point, not an accident, so the entire `finally`
+  subgraph is pre-accepted (`zdot_allow_defer`-style) and the force-defer pass
+  stays silent for it.
+
 ## Context System
 
 ### Shell Context Detection
@@ -947,65 +977,12 @@ zdot module clone xdg
 
 ---
 
-### Automatic Module Discovery
+### No Automatic Module Discovery
 
-> **Note**: `zdot_load_modules()` (plural) is no longer part of the public API.
-> Use `zdot_load_module <name>` (singular) in your `.zshrc` to load each module
-> explicitly. The framework no longer auto-discovers modules from a directory scan.
-> The section below is retained for historical reference.
-
-**Function**: `zdot_load_modules()` *(removed)*
-
-**Algorithm:**
-```
-1. Scan ${ZDOTDIR}/modules/ directory
-2. Find all *.zsh files (non-recursive, only modules/ directory itself)
-3. For each module file:
-   a. Extract module name from filename
-   b. Log loading message
-   c. Source the file
-4. Return count of loaded modules
-```
-
-**Code** *(historical)*:
-```zsh
-zdot_load_modules() {
-    local module_dir="${ZDOTDIR}/modules"
-    local loaded_count=0
-    
-    if [[ ! -d "$module_dir" ]]; then
-        zdot_error "Module directory not found: $module_dir"
-        return 1
-    fi
-    
-    zdot_verbose "Loading modules from: $module_dir"
-    
-    # Discover and source all .zsh files in modules/
-    for module_file in "${module_dir}"/**/*.zsh(N); do
-        local module_name="${module_file:t:r}"  # Extract filename without extension
-        
-        zdot_verbose "Loading module: $module_name"
-        
-        if source "$module_file"; then
-            ((loaded_count++))
-        else
-            zdot_error "Failed to load module: $module_name"
-        fi
-    done
-    
-    zdot_success "Loaded $loaded_count module(s)"
-    
-    return 0
-}
-```
-
-**Filename Patterns:**
-- Matches: `modules/*/module.zsh`
-- Matches: `modules/subdir/nested/module.zsh`
-- Ignores: Non-.zsh files
-- Ignores: Hidden files (start with `.`)
-
-**Design Note**: Recursive scan allows nested module organization.
+Modules are loaded explicitly with `zdot_load_module <name>` in `.zshrc`. The
+framework does not auto-discover modules from a directory scan — a removed
+early design (`zdot_load_modules`, plural) that made the loaded set implicit
+and order-dependent on the filesystem.
 
 ### Module Isolation
 
@@ -1051,7 +1028,7 @@ CONFIG_DIR="..."
 
 ### Implementation Details
 
-**File**: core/logging.zsh (56 lines)
+**File**: core/logging.zsh
 
 **Color Codes:**
 ```zsh
@@ -1183,23 +1160,23 @@ zdot debug
 
 **Purpose**: Display registered hooks organized by category.
 
-**Location**: core/functions/zdot_hooks_list (230 lines)
+**Location**: core/functions/zdot_hooks_list
 
 **Arguments:**
 - `--all`: Show hooks for all contexts (default: only active context)
 
 **Output Sections:**
 
-1. **Hooks by Phase** (lines 117-155):
+1. **Hooks by Phase**:
    - Groups hooks by the phase they provide
    - Shows contexts and flags (`[optional]`)
    - Standard hooks that provide phases
 
-2. **Unplanned Hooks** (lines 157-190):
+2. **Unplanned Hooks**:
    - Hooks without `--provides` but with satisfiable deps
    - Not errors; simply have no phase to provide
 
-3. **Hooks with Missing Requirements** (lines 192-220):
+3. **Hooks with Missing Requirements**:
    - Hooks with unsatisfiable dependencies
    - Shows which specific phases are missing
    - True configuration errors
@@ -1399,7 +1376,7 @@ echo "Optional: ${_ZDOT_HOOK_OPTIONAL[$hook_id]:-0}"
 - Cleaner namespace (functions not defined until needed)
 - Better organization (one function per file)
 
-**Setup** (zdot.zsh:27-34):
+**Setup** (zdot.zsh):
 ```zsh
 fpath=("${ZDOTDIR}/core/functions" $fpath)
 for func_file in "${ZDOTDIR}"/core/functions/*; do
@@ -1443,7 +1420,7 @@ my_function() {
 
 ### Adding New Global Arrays
 
-**Location**: `core/hooks.zsh` (lines 10-20)
+**Location**: `core/hooks.zsh`
 
 **Steps:**
 1. Declare array with `typeset -gA` (associative) or `typeset -ga` (regular)
@@ -1463,21 +1440,21 @@ typeset -gA _ZDOT_MY_NEW_ARRAY
 
 ### Adding New Flags to zdot_register_hook()
 
-**Location**: `core/hooks.zsh` (lines 29-102)
+**Location**: `core/hooks.zsh`
 
 **Steps:**
 
-1. Add flag to usage documentation (lines 29-35):
+1. Add flag to usage documentation:
 ```zsh
 # Usage: zdot_register_hook <function> [contexts...] [--my-flag]
 ```
 
-2. Initialize local variable (lines 38-44):
+2. Initialize local variable:
 ```zsh
 local my_flag=0
 ```
 
-3. Add case in argument parsing loop (lines 48-73):
+3. Add case in argument parsing loop:
 ```zsh
 --my-flag)
     my_flag=1
@@ -1489,7 +1466,7 @@ local my_flag=0
 [[ $my_flag -eq 1 ]] && _ZDOT_HOOK_MY_FLAG[$hook_id]=1
 ```
 
-5. Declare global array at top of file (lines 10-20):
+5. Declare global array at top of file:
 ```zsh
 typeset -gA _ZDOT_HOOK_MY_FLAG
 ```
@@ -2410,4 +2387,4 @@ as a table row. It is intended for diagnostic use (e.g. called from
 
 ---
 
-For user-focused documentation and examples, see [README.md](./README.md).
+For user-focused documentation and examples, see [README.md](../README.md).

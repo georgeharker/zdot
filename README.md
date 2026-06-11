@@ -7,26 +7,24 @@ zdot is a hook-based, dependency-aware configuration system for Zsh that
 organizes your shell environment into modular, reusable components with
 automatic dependency resolution.
 
+> 📖 Rendered documentation:
+> [docs.georgeharker.com/zdot](https://docs.georgeharker.com/zdot/)
+> · [dev](https://docs.georgeharker.com/zdot/dev/)
+
 ---
 
 - [Why zdot?](#why-zdot)
 - [Quick Start](#quick-start)
-  - [Option A: Standalone](#option-a-standalone-no-dotfiler)
+  - [Option A: Standalone](#option-a-standalone)
   - [Option B: With dotfiler (recommended)](#option-b-with-dotfiler-recommended)
 - [A Realistic `.zshrc`](#a-realistic-zshrc)
 - [Directory Structure](#directory-structure)
 - [Modules](#modules)
-  - [Built-in Modules](#built-in-modules)
-  - [Module Search Path](#module-search-path)
-  - [Writing Modules](#writing-modules)
 - [Contexts and Variants](#contexts-and-variants)
-  - [Shell contexts](#shell-contexts)
-  - [One file, two contexts: using `.zshrc` as `.zshenv`](#one-file-two-contexts-using-zshrc-as-zshenv)
-  - [Variants](#variants)
 - [CLI](#cli)
 - [Debugging](#debugging)
 - [Day-to-Day](#day-to-day)
-- [Further Reading](#further-reading)
+- [Documentation](#documentation)
 
 ---
 
@@ -52,7 +50,16 @@ zdot fixes this:
 
 ## Quick Start
 
-### Option A: Standalone (no dotfiler)
+There are two supported ways to run zdot, and both are first-class:
+
+- **Standalone** -- clone zdot, source it from your existing `.zshrc`. Right
+  choice if you already have a dotfiles manager (stow, chezmoi, yadm) or just
+  want to try zdot.
+- **With [dotfiler](https://github.com/georgeharker/dotfiler)** -- zdot lives
+  inside a dotfiler-managed dotfiles repo. Recommended for a full setup; see
+  [why below](#option-b-with-dotfiler-recommended).
+
+### Option A: Standalone
 
 ```zsh
 # 1. Clone zdot into your XDG config
@@ -64,7 +71,8 @@ source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
 
 zdot_load_module xdg
 zdot_load_module bootstrap
-zdot_load_module shell
+zdot_load_module env
+zdot_load_module history
 zdot_load_module brew          # macOS only; skipped if brew not found
 zdot_load_module keybinds
 zdot_load_module completions
@@ -78,120 +86,42 @@ exec zsh
 That's it. `zdot_init` resolves dependencies, builds the execution plan, runs
 everything in the right order, and compiles to bytecode for next time.
 
+Standalone zdot can keep itself updated too -- opt in with
+`zstyle ':zdot:update' mode prompt` (see the
+[zstyle reference](docs/zstyle-reference.md#self-update--zdotupdate)).
+
 ### Option B: With dotfiler (recommended)
 
 [dotfiler](https://github.com/georgeharker/dotfiler) is a dotfiles manager
-that keeps your config repo in sync across machines. Together with zdot it
-forms a layered system: dotfiler manages the repo and symlink tree, zdot
-manages the Zsh configuration inside it.
+that keeps your config repo in sync across machines. Neither tool requires
+the other -- but together they cover what each leaves out:
 
-Neither tool requires the other -- each works independently. But when used
-together, dotfiler handles updating zdot as a registered component.
+- **zdot organizes what's *inside* your `.zshrc`; it deliberately does not
+  manage the rc files themselves.** Your `.zshrc`/`.zshenv`, the rest of
+  `~/.config`, and your user modules still need to live somewhere versioned
+  and reach every machine. dotfiler tracks them as symlinks into a single git
+  repo -- edit `~/.zshrc` in place and the change is already staged for
+  commit.
+- **One update cycle for everything.** zdot registers as a dotfiler update
+  hook, so a single login-time check updates your dotfiles, your rc files,
+  *and* zdot together.
+- **Pinned, reproducible versions.** As a git submodule, the exact zdot
+  version is recorded in your dotfiles history, and by default only advances
+  on tagged releases.
+- **One-command machine bootstrap.** `dotfiler setup --bootstrap` restores rc
+  files, symlinks, and zdot on a fresh machine.
 
-#### What you end up with
-
-```
-~/.dotfiles/                         # your dotfiles git repo
-  .config/
-    zdot/                            # zdot (git submodule)
-    dotfiler/
-      hooks/
-        zdot.zsh -> ../../zdot/core/dotfiler-hook.zsh
-    zsh/
-      .zshrc                         # your zshrc, managed by dotfiler
-
-~/.config/                           # linktree (symlinks into ~/.dotfiles)
-  zdot/  -> ~/.dotfiles/.config/zdot/
-  zsh/   -> ~/.dotfiles/.config/zsh/
-```
-
-#### Step 1 -- Create your dotfiles repo
+The happy path, from nothing:
 
 ```zsh
 mkdir -p ~/.dotfiles && cd ~/.dotfiles && git init
-```
-
-#### Step 2 -- Install dotfiler
-
-```zsh
-git clone https://github.com/georgeharker/dotfiler ~/.dotfiles/.nounpack/dotfiler
-export PATH="$HOME/.dotfiles/.nounpack/dotfiler:$PATH"
-```
-
-#### Step 3 -- Add zdot as a submodule
-
-```zsh
-cd ~/.dotfiles
+git clone https://github.com/georgeharker/dotfiler .nounpack/dotfiler
 git submodule add https://github.com/georgeharker/zdot .config/zdot
-git submodule update --init --recursive
 ```
 
-#### Step 4 -- Create a minimal `.zshrc`
-
-Create `~/.dotfiles/.config/zsh/.zshrc`:
-
-```zsh
-source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
-
-zdot_load_module xdg
-zdot_load_module bootstrap
-zdot_load_module shell
-zdot_load_module brew         # macOS only
-zdot_load_module completions
-
-zdot_init
-```
-
-Commit:
-
-```zsh
-cd ~/.dotfiles
-git add .config/zsh/.zshrc && git commit -m "add initial zshrc"
-```
-
-#### Step 5 -- Register the zdot hook and unpack
-
-```zsh
-dotfiler setup --bootstrap-hook ~/.dotfiles/.config/zdot/core/dotfiler-hook.zsh -u
-```
-
-This creates the dotfiler hook symlink and unpacks the linktree into
-`~/.config/`. After this step your shell is live.
-
-#### Step 6 -- Enable self-updates (optional)
-
-Add to your `.zshrc` before `zdot_init`:
-
-```zsh
-zstyle ':zdot:update' mode prompt    # ask before updating at shell start
-zstyle ':dotfiler:update' in-tree-commit auto  # auto-commit submodule pins
-```
-
-#### Step 7 -- Start a new shell
-
-```zsh
-exec zsh
-```
-
-#### Bootstrap on a new machine
-
-Once your dotfiles repo is on a remote:
-
-```zsh
-# 1. Clone dotfiler
-git clone https://github.com/georgeharker/dotfiler ~/.dotfiles/.nounpack/dotfiler
-export PATH="$HOME/.dotfiles/.nounpack/dotfiler:$PATH"
-
-# 2. Clone your dotfiles
-git clone <your-repo-url> ~/.dotfiles
-git -C ~/.dotfiles submodule update --init --recursive
-
-# 3. Bootstrap (reads hooks from repo, unpacks linktree)
-dotfiler setup --bootstrap
-```
-
-See [dotfiler's zdot integration docs](https://github.com/georgeharker/dotfiler/blob/main/docs/zdot-integration.md)
-for the complete reference.
+Then follow the [dotfiler + zdot quickstart](docs/quickstart-dotfiler.md) --
+it walks through the `.zshrc`, hook registration, unpacking the symlink tree,
+and bootstrapping new machines.
 
 ## A Realistic `.zshrc`
 
@@ -209,7 +139,7 @@ zstyle ':zdot:cache'  enabled true
 zdot_load_module xdg
 zdot_load_module bootstrap
 zdot_load_module env
-zdot_load_module shell
+zdot_load_module history
 zdot_load_module brew
 zdot_load_module secrets          # 1Password secrets
 zdot_load_module nodejs           # nvm + node
@@ -221,7 +151,7 @@ zdot_load_module omz              # Oh-My-Zsh bundle defaults
 zdot_load_module shell-extras     # git, eza, ssh plugins
 zdot_load_module completions
 zdot_load_module starship-prompt
-zdot_load_module local_rc         # source ~/.zshrc.local if it exists
+zdot_load_module local_rc         # source ~/.zshrc_local if it exists
 
 # ── Defer control ──────────────────────────────────────
 # Acknowledge these hooks will be force-deferred
@@ -252,17 +182,16 @@ zdot/
 │   ├── update.zsh        # Self-update integration
 │   ├── functions/        # Autoloaded CLI functions
 │   └── plugin-bundles/   # OMZ & Prezto bundle handlers
-├── modules/              # Built-in modules (26)
+├── modules/              # Built-in modules
 │   ├── xdg/
 │   ├── brew/
-│   ├── shell/
 │   ├── fzf/
 │   └── ...
 ├── docs/                 # Documentation
 └── scripts/              # Benchmarking & profiling utilities
 ```
 
-User modules live outside this tree (see [Module Search Path](#module-search-path)).
+User modules live outside this tree (see [Modules](#modules)).
 
 ## Modules
 
@@ -271,85 +200,47 @@ loaded, it registers one or more hooks that declare what they provide and
 require. zdot resolves the dependency graph and executes hooks in the correct
 order.
 
-### Built-in Modules
-
-zdot ships with 26 built-in modules. See [docs/modules.md](docs/modules.md)
-for the full reference.
+zdot ships 30+ built-in modules covering the common concerns:
 
 | Module | Description |
 |--------|-------------|
 | `xdg` | XDG Base Directory setup |
-| `brew` | Homebrew (macOS) |
-| `shell` | Shell options, history, path |
+| `env` | Core environment variables |
+| `history` | Zsh history (XDG location, per-directory history) |
+| `brew` / `apt` | Package-manager PATH and tool verification |
 | `secrets` | 1Password secrets management |
-| `nodejs` | Node.js / nvm |
+| `nodejs` | Node.js / nvm with lazy loading |
 | `fzf` | Fuzzy finder + integrations |
 | `plugins` | Third-party zsh plugins |
-| `completions` | Completion file generation |
-| `starship-prompt` | Starship prompt |
-| ... | [See all 26 modules](docs/modules.md) |
+| `completions` | Completion file generation + compinit |
+| `starship-prompt` | Starship prompt (also: `omp-prompt`, `omz-prompt`) |
+| ... | [Full catalog](docs/modules.md) |
 
-### Module Search Path
-
-`zdot_load_module` searches directories in order -- user directories first, then
-the built-in `modules/` directory. This lets you override any built-in module
-or add your own without touching the zdot repo.
-
-By default, `${XDG_CONFIG_HOME}/zdot-modules` (typically
-`~/.config/zdot-modules`) is included in the search path automatically if the
-directory exists. Create it and drop modules in:
-
-```
-~/.config/zdot-modules/
-└── mymodule/
-    └── mymodule.zsh
-```
-
-You can add additional directories via zstyle:
+The simplest module is three lines:
 
 ```zsh
-zstyle ':zdot:modules' search-path \
-  "${XDG_CONFIG_HOME}/zsh/modules" \
-  ~/work/zsh-modules
-
-# Search order:
-#   1. Paths from zstyle (in order)
-#   2. ${XDG_CONFIG_HOME}/zdot-modules  (default user dir)
-#   3. Built-in modules/ inside the zdot repo (always last)
-zdot_load_module brew    # loads yours if it exists, falls back to built-in
-```
-
-### Writing Modules
-
-The simplest module:
-
-```zsh
-# modules/mymodule/mymodule.zsh
+# ~/.config/zdot-modules/mymodule/mymodule.zsh
 
 _mymodule_init() {
   export MY_VAR="hello"
 }
 
 zdot_simple_hook mymodule
-# Registers _mymodule_init with:
-#   requires: bootstrap-ready
-#   provides: mymodule-configured
-#   context:  interactive noninteractive
 ```
 
-For complex modules with plugin loading, multi-phase lifecycles, and bundle
-integration, see the [Module Writer's Guide](docs/module-guide.md).
+Drop it in `~/.config/zdot-modules/` (searched automatically, ahead of the
+built-in modules -- so a user module can also shadow and replace any built-in
+of the same name) and add `zdot_load_module mymodule` to your `.zshrc`. The
+[Module Writer's Guide](docs/module-guide.md) covers everything from here to
+multi-phase plugin lifecycles, and `zdot module clone <name>` copies a
+built-in module to your user directory as a starting point.
 
 ## Contexts and Variants
 
-### Shell contexts
-
 Zsh runs your startup files in different scenarios -- an interactive terminal,
-a script executed by `zsh -c`, a login shell from SSH. The same configuration
-often needs to behave differently in each.
-
-zdot models this with **contexts**. Every hook is registered with one or more
-context labels that say when it should run:
+a script run by `zsh -c`, a login shell over SSH. zdot models this with
+**contexts**: every hook declares when it should run, and zdot filters the
+execution plan accordingly.
 
 | Context | Meaning | Example scenario |
 |---------|---------|------------------|
@@ -358,221 +249,17 @@ context labels that say when it should run:
 | `login` | First shell in a session | `ssh host`, macOS Terminal.app |
 | `nonlogin` | Not the session's first shell | Sub-shells, `zsh` inside tmux |
 
-These combine freely. A new terminal tab might be `interactive login`; running
-`zsh -c 'make build'` is `noninteractive nonlogin`.
+**Variants** add a third, user-defined dimension -- *where* the shell runs
+(`work` vs `home` vs a resource-constrained Pi) -- so different hooks can
+activate on different machines from one shared config.
 
-zdot detects the current shell's context once at startup and uses it to filter
-the execution plan. Hooks registered for `interactive` never run in a script;
-hooks registered for `noninteractive` never fire in your terminal.
+Contexts also make it practical to use a single file as both `.zshenv` and
+`.zshrc`, so scripts and `ssh host command` get your `PATH` without the
+interactive overhead.
 
-#### Why this matters
-
-Most modules register for both:
-
-```zsh
-zdot_simple_hook mymodule
-# Default context: interactive noninteractive
-# -> _mymodule_init runs in every shell
-```
-
-But some things only make sense interactively -- prompt themes, key bindings,
-deferred plugin loading -- while others only matter non-interactively -- like
-setting `PATH` for scripts without dragging in the full interactive setup:
-
-```zsh
-# Interactive-only: ZLE key bindings require a terminal
-zdot_register_hook _keybinds_init interactive \
-  --requires shell-configured \
-  --provides keybinds-ready
-
-# Noninteractive-only: lightweight PATH setup for scripts
-zdot_register_hook _env_noninteractive noninteractive \
-  --requires bootstrap-ready \
-  --provides env-ready
-```
-
-`zdot_define_module` takes this further by letting a single module declare
-separate interactive and noninteractive init functions:
-
-```zsh
-zdot_define_module nodejs \
-  --configure _nodejs_configure \
-  --load-plugins "nvm-sh/nvm" \
-  --interactive-init _nodejs_interactive_init \
-  --noninteractive-init _nodejs_noninteractive_init
-```
-
-The framework sorts each context's hooks independently, so the interactive
-plan can defer heavy work while the noninteractive plan runs lean and fast.
-
-### One file, two contexts: using `.zshrc` as `.zshenv`
-
-A common dotfiles pattern is to symlink `.zshenv` to the same file as `.zshrc`.
-Since Zsh always sources `.zshenv` (even for non-interactive shells), this gives
-every shell -- scripts, `ssh host command`, cron jobs -- access to your `PATH`,
-environment variables, and tool setup without maintaining two separate files.
-
-The problem: if you open a terminal, Zsh sources `.zshenv` first and then
-`.zshrc`. Same file, sourced twice. Without protection, everything runs twice.
-
-zdot handles this with a **double-source guard** in `zdot_init`:
-
-```zsh
-zdot_init() {
-    (( _ZDOT_INIT_DONE )) && return 0   # already ran? do nothing
-    _ZDOT_INIT_DONE=1
-    # ... clone, plan, execute, compile
-}
-```
-
-Additionally, `zdot_register_hook` deduplicates by name -- if a module file is
-sourced twice, the second registration is silently skipped. Between these two
-guards, the file can be sourced any number of times safely.
-
-#### The ordering problem: `.zshenv` runs before `/etc/zprofile`
-
-zdot's re-entry guard is sufficient to prevent double execution, but there is a
-subtler issue with running the full interactive setup at `.zshenv` time.
-
-Zsh's startup file order for an interactive login shell is:
-
-```
-/etc/zshenv  →  ~/.zshenv
-/etc/zprofile  →  ~/.zprofile
-/etc/zshrc  →  ~/.zshrc
-```
-
-System files like `/etc/zprofile` run **between** `.zshenv` and `.zshrc`. On
-macOS, `/etc/zprofile` calls `/usr/libexec/path_helper` to set up the base
-`PATH` (including Homebrew's prefix). If your interactive setup -- and zdot's
-`brew` module -- runs at `.zshenv` time, it executes before `path_helper` has
-had a chance to run, so `brew` may not be on `PATH` yet.
-
-The zdot guard solves double-execution but does not help here: once interactive
-init has run at `.zshenv` time, the `.zshrc` source is a no-op and
-`/etc/zprofile`'s additions arrive too late.
-
-#### Recommended pattern: defer interactive init to `.zshrc`
-
-Add this guard **before** the zdot boilerplate in your shared `.zshrc`/`.zshenv`
-file:
-
-```zsh
-# When interactive, only initialize from .zshrc — not .zshenv.
-# This lets /etc/zprofile (Homebrew PATH, path_helper, etc.) run first.
-[[ -o interactive ]] && [[ "${${(%):-%x}:t}" == ".zshenv" ]] && return
-```
-
-`${(%):-%x}` is zsh's prompt-expansion equivalent of `BASH_SOURCE[0]`: it
-expands to the name of the file currently being read. Combined with `:t` (tail /
-basename), it returns `.zshenv` or `.zshrc` depending on which symlink zsh
-opened.
-
-With this guard in place:
-
-- **Interactive shell, sourced as `.zshenv`** — returns immediately; waits for
-  `.zshrc` to trigger zdot.
-- **Interactive shell, sourced as `.zshrc`** — runs the full interactive setup,
-  after `/etc/zprofile` has already executed.
-- **Non-interactive shell, sourced as `.zshenv`** — `-o interactive` is false,
-  guard is skipped, zdot runs the noninteractive plan as normal.
-
-#### Putting it together
-
-```zsh
-# This file is both ~/.zshenv AND ~/.zshrc (via symlink).
-
-# Interactive shells: wait for .zshrc so /etc/zprofile runs first.
-[[ -o interactive ]] && [[ "${${(%):-%x}:t}" == ".zshenv" ]] && return
-
-# Run-once guard (defensive; zdot_init is also internally guarded).
-[[ -n "$_ZDOT_INITIALIZED" ]] && return
-_ZDOT_INITIALIZED=1
-
-source "${XDG_CONFIG_HOME:-$HOME/.config}/zdot/zdot.zsh"
-
-# Modules register hooks for specific contexts internally.
-# Loading a module does NOT execute it -- it just registers hooks.
-zdot_load_module xdg           # provides xdg-configured (all contexts)
-zdot_load_module bootstrap     # provides bootstrap-ready: the default baseline (all contexts)
-zdot_load_module env           # sets PATH, LANG, etc. (all contexts)
-zdot_load_module brew          # homebrew (all contexts)
-zdot_load_module shell         # history, options (all contexts)
-zdot_load_module secrets       # 1Password (all contexts)
-zdot_load_module nodejs        # nvm (interactive: deferred; noninteractive: eager)
-zdot_load_module fzf           # fuzzy finder (interactive only)
-zdot_load_module keybinds      # ZLE key bindings (interactive only)
-zdot_load_module plugins       # third-party plugins (interactive only)
-zdot_load_module omz           # Oh-My-Zsh bundle defaults
-zdot_load_module starship-prompt  # prompt theme (interactive only)
-zdot_load_module completions   # tab completion (interactive only)
-zdot_load_module local_rc      # ~/.zshenv_local (early, in bootstrap) + ~/.zshrc_local (late)
-
-zdot_init
-```
-
-When sourced as `.zshenv` (noninteractive, e.g. a script):
-- Guard passes (not interactive).
-- Context: `noninteractive nonlogin`.
-- Only hooks registered for `noninteractive` run: `PATH` setup, environment
-  variables, tool availability. Interactive-only modules are skipped entirely.
-
-When sourced as `.zshenv` for an interactive shell:
-- Guard fires; file returns immediately.
-- `/etc/zprofile` (Homebrew, `path_helper`) runs next.
-- Then `.zshrc` is sourced and zdot runs the full interactive plan with a
-  correctly populated `PATH`.
-
-When sourced as `.zshrc` (interactive):
-- Guard passes (filename is `.zshrc`).
-- `_ZDOT_INITIALIZED` not yet set; full init proceeds.
-- On subsequent subshells that re-source `.zshrc`, the run-once guard fires.
-
-### Variants
-
-Contexts describe *how* the shell was started. Variants describe *where* --
-a user-defined label that lets different hooks run on different machines without
-maintaining separate config files.
-
-Set the variant in any of three ways (checked in priority order):
-
-```zsh
-# 1. Environment variable (highest priority)
-export ZDOT_VARIANT=work
-
-# 2. zstyle
-zstyle ':zdot:variant' name work
-
-# 3. Detection function (dynamic, per-machine)
-zdot_detect_variant() {
-  case $HOST in
-    (work-*)  REPLY=work  ;;
-    (pi-*)    REPLY=small ;;
-    (*)       REPLY=""    ;;    # default variant
-  esac
-}
-```
-
-Use `--variant` and `--variant-exclude` on hooks to control which machines
-they activate on:
-
-```zsh
-# Only on work machines:
-zdot_register_hook _vpn_init interactive \
-  --variant work \
-  --requires brew-ready \
-  --provides vpn-ready
-
-# Everywhere except resource-constrained machines:
-zdot_register_hook _heavy_completions_init interactive \
-  --variant-exclude small \
-  --requires plugins-loaded \
-  --provides completions-ready
-```
-
-Hooks with no `--variant` flag run in all variants (backward compatible).
-The variant becomes part of the execution plan's cache key, so switching
-variants just means rebuilding the plan on next shell start.
+The full story -- per-context hook registration, the `.zshenv` symlink
+pattern, and variant detection -- is in
+[Advanced Usage](docs/advanced.md).
 
 ## CLI
 
@@ -580,15 +267,15 @@ zdot provides an interactive CLI using a `<noun> <verb>` pattern with tab
 completion:
 
 ```
+zdot cache status           # show cache statistics
 zdot cache invalidate       # clear all caches
-zdot cache stats            # show cache statistics
 zdot hook list              # list registered hooks
-zdot hook status            # show hook execution status
+zdot hook plan              # print the execution plan
 zdot plugin list            # list plugins
 zdot plugin update <name>   # update a plugin
 zdot module list            # list loaded modules
+zdot update check-updates   # check for zdot updates
 zdot info                   # environment info
-zdot debug                  # debug diagnostics
 zdot bench                  # startup benchmark
 zdot profile                # zprof startup profile
 ```
@@ -607,7 +294,8 @@ ZDOT_DEBUG=1 zsh
 # Inspect registered hooks
 zdot hook list --all
 
-# Show the execution plan
+# Show the execution plan and per-hook status
+zdot hook plan
 zdot hook status
 
 # Full diagnostics
@@ -625,20 +313,19 @@ zdot debug
 | Check startup time | `zdot bench` |
 | Profile startup | `zdot profile` |
 
-## Further Reading
+## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [docs/api-reference.md](docs/api-reference.md) | Complete public API reference -- all functions, flags, and examples |
-| [docs/modules.md](docs/modules.md) | Reference for all 26 built-in modules |
-| [docs/module-guide.md](docs/module-guide.md) | Module writer's guide -- from quick start to complex lifecycles |
-| [docs/commands.md](docs/commands.md) | Full CLI reference for the `zdot` command |
-| [docs/plugins.md](docs/plugins.md) | Plugin system overview and usage |
-| [docs/zstyle-reference.md](docs/zstyle-reference.md) | Complete reference for all `zstyle` configuration options |
-| [docs/implementation.md](docs/implementation.md) | Architecture and implementation details |
-| [docs/plugin-implementation.md](docs/plugin-implementation.md) | Plugin system internals |
-| [docs/caching-implementation.md](docs/caching-implementation.md) | Bytecode compilation and plan caching internals |
-| [docs/compinit.md](docs/compinit.md) | Completion system (`compinit`) and compaudit controls |
+The docs are organized as a journey -- start at the top, go as deep as you
+need ([docs/README.md](docs/README.md) is the full index):
+
+| Stage | Document |
+|-------|----------|
+| Install & first shell | [Quickstart: dotfiler + zdot](docs/quickstart-dotfiler.md) (standalone: [Quick Start](#quick-start) above) |
+| Use plugins & configure shipped modules | [Using Plugins](docs/using-plugins.md) |
+| Write your own modules | [Module Writer's Guide](docs/module-guide.md) |
+| Contexts, variants, defer, bundles | [Advanced Usage](docs/advanced.md) |
+| Reference | [API](docs/api-reference.md) · [zstyle options](docs/zstyle-reference.md) · [CLI](docs/commands.md) · [Module catalog](docs/modules.md) · [compinit](docs/compinit.md) |
+| Internals | [Implementation](docs/implementation.md) · [Plugin internals](docs/plugin-implementation.md) |
 
 ## Acknowledgements
 

@@ -19,10 +19,7 @@ _ZDOT_PLUGINS_CACHE  - Cache directory path
 
 | Function | Purpose |
 |----------|---------|
-| `zdot_use_plugin <spec> [-hook\|-defer] [opts]` | Declare a plugin (normal, hook-loaded, or deferred) |
-| `zdot_use_defer <spec>` | **Deprecated** — alias for `zdot_use_plugin <spec> -defer` |
-| `zdot_use_fpath <spec>` | Declare plugin with fpath kind (legacy compat) |
-| `zdot_use_path <spec>` | Declare plugin with path kind (legacy compat) |
+| `zdot_use_plugin <spec> [hook\|defer\|defer-prompt] [opts]` | Declare a plugin (normal, hook-loaded, or deferred) |
 | `zdot_init` | Clone all repos, run bundle inits, resolve groups, build DAG, execute all hooks |
 | `zdot_plugin_path <spec>` | Get filesystem path for plugin |
 | `zdot_plugin_clone <spec>` | Clone plugin to cache |
@@ -68,7 +65,7 @@ nvm-ready               -> NVM initialized
 Registration:
 ```zsh
 zdot_register_hook my_func interactive \
-    --requires plugins-declared \
+    --requires plugins-cloned \
     --provides plugins-loaded
 ```
 
@@ -91,74 +88,19 @@ _ZDOT_BUNDLE_HANDLERS   - Ordered array of registered bundle handler names
 
 **Currently registered handlers:**
 
-- `omz` (`omz.zsh`) — Oh My Zsh compatibility
+- `omz` (`omz.zsh`) — Oh My Zsh compatibility (claims `omz:*`, provides `omz-bundle-initialized`)
+- `pz` (`pz.zsh`) — Prezto compatibility (claims `pz:*`; gated by `zstyle ':zdot:plugins' pz`)
 
 #### Bundle Handler Interface Contract
 
-Every bundle handler must implement exactly four functions. All take a single `<spec>`
-argument (e.g., `omz:plugins/git`):
-
-```zsh
-zdot_bundle_<name>_match <spec>   # Return 0 if this handler owns spec; non-zero otherwise
-zdot_bundle_<name>_path  <spec>   # Print the filesystem path for spec
-zdot_bundle_<name>_clone <spec>   # Ensure plugin is on disk (may be a no-op)
-zdot_bundle_<name>_load  <spec>   # Source / activate the plugin
-```
-
-All four functions are required. If a handler does not need cloning (e.g., OMZ is
-cloned at file-source time), `zdot_bundle_<name>_clone` must still be defined as a no-op.
-
-Optionally, a handler may also define an init function that is called by `zdot_init`
-during its bundle-init pass (step 2), **before** any plugins are cloned or loaded:
-
-```zsh
-zdot_bundle_<name>_init()  {
-    # one-time setup: set environment vars, configure paths, etc.
-}
-```
-
-Registration must happen **after** all four (or five) functions are defined, at the end
-of the file, and must declare any init function and phase it provides:
-
-```zsh
-zdot_register_bundle <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
-```
-
-`zdot_register_bundle` is idempotent — sourcing the file twice is safe.
-
-#### Writing a New Bundle Handler
-
-Create `core/plugin-bundles/<name>.zsh` with the following skeleton:
-
-```zsh
-# Match any spec this handler owns
-zdot_bundle_<name>_match() {
-    [[ $1 == <name>:* ]]
-}
-
-# Return the filesystem path for a spec
-zdot_bundle_<name>_path() {
-    local spec=$1
-    # derive and print path
-}
-
-# Ensure the plugin is available on disk
-zdot_bundle_<name>_clone() {
-    local spec=$1
-    # clone / install if not present; or leave empty if not needed
-}
-
-# Load (source/activate) the plugin
-zdot_bundle_<name>_load() {
-    local spec=$1
-    # source the plugin entry point
-}
-
-zdot_register_bundle <name> [--init-fn zdot_bundle_<name>_init] [--provides <phase>]
-```
-
-Then explicitly source the new file in `zdot.zsh` (auto-discovery is a planned future
-enhancement — see "Spec Format Decision" below).
+The four-function contract (`match`/`path`/`clone`/`load`), the optional
+`zdot_bundle_<name>_init` hook, registration ordering, and a complete
+skeleton are documented in
+[Advanced Usage → Writing a bundle handler](advanced.md#writing-a-bundle-handler).
+Handler files live in `core/plugin-bundles/` and are sourced explicitly from
+`zdot.zsh` (auto-discovery is a planned future enhancement — see "Spec Format
+Decision" below). `zdot_register_bundle` is idempotent — sourcing a handler
+file twice is safe.
 
 #### Spec Format Decision
 

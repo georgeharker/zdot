@@ -8,7 +8,7 @@
 #   zstyle ':zdot:update' mode                disabled   # disabled|reminder|prompt|auto
 #   zstyle ':zdot:update' frequency           3600       # seconds between checks
 #   zstyle ':zdot:update' destdir             "${XDG_CONFIG_HOME:-$HOME/.config}/zdot"
-#   zstyle ':zdot:update' in-tree-commit      none       # none|prompt|auto
+#   zstyle ':zdot:update' in-tree-commit      auto       # none|prompt|auto
 #   zstyle ':zdot:update' branch              ""         # explicit branch override (Phase 2 only)
 #   zstyle ':zdot:update' subtree-remote      ""         # "remote" or "remote branch"
 #   zstyle ':zdot:update' link-tree           true       # false to skip link-tree unpacking

@@ -3,7 +3,8 @@
 #
 # Provides:
 #   - Compdef queue (queue compdef calls before compinit runs)
-#   - Two-phase compinit: defer → flag → precmd
+#   - zdot_compinit_run: single idempotent entry point (deferred launch from
+#     the completions module; `finally`-group fallback in core)
 #   - Pluggable compdump path and refresh-check hooks
 #
 # Bundle-specific concerns (OMZ compdump metadata, SHORT_HOST, etc.) live in

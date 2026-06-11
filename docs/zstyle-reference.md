@@ -37,7 +37,7 @@ Source: `core/logging.zsh`
 
 ## Cache — `:zdot:cache`
 
-Source: `core/cache.zsh` · See also: [caching-implementation.md](caching-implementation.md)
+Source: `core/cache.zsh` · See also: [Implementation → Caching System](implementation.md#caching-system)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -54,7 +54,7 @@ zstyle ':zdot:cache' directory ~/.my-cache/zdot
 
 ## Modules — `:zdot:modules`
 
-Source: `core/modules.zsh` · See also: [Module Search Path](../README.md#module-search-path)
+Source: `core/modules.zsh` · See also: [Module Search Path](module-guide.md#module-search-path)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -71,7 +71,7 @@ zstyle ':zdot:modules' search-path \
 
 ## Variant — `:zdot:variant`
 
-Source: `core/ctx.zsh` · See also: [Variants](../README.md#variants)
+Source: `core/ctx.zsh` · See also: [Variants](advanced.md#variants)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -89,7 +89,7 @@ Priority order (highest first): `$ZDOT_VARIANT` → `zstyle ':zdot:variant' name
 ## Plugins — `:zdot:plugins`
 
 Source: `core/plugins.zsh`, `core/plugin-bundles/omz.zsh`, `core/plugin-bundles/pz.zsh`  
-See also: [plugins.md](plugins.md), [plugin-implementation.md](plugin-implementation.md)
+See also: [using-plugins.md](using-plugins.md), [plugin-implementation.md](plugin-implementation.md)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -104,6 +104,23 @@ See also: [plugins.md](plugins.md), [plugin-implementation.md](plugin-implementa
 zstyle ':zdot:plugins' directory ~/.cache/myzsh/plugins
 zstyle ':zdot:plugins' compile   false
 zstyle ':zdot:plugins' omz       false   # opt out of OMZ
+```
+
+---
+
+## Plugin update reminder — `:zdot:plugin-update`
+
+Source: `modules/plugins/plugins.zsh` · See also: [using-plugins.md](using-plugins.md#keeping-plugins-updated)
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `prompt` (shipped default; engine fallback `disabled`) | Background plugin-update scan: `disabled` \| `reminder` (print summary) \| `prompt` (ask Y/n to fast-forward). |
+| `frequency` | integer | `14400` | Minimum seconds between background scans. |
+
+**Example:**
+```zsh
+zstyle ':zdot:plugin-update' mode      reminder
+zstyle ':zdot:plugin-update' frequency 7200
 ```
 
 ---
@@ -131,24 +148,23 @@ See also: [implementation.md](implementation.md)
 Self-update is **opt-in** — set `mode` to activate. All other keys are ignored
 when `mode` is `disabled`.
 
-### Phase 1 vs Phase 2
+### Round 1 vs Round 2
 
-When zdot is integrated with dotfiler, updates run in two phases:
+When zdot is integrated with dotfiler, updates run in two rounds (matching
+dotfiler's terminology; the code uses `_phase` as the variable name):
 
-- **Phase 1 — dotfiles-directed**: dotfiler pulls the main dotfiles repo and
+- **Round 1 — dotfiles-directed**: dotfiler pulls the main dotfiles repo and
   applies whatever submodule pointer / marker the upstream maintainer
-  recorded for zdot. Phase 1 follows that pointer faithfully (whatever
+  recorded for zdot. Round 1 follows that pointer faithfully (whatever
   branch lineage the dotfiles maintainer chose, you get).
-- **Phase 2 — self-directed**: zdot fetches its own upstream and advances
+- **Round 2 — self-directed**: zdot fetches its own upstream and advances
   to the branch tip. This is where `:zdot:update' branch` and
   `release-channel` apply.
 
-Some keys (notably `branch` and `release-channel`) only affect Phase 2 —
-they don't override Phase 1's pointer trajectory.
-
-(Dotfiler's user docs call these "Round 1" and "Round 2"; the code uses
-`_phase` as the variable name. Same concept, different scope of
-description.)
+Some keys (notably `branch` and `release-channel`) only affect Round 2 —
+they don't override Round 1's pointer trajectory. See dotfiler's
+[how-updates-work](https://github.com/georgeharker/dotfiler/blob/main/docs/how-updates-work.md)
+for the full lifecycle.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -157,11 +173,11 @@ description.)
 | `destdir` | string | `$XDG_CONFIG_HOME/zdot` | Directory where the link-tree is unpacked (the home-side destination). |
 | `link-tree` | bool | `true` | Run link-tree unpacking after a pull. Set `false` to skip symlink management. |
 | `dotfiler-integration` | string | _(auto)_ | Force dotfiler integration on (`true`/`yes`/`on`/`1`) or off (`false`/`no`/`off`/`0`). Default: auto-detected from repo topology. |
-| `in-tree-commit` | string | `none` | How to handle in-tree (non-submodule) commits: `none` \| `prompt` \| `auto`. |
-| `branch` | string | _(empty)_ | **Phase 2 only.** Explicit upstream branch override for the self-directed update. When set AND the worktree's current branch differs, Phase 2 actively `git checkout`s this branch before fast-forwarding. See [Branch overrides and switching](#branch-overrides-and-switching) below. |
+| `in-tree-commit` | string | `auto` | What to do with the parent repo's pointer/marker after a component update (submodule gitlink commit, SHA marker): `none` \| `prompt` \| `auto`. |
+| `branch` | string | _(empty)_ | **Round 2 only.** Explicit upstream branch override for the self-directed update. When set AND the worktree's current branch differs, Round 2 actively `git checkout`s this branch before fast-forwarding. See [Branch overrides and switching](#branch-overrides-and-switching) below. |
 | `subtree-remote` | string | _(empty)_ | Subtree topology only. Either `"<remote>"` (branch resolved via the chain below) or `"<remote> <branch>"` (explicit branch). |
 | `subtree-url` | string | _(empty)_ | Remote URL override for subtree pulls. |
-| `release-channel` | string | `release` | Controls which commits are considered as update targets in **self-directed (Phase 2) checks** only. `release` — only advance to commits reachable from a semver tag matching `v<N>.<N>.<N>[…]`; no qualifying tag means no update. `any` — advance to the branch tip (pre-v0.x behaviour). Phase 1 (dotfiles-directed) is unaffected by this setting. |
+| `release-channel` | string | `release` | Controls which commits are considered as update targets in **self-directed (Round 2) checks** only. `release` — only advance to commits reachable from a semver tag matching `v<N>.<N>.<N>[…]`; no qualifying tag means no update. `any` — advance to the branch tip (pre-v0.x behaviour). Round 1 (dotfiles-directed) is unaffected by this setting. |
 
 **Example:**
 ```zsh
@@ -175,7 +191,7 @@ zstyle ':zdot:update' release-channel any
 
 ### Branch overrides and switching
 
-Phase 2 (the self-directed pull from zdot's own upstream) resolves the upstream
+Round 2 (the self-directed pull from zdot's own upstream) resolves the upstream
 branch via this chain (highest-priority first):
 
 1. `zstyle ':zdot:update' branch <name>`
@@ -186,7 +202,7 @@ branch via this chain (highest-priority first):
 
 **Switch behaviour.** When tier 1 or 2 produces a value (= the user
 **explicitly** picked a branch) and the worktree's current branch isn't
-that, Phase 2 actively `git checkout`s the configured branch — creating a
+that, Round 2 actively `git checkout`s the configured branch — creating a
 local tracking branch from `<remote>/<branch>` if missing — and then
 fast-forwards. No rebase fallback: if local branch has commits ahead of
 remote, the pull fails loudly.
@@ -221,7 +237,7 @@ omits it.
 ## dotfiler integration — `:zdot:dotfiler`
 
 Source: `core/update.zsh`, `core/update-impl.zsh`, `modules/dotfiler/dotfiler.zsh`  
-See also: [dotfiler Integration](../README.md#dotfiler-integration)
+See also: [Quickstart: dotfiler + zdot](quickstart-dotfiler.md)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -238,6 +254,32 @@ Detection order (first match wins):
 ```zsh
 zstyle ':zdot:dotfiler' scripts-dir ~/.dotfiles/.nounpack/dotfiler
 ```
+
+---
+
+## Module: history — `:zdot:history`
+
+Source: `modules/history/history.zsh`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `size` | integer | `50000` | `HISTSIZE` — maximum history entries in memory. |
+| `save-size` | integer | `50000` | `SAVEHIST` — maximum history entries saved to disk. |
+| `per-dir` | bool | `true` | Per-directory history via `jimhester/per-directory-history`. Set `false` to disable (read at parse time). |
+
+---
+
+## Module: prompts — `:zdot:omp-prompt` / `:zdot:starship-prompt` / `:zdot:omz-prompt`
+
+Source: `modules/omp-prompt/`, `modules/starship-prompt/`, `modules/omz-prompt/`
+
+Only one prompt module should be loaded at a time; each provides `prompt-ready`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `':zdot:omp-prompt' theme` | string | `$XDG_CONFIG_HOME/oh-my-posh/theme.toml` | oh-my-posh theme file. |
+| `':zdot:starship-prompt' config` | string | Starship default (`$XDG_CONFIG_HOME/starship.toml`) | Config path; sets `$STARSHIP_CONFIG`. |
+| `':zdot:omz-prompt' theme` | string | _(required)_ | OMZ theme name, e.g. `robbyrussell` or `agnoster`. |
 
 ---
 
@@ -267,7 +309,7 @@ Source: `modules/nodejs/nodejs.zsh`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `lazy-cmd` | array | `(node npm npx yarn pnpm)` | Commands that trigger lazy-loading of the Node.js version manager. |
+| `lazy-cmd` | array | `(opencode copilot prettierd claude)` | Commands that trigger lazy-loading of the Node.js version manager. |
 
 **Example:**
 ```zsh
@@ -325,3 +367,36 @@ Source: `modules/apt/apt.zsh`
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `verify-tools` | array | `(op eza oh-my-posh gh tailscale zoxide rg bat fd)` | List of tools whose presence is verified after apt setup. Override to add or replace. |
+
+---
+
+## Module: syntax-highlight — `:zdot:syntax-highlight`
+
+Source: `modules/syntax-highlight/syntax-highlight.zsh`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `fsh-theme` | string | `$XDG_CONFIG_HOME/fast-syntax-highlighting/tokyonight.ini` | Path to a `fast-syntax-highlighting` `.ini` theme. Empty string disables theming. |
+
+---
+
+## Module: update-nag — `:zdot:update-nag`
+
+Source: `modules/update-nag/update-nag.zsh`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `plugin` | string | `georgeharker/zsh-pkg-update-nag` | Plugin spec to clone and load. **Read at parse time** — set before `zdot_load_module update-nag`, or via `zdot_before_module`. |
+
+---
+
+## Module: ai — `:zdot:ai` / `:zsh-ai:*`
+
+Source: `modules/ai/ai.zsh` · See also: [modules/ai/README.md](../modules/ai/README.md)
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `':zdot:ai' add-cli-to-path` | bool | `false` | Prepend the plugin's `bin/` to `$PATH` for the `zsh-ai` CLI. |
+| `':zdot:ai' api-key-env` | string | _(empty)_ | Forwarded to `:zsh-ai:* api_key_env` when that upstream value isn't set. |
+| `':zsh-ai:*' endpoint` | string | `http://localhost:11434/v1` | Backstop default seeded for the plugin; any user value wins. |
+| `':zsh-ai:…'` other keys | | plugin defaults | Model, keybinds, temperature, FIM templates, … — set via an `ai-configure` hook; see the upstream plugin's config reference. |
