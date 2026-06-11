@@ -8,7 +8,7 @@ organizes your shell environment into modular, reusable components with
 automatic dependency resolution.
 
 > 📖 Rendered documentation:
-> [docs.georgeharker.com/zdot/main](https://docs.georgeharker.com/zdot/main/)
+> [docs.georgeharker.com/zdot](https://docs.georgeharker.com/zdot/)
 > · [dev](https://docs.georgeharker.com/zdot/dev/)
 
 ---
