@@ -470,6 +470,9 @@ _zdot_update_hook_unpack() {
 
     local -a _setup_args=(
         "$_unpack_flag"
+        # force = consent: a forced update must converge headlessly, so it
+        # answers yes to link-replacement prompts (divergent files).
+        ${force:+"-y"}
         ${dry_run:+"-D"}
         ${quiet:+"-q"}
         ${debug_flag:+"-g"}
@@ -664,7 +667,10 @@ _zdot_update_handle_update() {
             fi
             print -n "zdot: update available. Pull now? [Y/n] "
             local _ans
-            read -r -k1 _ans; print ""
+            # EOF (ctrl-d) fails the read without setting _ans — treat it as
+            # decline, not as the Y default (Enter is the way to accept).
+            read -r -k1 _ans || _ans=n
+            print ""
             if [[ "$_ans" == (n|N) ]]; then
                 _update_core_release_lock "$_lock_dir"
                 return 0

@@ -2,8 +2,12 @@
 # Patterns are relative to the zdot repo root.
 .shuck.toml
 
-# Documentation only — everything else in zdot is installed.
-docs/
+# Documentation only — everything else in zdot is installed. Anchored
+# to the repo root like /tests/.
+/docs/
+
+# Test suite — repo infrastructure, never linked into ~/.config/zdot
+/tests/
 
 # CI / GitHub metadata
 .github/
