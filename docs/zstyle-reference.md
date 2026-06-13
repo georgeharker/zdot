@@ -175,8 +175,8 @@ for the full lifecycle.
 | `dotfiler-integration` | string | _(auto)_ | Force dotfiler integration on (`true`/`yes`/`on`/`1`) or off (`false`/`no`/`off`/`0`). Default: auto-detected from repo topology. |
 | `in-tree-commit` | string | `auto` | What to do with the parent repo's pointer/marker after a component update (submodule gitlink commit, SHA marker): `none` \| `prompt` \| `auto`. |
 | `branch` | string | _(empty)_ | **Round 2 only.** Explicit upstream branch override for the self-directed update. When set AND the worktree's current branch differs, Round 2 actively `git checkout`s this branch before fast-forwarding. See [Branch overrides and switching](#branch-overrides-and-switching) below. |
-| `subtree-remote` | string | _(empty)_ | Subtree topology only. Either `"<remote>"` (branch resolved via the chain below) or `"<remote> <branch>"` (explicit branch). |
-| `subtree-url` | string | _(empty)_ | Remote URL override for subtree pulls. |
+| `subtree-remote` | string | `zdot main` | Subtree topology only. Either `"<remote>"` (branch resolved via the chain below) or `"<remote> <branch>"` (explicit branch). Note: the two-word default hard-pins the branch; set the single-word form to use the resolution chain. |
+| `subtree-url` | string | `https://github.com/georgeharker/zdot.git` | Remote URL for subtree pulls. The default is the canonical repo — the standard way to receive published zdot updates; set it only for forks or private mirrors. |
 | `release-channel` | string | `release` | Controls which commits are considered as update targets in **self-directed (Round 2) checks** only. `release` — only advance to commits reachable from a semver tag matching `v<N>.<N>.<N>[…]`; no qualifying tag means no update. `any` — advance to the branch tip (pre-v0.x behaviour). Round 1 (dotfiles-directed) is unaffected by this setting. |
 
 **Example:**

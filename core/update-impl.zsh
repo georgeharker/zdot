@@ -267,6 +267,14 @@ _zdot_update_hook_plan() {
                 return 0
             fi
             zdot_verbose "zdot hook plan: up to date but force active — populating plan vars"
+            if [[ "$_topology" == subtree ]] && \
+                    _update_core_read_sha_marker "$ZDOT_REPO"; then
+                # Inside a subtree, _old came from `rev-parse HEAD` — the
+                # PARENT repo's SHA. Post would record it into the marker
+                # and poison the next range; the marker is zdot's true
+                # position.
+                _old="$REPLY"
+            fi
             _new="$_old"
         else
             _old="${REPLY%%..*}"
