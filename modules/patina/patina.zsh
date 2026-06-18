@@ -29,4 +29,5 @@ zdot_register_hook _patina_init interactive \
     --requires-group patina-configure \
     --requires-tool zsh-patina \
     --provides patina-ready \
+    --after autosuggestions-ready \
     --optional
