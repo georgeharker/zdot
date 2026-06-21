@@ -44,6 +44,14 @@
 #   api-key-env      shortcut: forwarded to `:zsh-ai:* api_key_env` when that
 #                      upstream value isn't already set
 #
+# Commands:
+#   ai-sync [uv-sync-args...]  (re)sync the plugin's Python venv. _ai_load only
+#                      bootstraps the venv on first run (when .venv is missing);
+#                      this re-syncs an existing one too. Run it to add an extra
+#                      after the fact — e.g. `ai-sync --extra claude` to enable
+#                      the claude_code backend on a venv built without it. With
+#                      no args it forwards the same flags _ai_load uses.
+#
 # Plugin knobs this module seeds as backstop defaults:
 #   :zsh-ai:*        endpoint           http://localhost:11434/v1
 #   :zsh-ai:scratch  enabled            yes
@@ -105,11 +113,10 @@ _ai_load() {
     # is unset for the sync so uv builds the plugin's own .venv rather than
     # syncing into whatever venv is active (the uv module activates ~/.venv).
     if [[ -f "${_ai_path}/pyproject.toml" && ! -d "${_ai_path}/.venv" ]]; then
-        # Always pull in the optional `claude` extra (Claude Agent SDK) so the
-        # claude_code provider works out of the box — no manual reinstall.
-        zdot_info "ai: setting up zsh-ai Python venv (uv sync --extra claude)…"
-        ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync --no-dev --extra claude ) \
-            || zdot_warn "ai: uv sync failed; the zsh-ai LLM bridge may not work"
+        # First run: build the venv. ai-sync's defaults include the optional
+        # `claude` extra (Claude Agent SDK), so the claude_code provider works
+        # out of the box. Re-run `ai-sync` by hand to change extras later.
+        ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
     fi
 
     # Optional CLI on PATH (zsh-ai ships bin/zsh-ai). Explicit `export` so PATH
@@ -119,6 +126,29 @@ _ai_load() {
     fi
 
     zdot_load_plugin georgeharker/zsh-ai
+}
+
+# (Re)sync the zsh-ai plugin's Python venv with uv. _ai_load bootstraps the
+# venv only when it's missing; this command re-syncs an existing one too, so you
+# can change what's installed after the fact — most usefully adding an optional
+# extra: `ai-sync --extra claude` enables the claude_code chat backend on a venv
+# that was built without it. Args are forwarded verbatim to `uv sync`; with none
+# it uses the same flags the first-run bootstrap does (--no-dev --extra claude).
+# VIRTUAL_ENV is unset so uv targets the plugin's own .venv, not an active one
+# (the uv module activates ~/.venv).
+ai-sync() {
+    local _ai_path
+    zdot_plugin_path georgeharker/zsh-ai
+    _ai_path="$REPLY"
+    if [[ ! -f "${_ai_path}/pyproject.toml" ]]; then
+        zdot_warn "ai: no pyproject.toml under ${_ai_path}; is the plugin cloned?"
+        return 1
+    fi
+    local -a args=("$@")
+    (( $# )) || args=(--no-dev --extra claude)
+    zdot_info "ai: syncing zsh-ai venv (uv sync ${args[*]})…"
+    ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ) \
+        || { zdot_warn "ai: uv sync failed"; return 1; }
 }
 
 # Declare the plugin so the zdot plugin system clones/updates it. It is *loaded*
