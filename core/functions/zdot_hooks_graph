@@ -33,6 +33,10 @@ function zdot_hooks_graph() {
 
     local mode="" target_name=""
     local _g_ascii=0 _g_max_depth=-1 _g_show_internal=0 _g_verbose=0
+    # Group rendering: 0 = expand each group inline at first use (default);
+    # 1 = keep groups as atoms in the main tree and list their members in a
+    # "Group contents" section afterwards.
+    local _g_groups_after=0
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -42,6 +46,8 @@ function zdot_hooks_graph() {
             --ascii)          _g_ascii=1;     shift ;;
             --max-depth)      _g_max_depth="$2"; shift 2 ;;
             --show-internal)  _g_show_internal=1; shift ;;
+            --groups-inline)  _g_groups_after=0; shift ;;
+            --groups-after)   _g_groups_after=1; shift ;;
             -v|--verbose)     _g_verbose=1;   shift ;;
             --help|-h)
                 zdot_info "zdot hook graph — pstree-style dependency tree"
@@ -53,6 +59,9 @@ function zdot_hooks_graph() {
                 zdot_info "  --ascii              ASCII glyphs only"
                 zdot_info "  --max-depth N        Cap recursion depth"
                 zdot_info "  --show-internal      Include synthetic group hooks"
+                zdot_info "  --groups-inline      Expand each group at first use (default)"
+                zdot_info "  --groups-after       Keep groups as atoms; expand them in a"
+                zdot_info "                       'Group contents' section afterwards"
                 zdot_info "  -v, --verbose        Show label and function name together"
                 zdot_info ""
                 zdot_info "  Solid connectors are hard --requires edges. Dim connectors with"
@@ -479,7 +488,13 @@ function zdot_hooks_graph() {
         # Group pseudo-node: contents are the group's real members; in --uses we
         # also hang its external dependents (consumers) off it.
         if [[ "$hid" == group:* ]]; then
-            out=( ${=_ZDOT_GROUP_MEMBERS[${hid#group:}]:-} )
+            out=()
+            # In --groups-after the group is an atom in the main tree: its members
+            # are suppressed (listed in the "Group contents" section instead).
+            # External dependents / soft predecessors still show, to keep the flow.
+            if (( ! _g_groups_after )); then
+                out=( ${=_ZDOT_GROUP_MEMBERS[${hid#group:}]:-} )
+            fi
             [[ "$_zdot_g_dir" == "uses" ]] && out+=( ${=_zdot_g_rev_map[$hid]:-} )
             [[ "$_zdot_g_dir" == "depends" ]] && out+=( ${=_zdot_g_soft_pre[$hid]:-} )
             REPLY="${(F)out}"
@@ -728,6 +743,60 @@ function zdot_hooks_graph() {
         done
     }
 
+    # ── --groups-after appendix ───────────────────────────────────────────────
+    # A "Group contents" section listing the direct members of each group that
+    # the just-drawn main tree referenced (read from _zdot_g_seen). This is a
+    # flat membership listing — a member's own subtree belongs to the main flow
+    # (or `--depends <member>`), so we deliberately do not recurse here; that
+    # keeps the section a predictable, scannable definition of each group rather
+    # than a second deep graph in a possibly-opposite direction.
+    function _zdot_g_render_group_defs() {
+        local -a _seed=()
+        local _k
+        for _k in ${(k)_zdot_g_seen}; do
+            [[ "$_k" == group:* ]] && _seed+=("${_k#group:}")
+        done
+        (( ${#_seed} )) || return 0
+        zdot_info ""
+        zdot_info "Group contents:"
+        # All loop-body locals declared once up front — re-running `local name`
+        # (no value) inside the loop would print "name=value" between entries.
+        local _G _gd _m _i _w _pad _t _n
+        local -a _mem _vis _vl
+        for _G in ${(o)_seed}; do
+            _mem=( ${=_ZDOT_GROUP_MEMBERS[$_G]:-} )
+            _vis=()
+            for _m in "${_mem[@]}"; do
+                (( ! _g_show_internal )) && _zdot_g_is_internal "$_m" && continue
+                _vis+=("$_m")
+            done
+            _zdot_g_sort_by_display "${_vis[@]}"
+            _vis=( ${(f)REPLY} )
+            _vl=()
+            for _t in "${_vis[@]}"; do [[ -n "$_t" ]] && _vl+=("$_t"); done
+            _vis=( "${_vl[@]}" )
+
+            _gd="$(_zdot_g_display_name "group:$_G")"
+            _n=${#_vis}
+            if (( _n == 0 )); then
+                zdot_info "  ${_gd}"
+                continue
+            fi
+            if (( _n == 1 )); then
+                zdot_info "  ${_gd}${_G_DASH}$(_zdot_g_display_name "${_vis[1]}")"
+                continue
+            fi
+            _zdot_g_vwidth "$_gd"; _w=$REPLY
+            _pad=""
+            for (( _i = 0; _i < _w + 1; _i++ )); do _pad+=" "; done
+            zdot_info "  ${_gd}${_G_TEE}$(_zdot_g_display_name "${_vis[1]}")"
+            for (( _i = 2; _i < _n; _i++ )); do
+                zdot_info "  ${_pad}${_G_BRANCH}$(_zdot_g_display_name "${_vis[$_i]}")"
+            done
+            zdot_info "  ${_pad}${_G_LAST}$(_zdot_g_display_name "${_vis[$_n]}")"
+        done
+    }
+
     # ── mode: --depends ──────────────────────────────────────────────────────
     if [[ "$mode" == "depends" ]]; then
         if [[ -z "$target_name" ]]; then
@@ -749,6 +818,7 @@ function zdot_hooks_graph() {
         _zdot_g_build_soft_edges
         _zdot_g_seen=()
         _zdot_g_render "$root_id" "" "" 0
+        (( _g_groups_after )) && _zdot_g_render_group_defs
         _zdot_g_seen=()
         _zdot_g_rev_map=()
         return 0
@@ -780,6 +850,7 @@ function zdot_hooks_graph() {
         (( _g_show_internal )) || { _zdot_g_canon "$root_id"; root_id="$REPLY"; }
         _zdot_g_seen=()
         _zdot_g_render "$root_id" "" "" 0
+        (( _g_groups_after )) && _zdot_g_render_group_defs
         _zdot_g_seen=()
         _zdot_g_rev_map=()
         return 0
@@ -843,6 +914,7 @@ function zdot_hooks_graph() {
     for r in "${final_roots[@]}"; do
         _zdot_g_render "$r" "" "" 0
     done
+    (( _g_groups_after )) && _zdot_g_render_group_defs
     _zdot_g_seen=()
     _zdot_g_rev_map=()
     return 0
