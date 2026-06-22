@@ -13,15 +13,24 @@
 zstyle ':zdot:brew' verify-tools zsh-patina
 zstyle ':zdot:apt' verify-tools zsh-patina
 
-# Register the completion at module-source time (like uv), NOT inside _patina_init.
-# Registration is metadata and only needs the zsh-patina binary present, not
-# active — so it must not ride on _patina_init, which is prompt-time (deferred via
-# prompt-ready). Making that hook a completions-producer would force-defer
-# completion finalization (and compinit) behind the prompt lifecycle. Top-level
-# registration always precedes finalization, so no group membership is needed.
-if command -v zsh-patina &>/dev/null; then
+# Completion registration lives in its OWN eager hook, separate from _patina_init
+# (which activates zsh-patina at prompt time — gated on prompt-ready, deferred).
+# Making _patina_init a completions-producer would force-defer completion
+# finalization (and compinit) behind the prompt lifecycle. Registration only needs
+# the binary available, so gate this hook on --requires-tool zsh-patina (provided
+# eagerly by _brew_init, after PATH setup) and keep it eager: it joins
+# completions-producers without dragging in the prompt phase. Cannot register at
+# module-source time — the brew PATH isn't set up yet, so zsh-patina isn't found.
+_patina_register_completions() {
     zdot_register_completion_file "zsh-patina" "zsh-patina completion"
-fi
+}
+
+zdot_register_hook _patina_register_completions interactive \
+    --name patina-completions \
+    --requires bootstrap-ready \
+    --requires-tool zsh-patina \
+    --group completions-producers \
+    --optional
 
 _patina_init() {
     command -v zsh-patina &>/dev/null || {
