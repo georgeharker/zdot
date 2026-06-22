@@ -1213,11 +1213,18 @@ zdot_register_completion_file gh "gh completion -s zsh"
 zdot_register_completion_file docker "docker completion zsh"
 ```
 
+> **Calling this from inside a hook?** If the registration runs in a hook body
+> (rather than at module-source time), register that hook into the
+> `completions-producers` group (`--group completions-producers`) so completion
+> generation waits for it. See [Modules → the `completions-producers` group](modules.md#registering-completions-from-a-hook-the-completions-producers-group).
+
 ---
 
 ### `zdot_register_completion_live`
 
-Register a function to run live during init for completion setup.
+Register a function to run live during init for completion setup. Same grouping
+rule as `zdot_register_completion_file`: if called from a hook body, register
+that hook with `--group completions-producers`.
 
 ```zsh
 zdot_register_completion_live <function-name>

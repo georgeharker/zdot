@@ -63,9 +63,20 @@ zdot_register_hook _completions_init interactive \
 # after every producer has drained (full fpath) — but NOT behind unrelated slow
 # deferred hooks (e.g. nvm), which simply aren't members. Distinct from the
 # `completions-configure` group above, which gates pre-fpath contributions.
+#
+# `completions-producers` group: any hook that calls a completion registration
+# function (zdot_register_completion_file / zdot_register_completion_live) from
+# INSIDE its body must join this group with `--group completions-producers`, so
+# that refresh_completions (below) sees the registration before it generates
+# files, AND the tool the gen command invokes is on PATH. Top-level (module-
+# source-time) registrations don't need it — they always precede this hook — but
+# joining is still correct if the gen command needs a tool the hook puts on PATH
+# (e.g. uv). Skipped optional members (a tool-gated hook on a machine without the
+# tool) are dropped from the barrier, so the group is safe for optional producers.
 zdot_register_hook _completions_finalize interactive \
     --group completions \
-    --requires completions-paths-ready autocomplete-post-configured rust-ready bun-ready uv-configured \
+    --requires completions-paths-ready autocomplete-post-configured \
+    --requires-group completions-producers \
     --provides completions-ready
 
 # Phase 3: compinit — the single launch point for the completion system.

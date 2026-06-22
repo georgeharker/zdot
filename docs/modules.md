@@ -614,9 +614,44 @@ gated `--requires-group completions` so it fires after every producer; a core
 | | |
 |---|---|
 | **Provides** | `completions-paths-ready`, `completions-ready`, `compinit-done` |
-| **Requires** | Phase 1: `bootstrap-ready`; Phase 2: `completions-paths-ready`, `autocomplete-post-configured`, `rust-ready`, `bun-ready`, `uv-configured` |
+| **Requires** | Phase 1: `bootstrap-ready`; Phase 2: `completions-paths-ready`, `autocomplete-post-configured`, group `completions-producers` |
 | **Context** | interactive + noninteractive |
 | **zstyle** | none |
+
+#### Registering completions from a hook: the `completions-producers` group
+
+`refresh_completions` (phase 2) generates a file for every command registered
+via `zdot_register_completion_file` / `zdot_register_completion_live`. For that
+to work the registration must already be in place **and** the tool the generator
+invokes must be on `PATH` by the time phase 2 runs.
+
+- **Registering at module-source time** (top level of the module `.zsh`, e.g.
+  `uv`) always precedes phase 2 — no extra wiring needed for the registration
+  itself.
+- **Registering from inside a hook body** (e.g. `_rust_init`, `_bun_init`,
+  `_patina_init`) only happens when that hook fires. Such a hook **must** join
+  the `completions-producers` group so phase 2 waits for it:
+
+  ```zsh
+  _mytool_init() {
+      command -v mytool &>/dev/null || return 0
+      zdot_register_completion_file "mytool" "mytool completion zsh"
+  }
+  zdot_register_hook _mytool_init interactive \
+      --requires bootstrap-ready \
+      --group completions-producers
+  ```
+
+`_completions_finalize` gates on `--requires-group completions-producers`, so it
+runs only after every member has drained — registrations are all present and the
+tools they shell out to are loaded. Also join the group when you register at
+top level but the generator needs a tool your hook puts on `PATH` (this is why
+`uv` is a member even though it registers at source time).
+
+The group is **safe for `--optional`, tool-gated producers**: a member skipped
+because its tool isn't installed (e.g. `patina` without `zsh-patina`) is dropped
+from the barrier rather than stalling it, and an all-skipped group is satisfied
+vacuously. See [Implementation → Skipped optional members and the end barrier](implementation.md#variant-system).
 
 ---
 

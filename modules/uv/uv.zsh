@@ -12,8 +12,13 @@ _uv_init() {
     [ -f ~/.venv/bin/activate ] && source ~/.venv/bin/activate
 }
 
-# Register hook: runs after secrets if available, otherwise runs anyway
-zdot_simple_hook uv --requires secrets-loaded --optional --requires-group uv-configure
+# --group completions-producers: uv registers completions at module-source time
+# (below), but the gen commands need `uv`/`uvx` on PATH — which _uv_init sources.
+# Joining the group makes completions finalization wait for that.
+zdot_simple_hook uv \
+    --requires-group uv-configure \
+    --provides-tool uv \
+    --group completions-producers
 
 zdot_register_completion_file "uv" "uv generate-shell-completion zsh"
 zdot_register_completion_file "uvx" "uvx --generate-shell-completion zsh"

@@ -23,11 +23,15 @@ _patina_init() {
     zdot_register_completion_file "zsh-patina" "zsh-patina completion"
 }
 
+# --group completions-producers: _patina_init registers the zsh-patina completion
+# in its body. Safe despite --optional: on a machine without zsh-patina the hook
+# is skipped and simply dropped from the completions barrier (see modules/completions).
 zdot_register_hook _patina_init interactive \
     --name patina \
     --requires bootstrap-ready prompt-ready \
     --requires-group patina-configure \
     --requires-tool zsh-patina \
     --provides patina-ready \
+    --group completions-producers \
     --after autosuggestions-ready \
     --optional

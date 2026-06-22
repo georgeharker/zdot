@@ -7,4 +7,7 @@ _bun_init() {
     zdot_register_completion_file "bun" "bun completions zsh"
 }
 
-zdot_simple_hook bun --provides bun-ready --requires-group bun-configure
+# --group completions-producers: _bun_init registers completions in its body,
+# so completions finalization must wait for it (see modules/completions).
+zdot_simple_hook bun --provides bun-ready --requires-group bun-configure \
+    --group completions-producers

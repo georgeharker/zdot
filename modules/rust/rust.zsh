@@ -8,4 +8,7 @@ _rust_init() {
     zdot_register_completion_file "cargo" "rustup completions zsh cargo"
 }
 
-zdot_simple_hook rust --provides rust-ready --requires-group rust-configure
+# --group completions-producers: _rust_init registers completions in its body,
+# so completions finalization must wait for it (see modules/completions).
+zdot_simple_hook rust --provides rust-ready --requires-group rust-configure \
+    --group completions-producers
