@@ -7,9 +7,6 @@ _uv_init() {
     if [ -f "$HOME/.local/bin/env" ]; then
         source "$HOME/.local/bin/env"
     fi
-
-    # Activate global Python virtualenv if available
-    [ -f ~/.venv/bin/activate ] && source ~/.venv/bin/activate
 }
 
 # --group completions-producers: uv registers completions at module-source time
