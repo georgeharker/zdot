@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="23"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="24"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -268,6 +268,15 @@ zdot_cache_save_plan() {
             echo "    \"$hook_id\""
         done
 
+        echo ")"
+        echo ""
+        echo "# Skipped optional members' group-member phases — dropped from barrier"
+        echo "# edges at runtime (_zdot_hook_requirements_met). Computed in"
+        echo "# zdot_build_execution_plan, which a cache hit skips, so it must persist."
+        echo "typeset -gA _ZDOT_SKIPPED_MEMBER_PHASES=("
+        for _smp in "${(@k)_ZDOT_SKIPPED_MEMBER_PHASES}"; do
+            echo "    ['$_smp']=1"
+        done
         echo ")"
         echo ""
         echo "# Hook metadata"

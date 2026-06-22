@@ -22,6 +22,7 @@ typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred exe
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
+typeset -gA _ZDOT_SKIPPED_MEMBER_PHASES   # _group_member_* phase -> 1 when its member is a skipped optional hook (dropped from barriers at plan-build AND runtime)
 typeset -g _ZDOT_CURRENT_HOOK_FUNC   # Set by hook runner during execution; empty between hooks
 typeset -gA _ZDOT_HOOK_NAMES         # hook_id -> user-assigned name label
 typeset -gA _ZDOT_HOOK_BY_NAME       # name label -> hook_id
@@ -591,6 +592,18 @@ zdot_build_execution_plan() {
         done
     done
 
+    # Persist each skipped member's synthetic _group_member_* phases so BOTH the
+    # in-degree count below AND the runtime deferred dispatch
+    # (_zdot_hook_requirements_met) drop the same barrier edges. Without the
+    # runtime half, a deferred group end barrier would wait forever on a skipped
+    # member's phase (never provided) and stall the whole deferred drain.
+    _ZDOT_SKIPPED_MEMBER_PHASES=()
+    for _sp_hid in ${(k)_skipped_optional}; do
+        for _sp_phase in ${=_ZDOT_HOOK_PROVIDES[$_sp_hid]}; do
+            [[ $_sp_phase == _group_member_* ]] && _ZDOT_SKIPPED_MEMBER_PHASES[$_sp_phase]=1
+        done
+    done
+
     # Initialize graph
     for hook_id in ${(k)_ZDOT_HOOKS}; do
 
@@ -619,15 +632,13 @@ zdot_build_execution_plan() {
         # _ZDOT_HOOK_REQUIRES_CONTEXTS; absent entry means all contexts).
         for phase in $requires; do
             _zdot_require_active_in_ctx "$hook_id" "$phase" || continue
-            # A synthesised group-member edge whose member will not run is
-            # dropped (not counted) so the end barrier still fires for the
-            # members that ARE present. Context-absent members are handled by
-            # _zdot_require_active_in_ctx above; this adds the optional-skip case.
-            if [[ $phase == _group_member_* ]] \
-                && _zdot_provider_hook_in_contexts "$phase" "${current_contexts[@]}" \
-                && [[ -n ${_skipped_optional[$REPLY]} ]]; then
-                continue
-            fi
+            # A synthesised group-member edge whose member is a skipped optional
+            # hook is dropped (not counted) so the end barrier still fires for the
+            # members that ARE present. Same set the runtime check
+            # (_zdot_hook_requirements_met) consults, so plan-build and the
+            # deferred drain stay consistent. Context-absent members are handled
+            # by _zdot_require_active_in_ctx above.
+            [[ -n ${_ZDOT_SKIPPED_MEMBER_PHASES[$phase]} ]] && continue
             # Check if phase is promised or has a provider hook in current contexts
             if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}"; then
                 # Required phase has no provider in current context
@@ -1813,6 +1824,10 @@ _zdot_hook_requirements_met() {
     local req
     for req in $requires; do
         _zdot_require_active_in_ctx "$hook_id" "$req" || continue
+        # A group-member edge whose member is a skipped optional hook is dropped —
+        # the same edge the plan's in-degree count drops. Without this, a deferred
+        # end barrier stalls forever waiting on a phase that will never be provided.
+        [[ -n ${_ZDOT_SKIPPED_MEMBER_PHASES[$req]} ]] && continue
         if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
             return 1
         fi
