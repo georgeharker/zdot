@@ -2234,8 +2234,15 @@ _zdot_hook_display_marks() {
         else
             _status_mark=" %F{red}[failed: rc=${_frc}]%f"
         fi
-    elif (( ${_ZDOT_EXECUTION_PLAN[(Ie)$1]} )); then
-        # In plan but never attempted — blocked by unmet dependency
+    elif (( ${_ZDOT_EXECUTION_PLAN[(Ie)$1]} )) \
+         || (( ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$1]} )) \
+         || [[ " ${_ZDOT_GROUP_MEMBERS[finally]:-} " == *" $1 "* ]]; then
+        # Planned (eager, deferred, or finally) but no exec result recorded:
+        # never attempted. For an eager hook a required phase stayed unmet; for a
+        # deferred/finally hook the deferred drain hasn't reached it — or stalled
+        # here. Previously only the eager plan was checked, so an un-run deferred
+        # hook showed NO mark (blank), making a stalled drain indistinguishable
+        # from a clean one. Marking it [not run] surfaces the stall point.
         _status_mark=" %F{yellow}[not run]%f"
     fi
 }
