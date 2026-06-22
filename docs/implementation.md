@@ -777,6 +777,13 @@ zdot_is_variant work  # returns 0 if active variant is 'work'
 
 **Group barrier inheritance**: synthetic begin/end barrier hooks created by `_zdot_init_resolve_groups` inherit variant constraints derived from their members — include list = union of member include lists (any open member keeps the barrier open); exclude list = intersection of member exclude lists (all members must exclude a variant for the barrier to exclude it). This ensures that when all members of a group are variant-filtered out, the barriers are also filtered, keeping `--requires-group` dependency resolution correct.
 
+**Skipped optional members and the end barrier**: an `--optional` member that is *skipped* at plan time (one of its own active requires has no provider — e.g. a tool-gated hook whose tool isn't installed) must not stall its group's end barrier. The member is variant/context-present, so it still has a registered provider for its synthetic `_group_member_<G>_<id>` phase — but that provider never runs, so a naive end barrier would keep a dead in-edge, never reach in-degree 0, and the plan would abort as a *false* circular dependency. `zdot_build_execution_plan` handles this in two steps:
+
+1. **Optional-skip pre-pass** (before in-degree counting): a fixed-point loop computes the set of `--optional` hooks that will be skipped — a hook is skipped when an active, non-`_group_member_*` require has no provider that will actually run (the provider is absent, or is itself a skipped optional hook, so skips cascade). `_group_member_*` requires are *excluded* as skip triggers, so a barrier is never skipped merely because one of its members is. Only `--optional` hooks can enter the set; a non-optional hook with a missing provider remains a hard error.
+2. **Per-edge drop** (during in-degree counting): a `_group_member_*` edge whose provider is in the skip set is dropped rather than counted — exactly mirroring how `_zdot_require_active_in_ctx` drops context-absent member edges. The end barrier therefore counts only the members that *will* run, fires once they complete, and `--requires-group` consumers proceed. If *every* member is skipped the barrier has no in-edges and fires immediately, identical to an empty group (vacuously satisfied).
+
+The net effect: **optional group members compose safely** — adding a tool-gated `--optional` hook to a producer group never risks deadlocking a non-optional `--requires-group` consumer on machines where the tool is absent. (Helper: `_zdot_provider_hook_in_contexts` returns the provider hook-id, which the pre-pass and the per-edge drop both consult.)
+
 ### Context Matching Algorithm
 
 **Function**: `zdot_build_execution_plan()` (core/hooks.zsh)

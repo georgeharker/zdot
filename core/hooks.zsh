@@ -481,6 +481,31 @@ _zdot_has_provider_in_contexts() {
     return 1
 }
 
+# Helper: return (in REPLY) the provider hook-id for a phase in the given
+# contexts, or "" if none. Same source-selection as
+# _zdot_has_provider_in_contexts (variant-filtered active index at plan time);
+# the in-degree builder needs the id, not just a yes/no, to tell whether a
+# provider will actually run.
+# Usage: _zdot_provider_hook_in_contexts <phase> <context1> ...
+_zdot_provider_hook_in_contexts() {
+    local phase="$1"
+    shift
+    local _ctx _val
+    for _ctx in "$@"; do
+        if (( _ZDOT_VARIANT_INDEX_BUILT )); then
+            _val="${_ZDOT_PHASE_PROVIDERS_ACTIVE[${_ctx}:${phase}]}"
+        else
+            _val="${_ZDOT_PHASE_PROVIDERS_BY_CONTEXT[${_ctx}:${phase}]}"
+        fi
+        if [[ -n $_val ]]; then
+            REPLY="$_val"
+            return 0
+        fi
+    done
+    REPLY=""
+    return 1
+}
+
 # Check whether a context-restricted require is active in the current shell.
 # Consults _ZDOT_HOOK_REQUIRES_CONTEXTS["hook_id:phase"]:
 #   - absent entry  -> require is unconditional (all contexts) -> return 0
@@ -530,6 +555,42 @@ zdot_build_execution_plan() {
     local -a execution_order
     local -a skipped_hooks    # Track skipped optional hooks
 
+    # ── Optional-skip pre-pass (transitive) ─────────────────────────────────
+    # An --optional hook is skipped when one of its active requires has no
+    # provider that will actually run. Computing this BEFORE in-degree counting
+    # is what lets a group's end barrier drop the edge for a skipped member:
+    # otherwise the member's synthesised _group_member_* phase stays "provided"
+    # (its provider is registered, it just never runs), the barrier keeps a dead
+    # edge, and the plan aborts as a false cycle.
+    #
+    # Skips cascade (an optional hook requiring a skipped optional hook's phase
+    # also skips), so iterate to a fixed point. Only --optional hooks enter the
+    # set; a non-optional hook with a missing provider is a hard error, surfaced
+    # in the main loop below. _group_member_* requires are never skip triggers —
+    # they are droppable, so a barrier is never skipped just because a member is.
+    local -A _skipped_optional
+    local _sp_changed=1 _sp_hid _sp_phase
+    while (( _sp_changed )); do
+        _sp_changed=0
+        for _sp_hid in ${(k)_ZDOT_HOOKS}; do
+            [[ ${_ZDOT_HOOK_OPTIONAL[$_sp_hid]:-0} == 1 ]] || continue
+            [[ -n ${_skipped_optional[$_sp_hid]} ]] && continue
+            _zdot_context_match "$_sp_hid" "${current_contexts[@]}" || continue
+            _zdot_variant_match "$_sp_hid" || continue
+            for _sp_phase in ${=_ZDOT_HOOK_REQUIRES[$_sp_hid]}; do
+                _zdot_require_active_in_ctx "$_sp_hid" "$_sp_phase" || continue
+                [[ $_sp_phase == _group_member_* ]] && continue
+                if _zdot_provider_hook_in_contexts "$_sp_phase" "${current_contexts[@]}"; then
+                    # Provider exists; satisfied unless it is itself skipped.
+                    [[ -n ${_skipped_optional[$REPLY]} ]] || continue
+                fi
+                _skipped_optional[$_sp_hid]=1
+                _sp_changed=1
+                break
+            done
+        done
+    done
+
     # Initialize graph
     for hook_id in ${(k)_ZDOT_HOOKS}; do
 
@@ -543,6 +604,13 @@ zdot_build_execution_plan() {
             continue
         fi
 
+        # Optional hooks the pre-pass resolved as unsatisfiable (including
+        # transitive skips) are dropped here, before they reach the graph.
+        if [[ -n ${_skipped_optional[$hook_id]} ]]; then
+            skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (optional: requires unmet)")
+            continue
+        fi
+
         local requires=(${=_ZDOT_HOOK_REQUIRES[$hook_id]})
         local degree=0
 
@@ -551,6 +619,15 @@ zdot_build_execution_plan() {
         # _ZDOT_HOOK_REQUIRES_CONTEXTS; absent entry means all contexts).
         for phase in $requires; do
             _zdot_require_active_in_ctx "$hook_id" "$phase" || continue
+            # A synthesised group-member edge whose member will not run is
+            # dropped (not counted) so the end barrier still fires for the
+            # members that ARE present. Context-absent members are handled by
+            # _zdot_require_active_in_ctx above; this adds the optional-skip case.
+            if [[ $phase == _group_member_* ]] \
+                && _zdot_provider_hook_in_contexts "$phase" "${current_contexts[@]}" \
+                && [[ -n ${_skipped_optional[$REPLY]} ]]; then
+                continue
+            fi
             # Check if phase is promised or has a provider hook in current contexts
             if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}"; then
                 # Required phase has no provider in current context

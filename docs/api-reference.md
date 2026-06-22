@@ -93,13 +93,13 @@ zdot_register_hook <function-name> <context...> [flags...]
 | `--before-tool` | `<tool>` | Sugar for `--before tool:<tool>` — soft-order before whoever `--provides-tool <tool>`, if any. |
 | `--provides` | `<phase>` | Phase token this hook provides on completion |
 | `--provides-tool` | `<tool>` | Sugar for `--provides tool:<tool>` |
-| `--optional` | | Hook is skipped (not errored) if a required phase has no provider |
+| `--optional` | | Hook is skipped (not errored) if a required phase has no provider. Safe to combine with `--group`: a skipped optional member is dropped from its group's end barrier rather than stalling it — see [Implementation → Skipped optional members and the end barrier](implementation.md#variant-system) |
 | `--name` | `<name>` | Human-readable label (used by `zdot_defer_order` and introspection) |
 | `--deferred` | | Mark for post-prompt deferred execution |
 | `--deferred-prompt` | | Like `--deferred` but refreshes the prompt afterward |
 | `--group` | `<name>` | Add to a named group (may repeat). Three names are predefined: `bootstrap` (runs first), `pre-defer` (runs as the last eager step, before the deferred phase), and `finally` (runs last of all, after the deferred drain). See the [Module Guide](module-guide.md#predefined-groups-bootstrap-pre-defer-and-finally). |
 | `--provides-group` | `<name>` | Run *before* the named group: the group's begin barrier waits for this hook, so every member runs after it. Mirror image of `--requires-group` (which waits for the group's end barrier). The provider is not a member |
-| `--requires-group` | `<name>` | Require all members of the named group to complete |
+| `--requires-group` | `<name>` | Require all members of the named group to complete. Members that are skipped (optional with unmet requires) or variant/context-filtered are dropped from the barrier, not waited on; an empty/all-skipped group is satisfied vacuously |
 | `--variant` | `<name>` | Only run when variant matches (may repeat; empty = all) |
 | `--variant-exclude` | `<name>` | Exclude when variant matches (takes priority over `--variant`) |
 
