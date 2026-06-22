@@ -19,8 +19,9 @@ zstyle ':zdot:apt' verify-tools zsh-patina
 # prompt-ready). Making that hook a completions-producer would force-defer
 # completion finalization (and compinit) behind the prompt lifecycle. Top-level
 # registration always precedes finalization, so no group membership is needed.
-command -v zsh-patina &>/dev/null && \
+if command -v zsh-patina &>/dev/null; then
     zdot_register_completion_file "zsh-patina" "zsh-patina completion"
+fi
 
 _patina_init() {
     command -v zsh-patina &>/dev/null || {
