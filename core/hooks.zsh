@@ -2259,6 +2259,18 @@ _zdot_hook_display_marks() {
         # hook showed NO mark (blank), making a stalled drain indistinguishable
         # from a clean one. Marking it [not run] surfaces the stall point.
         _status_mark=" %F{yellow}[not run]%f"
+    else
+        # No exec result AND not in any plan. If the hook is active in THIS
+        # shell's context+variant, it was dropped at build time — an --optional
+        # hook whose required phase had no provider (skipped), a cascade skip, or
+        # a group edge that resolved out. That is the case that previously showed
+        # blank and hid the very hook that "didn't run". A hook that is simply for
+        # another context (common under --all) is correctly left unmarked.
+        local -a _dm_cc=(${=_ZDOT_CURRENT_CONTEXT})
+        [[ ${_ZDOT_IS_LOGIN:-0} -eq 1 ]] && _dm_cc+=(login) || _dm_cc+=(nonlogin)
+        if _zdot_context_match "$1" "${_dm_cc[@]}" && _zdot_variant_match "$1"; then
+            _status_mark=" %F{red}[skipped]%f"
+        fi
     fi
 }
 
