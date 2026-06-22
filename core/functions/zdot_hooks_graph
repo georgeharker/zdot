@@ -13,13 +13,19 @@
 #   -v, --verbose        Show "label  <func>" instead of just the user-facing label
 #
 # Output style:
-#   - Siblings sorted by display name (deterministic)
+#   - Siblings sorted by display name (hard edges first, then soft)
 #   - DAG nodes printed once; repeat occurrences shown as "name ↑"
 #   - Single-child chains collapse onto one line:  A ─── B ─── C
 #   - Multiple children laid out pstree-style with parent-width alignment:
-#         parent─┬─child1
+#         parent─┬─child1        (hard --requires edge: solid connector)
 #                ├─child2
-#                └─child3
+#                ╰◂child3        (soft --after  edge: dim, arrow ◂ = runs after)
+#                ╰▸child4        (soft --before edge: dim, arrow ▸ = runs before)
+#   - Soft (--after / --before) edges are dimmed with a direction arrow and are
+#     never inlined, so they read distinctly from hard dependencies.
+#
+# Glyph widths are measured from the terminal (cursor-position report) so the
+# column math stays aligned even for double-width Nerd-Font icon glyphs.
 
 function zdot_hooks_graph() {
 
@@ -48,6 +54,10 @@ function zdot_hooks_graph() {
                 zdot_info "  --max-depth N        Cap recursion depth"
                 zdot_info "  --show-internal      Include synthetic group hooks"
                 zdot_info "  -v, --verbose        Show label and function name together"
+                zdot_info ""
+                zdot_info "  Solid connectors are hard --requires edges. Dim connectors with"
+                zdot_info "  an arrow are soft ordering: ◂ = --after (runs after), ▸ = --before"
+                zdot_info "  (runs before); absent if the target isn't registered."
                 return 0
                 ;;
             *)
@@ -72,6 +82,16 @@ function zdot_hooks_graph() {
     #   _G_DASH (chain-collapse connector "A─B")                  — 3 chars
     # See the column-math comment near _zdot_g_render for why.
     local _G_TEE _G_BRANCH _G_LAST _G_VERT _G_BLANK _G_DASH _G_UP _G_ELLIPSIS
+    # Soft-ordering (--after / --before) edges render dimmed with a 1-cell
+    # direction arrow in place of one branch dash. The skeleton char (├ / └)
+    # stays box-drawing so a soft sibling's column still lands under its parent
+    # bar; only the arrow carries direction:
+    #   after  → ◂  ("parent runs AFTER this node" — the node is a soft predecessor)
+    #   before → ▸  ("parent runs BEFORE this node" — the node is a soft successor)
+    # Arrows live only in prefix connectors (never in width-measured heads), and
+    # soft children are kept out of the inline first-child slot, so an unexpected
+    # arrow cell-width can't cascade into the overprint the hourglass caused.
+    local _G_DIM _G_DIMOFF _G_SBRANCH _G_SLAST _G_AFTER_ARROW _G_BEFORE_ARROW _G_VBAR
     if (( _g_ascii )); then
         _G_TEE='-+-'
         _G_BRANCH='|-'
@@ -81,6 +101,9 @@ function zdot_hooks_graph() {
         _G_DASH='---'
         _G_UP='^'
         _G_ELLIPSIS='...'
+        _G_DIM='%F{8}'; _G_DIMOFF='%f'
+        _G_SBRANCH='|'; _G_SLAST='`'; _G_VBAR='|'
+        _G_AFTER_ARROW='<'; _G_BEFORE_ARROW='>'
     else
         _G_TEE='─┬─'
         _G_BRANCH='├─'
@@ -90,6 +113,9 @@ function zdot_hooks_graph() {
         _G_DASH='───'
         _G_UP='↑'
         _G_ELLIPSIS='…'
+        _G_DIM='%F{8}'; _G_DIMOFF='%f'
+        _G_SBRANCH='├'; _G_SLAST='╰'; _G_VBAR='│'
+        _G_AFTER_ARROW='◂'; _G_BEFORE_ARROW='▸'
     fi
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -178,17 +204,57 @@ function zdot_hooks_graph() {
         print -r -- "$out"
     }
 
-    # Visible width of a head string, ignoring the %F{…}…%f colour escapes we
-    # add to [group:…] labels and deferral marks — so the pstree column math
-    # stays aligned (a raw ${#head} would count the escape characters and
-    # shift every child right).
+    # Visible width of a head string for the pstree column math. Two things
+    # would otherwise throw it off, so both are corrected here:
+    #   1. %F{colour}…%f escapes — stripped (they have zero on-screen width).
+    #   2. Wide glyphs — the Nerd-Font deferral hourglasses (U+F251/U+F250) are
+    #      icon glyphs that render TWO cells in many fonts, yet zsh's wcwidth (a
+    #      plain ${#s}) counts one. Rather than hard-code "= 2", we MEASURE the
+    #      real width once via _zdot_g_cellwidth and add the surplus per glyph.
+    # Uncorrected, every deferred mark in a (chain-collapsed) head shifts the
+    # children one column left of their ┬ until sibling bars overprint.
     function _zdot_g_vwidth() {
-        local s=${1//\%F\{magenta\}/}
-        s=${s//\%F\{yellow\}/}
-        s=${s//\%f/}
-        # The deferral hourglasses (U+F251/U+F250, Nerd Font PUA) advance
-        # one cell in monospace Nerd Fonts, so a plain character count stays correct.
-        REPLY=${#s}
+        setopt localoptions extendedglob   # ## closure below needs it
+        local s=${1//\%F\{[^\}]##\}/}   # drop every %F{colour}
+        s=${s//\%f/}                     # …and its %f reset
+        local total=${#s} g bare n
+        for g in $'' $''; do
+            bare=${s//$g/}
+            n=$(( ${#s} - ${#bare} ))    # occurrences (glyph is 1 codepoint each)
+            (( n )) || continue
+            _zdot_g_cellwidth "$g"
+            (( total += n * (REPLY - 1) ))
+        done
+        REPLY=$total
+    }
+
+    # Measure a glyph's true terminal cell width by asking the terminal where the
+    # cursor lands after we print it (Cursor Position Report: emit, send ESC[6n,
+    # read back ESC[row;colR — the column delta is the rendered width). The probe
+    # line is wiped immediately, results are memoised, and we fall back to the
+    # zsh char count when stdout is not a tty (e.g. piped to a file, where on-
+    # screen alignment is moot anyway). This adapts to the font instead of
+    # assuming a fixed width for the icon glyphs.
+    typeset -gA _zdot_g_cellw=()
+    function _zdot_g_cellwidth() {
+        local glyph="$1"
+        [[ -n "${_zdot_g_cellw[$glyph]:-}" ]] && { REPLY=${_zdot_g_cellw[$glyph]}; return; }
+        local w=${#glyph} _stty resp
+        if [[ -t 1 && -w /dev/tty && -r /dev/tty ]]; then
+            _stty=$(stty -g </dev/tty 2>/dev/null)
+            if [[ -n "$_stty" ]]; then
+                stty raw -echo min 0 time 2 </dev/tty 2>/dev/null
+                print -n -- $'\r'"${glyph}"$'\e[6n' >/dev/tty
+                resp=""
+                read -rs -d R -t 1 resp </dev/tty 2>/dev/null
+                print -n -- $'\e[2K\r' >/dev/tty
+                stty "$_stty" </dev/tty 2>/dev/null
+                local col=${resp##*;}
+                [[ "$col" == <-> ]] && w=$(( col - 1 ))
+            fi
+        fi
+        _zdot_g_cellw[$glyph]=$w
+        REPLY=$w
     }
 
     # Display for any node, including phase pseudo-nodes. A phase whose
@@ -227,6 +293,16 @@ function zdot_hooks_graph() {
     }
     local -a _all_ctx
     _all_ctx=( ${=$(_zdot_g_all_contexts)} )
+
+    # Measure every wide glyph once, up front, so the cursor-position probes in
+    # _zdot_g_cellwidth never interleave with rendered output. After this the
+    # widths are memoised and lookups during rendering do no terminal I/O.
+    _zdot_g_cellwidth $''   # deferral hourglass (by design)
+    _zdot_g_cellwidth $''   # deferral hourglass (forced)
+    if (( ! _g_ascii )); then
+        _zdot_g_cellwidth "$_G_AFTER_ARROW"
+        _zdot_g_cellwidth "$_G_BEFORE_ARROW"
+    fi
 
     # Resolve a phase name to its provider hook_id via context lookup; first match wins.
     function _zdot_g_provider_for_phase() {
@@ -280,6 +356,10 @@ function zdot_hooks_graph() {
                     _zdot_g_canon "$provider_id"; _pnode="$REPLY"
                 fi
                 [[ "$_pnode" == "$_cnode" ]] && continue
+                # Record the hard edge (provider → dependent) so soft --after /
+                # --before edges that merely restate an existing hard dependency
+                # are not drawn as soft (hard wins — see _zdot_g_build_soft_edges).
+                _zdot_g_hard_edge[${_pnode}::${_cnode}]=1
                 if [[ -z "${_zdot_g_rev_map[$_pnode]}" ]]; then
                     _zdot_g_rev_map[$_pnode]="$_cnode"
                 elif [[ " ${_zdot_g_rev_map[$_pnode]} " != *" $_cnode "* ]]; then
@@ -287,6 +367,75 @@ function zdot_hooks_graph() {
                 fi
             done
         done
+    }
+
+    # Soft-ordering edges from --after / --before, resolved + group-contracted
+    # into the same node space as the hard graph. Both reduce to a directed
+    # "from runs before to" edge (the planner's convention, core/hooks.zsh):
+    #   B --after  X   →  edge  resolve(X) → B   (X is a soft predecessor of B)
+    #   B --before X   →  edge  B → resolve(X)   (X is a soft successor   of B)
+    # Targets resolve as a phase provider first (covers --after-tool's tool:<t>),
+    # then as a hook name — exactly as the planner resolves them. Absent targets
+    # are a silent no-op, like the planner. Populates:
+    #   _zdot_g_soft_kind[from::to] = after|before   (kind, for the connector)
+    #   _zdot_g_soft_pre[to]       += from           (soft predecessors, --depends)
+    # and folds each edge into _zdot_g_rev_map so the --uses / --all direction and
+    # root computation see soft dependents too.
+    function _zdot_g_build_soft_edges() {
+        local b kind reg t x from to _f _to2
+        for b in ${(k)_ZDOT_HOOKS}; do
+            for kind in after before; do
+                if [[ "$kind" == after ]]; then
+                    reg="${_ZDOT_HOOK_AFTER[$b]:-}"
+                else
+                    reg="${_ZDOT_HOOK_BEFORE[$b]:-}"
+                fi
+                [[ -z "$reg" ]] && continue
+                for t in ${=reg}; do
+                    local -a resolved=()
+                    if _zdot_g_provider_for_phase "$t"; then
+                        resolved+=("$REPLY")
+                    elif [[ -n "${_ZDOT_HOOK_BY_NAME[$t]:-}" ]]; then
+                        resolved+=("${_ZDOT_HOOK_BY_NAME[$t]}")
+                    fi
+                    for x in ${(u)resolved}; do
+                        if [[ "$kind" == after ]]; then from="$x"; to="$b"; else from="$b"; to="$x"; fi
+                        _f="$from"; _to2="$to"
+                        if (( ! _g_show_internal )); then
+                            _zdot_g_canon "$from"; _f="$REPLY"
+                            _zdot_g_canon "$to";   _to2="$REPLY"
+                        fi
+                        [[ "$_f" == "$_to2" ]] && continue
+                        # Hard dependency already covers this pair → keep it hard.
+                        [[ -n "${_zdot_g_hard_edge[${_f}::${_to2}]:-}" ]] && continue
+                        # First declaration wins (a pair is at most one soft kind).
+                        [[ -n "${_zdot_g_soft_kind[${_f}::${_to2}]:-}" ]] && continue
+                        _zdot_g_soft_kind[${_f}::${_to2}]="$kind"
+                        # soft predecessor index for --depends
+                        if [[ " ${_zdot_g_soft_pre[$_to2]:-} " != *" $_f "* ]]; then
+                            _zdot_g_soft_pre[$_to2]+=" $_f"
+                        fi
+                        # fold into reverse map for --uses / --all
+                        if [[ -z "${_zdot_g_rev_map[$_f]:-}" ]]; then
+                            _zdot_g_rev_map[$_f]="$_to2"
+                        elif [[ " ${_zdot_g_rev_map[$_f]} " != *" $_to2 "* ]]; then
+                            _zdot_g_rev_map[$_f]+=" $_to2"
+                        fi
+                    done
+                done
+            done
+        done
+    }
+
+    # Edge kind between a displayed parent and child: hard | after | before.
+    # The soft map is keyed from→to (from runs before to); the lookup orientation
+    # depends on which way the current view walks the graph.
+    function _zdot_g_edge_kind() {   # $1 parent, $2 child
+        if [[ "$_zdot_g_dir" == depends ]]; then
+            REPLY="${_zdot_g_soft_kind[${2}::${1}]:-hard}"   # child is a predecessor of parent
+        else
+            REPLY="${_zdot_g_soft_kind[${1}::${2}]:-hard}"   # child depends on parent
+        fi
     }
 
     # ── child enumeration ─────────────────────────────────────────────────────
@@ -332,6 +481,7 @@ function zdot_hooks_graph() {
         if [[ "$hid" == group:* ]]; then
             out=( ${=_ZDOT_GROUP_MEMBERS[${hid#group:}]:-} )
             [[ "$_zdot_g_dir" == "uses" ]] && out+=( ${=_zdot_g_rev_map[$hid]:-} )
+            [[ "$_zdot_g_dir" == "depends" ]] && out+=( ${=_zdot_g_soft_pre[$hid]:-} )
             REPLY="${(F)out}"
             return
         fi
@@ -359,6 +509,8 @@ function zdot_hooks_graph() {
                     out+=("phase:$phase")
                 fi
             done
+            # Soft --after / --before predecessors of this node (run before it).
+            out+=( ${=_zdot_g_soft_pre[$_hn]:-} )
         else
             local deps="${_zdot_g_rev_map[$hid]:-}"
             out=( ${=deps} )
@@ -457,8 +609,11 @@ function zdot_hooks_graph() {
 
         _zdot_g_seen[$nid]=1
 
-        # Build head with chain collapse: while node has exactly one child that we
-        # can follow, append " ─── child" to the head and step into the child.
+        # Build head with chain collapse: while node has exactly one child we can
+        # follow *via a hard edge*, append " ─── child" and step into the child.
+        # Soft (--after/--before) children are never inlined — their dim arrow
+        # connector rides only on a vertical branch, so its cell width can't
+        # perturb the measured head column math.
         local head cur="$nid"
         head="$(_zdot_g_display_name "$nid")"
         _zdot_g_filtered_children "$cur"
@@ -473,6 +628,7 @@ function zdot_hooks_graph() {
             local only="${kids[1]}"
             [[ "$only" == phase:* ]] && break
             [[ -n "${_zdot_g_seen[$only]:-}" ]] && break
+            _zdot_g_edge_kind "$cur" "$only"; [[ "$REPLY" == hard ]] || break
             if (( _g_max_depth >= 0 && chain_depth + 1 >= _g_max_depth )); then
                 break
             fi
@@ -493,45 +649,83 @@ function zdot_hooks_graph() {
             return
         fi
 
+        # Classify each child of `cur` (hard | after | before), then reorder
+        # stably so hard edges come first. The inline first-child slot (the ─┬─
+        # tee, whose width feeds the column math) is thus always a hard edge;
+        # soft children fall to the vertical branches where their dim arrow
+        # connector is width-matched against its continuation and so is safe.
+        local -a kinds=()
+        for _kt in "${kids[@]}"; do _zdot_g_edge_kind "$cur" "$_kt"; kinds+=("$REPLY"); done
+        local _i
+        local -a _hk=() _hkind=() _sk=() _skind=()
+        for (( _i = 1; _i <= n; _i++ )); do
+            if [[ "${kinds[$_i]}" == hard ]]; then
+                _hk+=("${kids[$_i]}");  _hkind+=("hard")
+            else
+                _sk+=("${kids[$_i]}");  _skind+=("${kinds[$_i]}")
+            fi
+        done
+        kids=( "${_hk[@]}" "${_sk[@]}" )
+        kinds=( "${_hkind[@]}" "${_skind[@]}" )
+
         _zdot_g_vwidth "$head"; local head_w=$REPLY
         local pad=""
-        local _i
         for (( _i=0; _i < head_w + 1; _i++ )); do pad+=" "; done
 
-        if (( n == 1 )); then
-            # Chain collapse broke. Render the remaining child inline,
+        # The first child rides the inline tee only when it's a hard edge.
+        local first_inline=0
+        [[ "${kinds[1]}" == hard ]] && first_inline=1
+
+        if (( first_inline && n == 1 )); then
+            # Chain collapse broke at a hard single child. Render it inline,
             # tagged with why we stopped: phase pseudo-node, back-reference
             # to a previously-seen node, or depth-limit cutoff.
             local only="${kids[1]}"
             if [[ "$only" == phase:* ]]; then
                 zdot_info "${pfx1}${head}${_G_DASH}[phase: ${only#phase:}] (no provider)"
             elif [[ -n "${_zdot_g_seen[$only]:-}" ]]; then
-                local lbl
-                lbl="$(_zdot_g_display_name "$only")"
-                zdot_info "${pfx1}${head}${_G_DASH}${lbl} ${_G_UP}"
+                zdot_info "${pfx1}${head}${_G_DASH}$(_zdot_g_display_name "$only") ${_G_UP}"
             else
-                local lbl
-                lbl="$(_zdot_g_display_name "$only")"
-                zdot_info "${pfx1}${head}${_G_DASH}${lbl} ${_G_ELLIPSIS}"
+                zdot_info "${pfx1}${head}${_G_DASH}$(_zdot_g_display_name "$only") ${_G_ELLIPSIS}"
             fi
             return
         fi
 
-        # n >= 2: pstree-style first-child inline; remaining siblings beneath.
-        local k1_pfx1="${pfx1}${head}${_G_TEE}"
-        local k1_pfxc="${pfxc}${pad}${_G_VERT}"
-        _zdot_g_render "${kids[1]}" "$k1_pfx1" "$k1_pfxc" $((depth + 1))
+        # Lay out children. A hard first child rides inline after the head (tee);
+        # otherwise the head stands alone and every child hangs below it.
+        local start=1
+        if (( first_inline )); then
+            _zdot_g_render "${kids[1]}" "${pfx1}${head}${_G_TEE}" "${pfxc}${pad}${_G_VERT}" $((depth + 1))
+            start=2
+        else
+            zdot_info "${pfx1}${head}"
+        fi
 
-        local i
-        for (( i = 2; i < n; i++ )); do
-            local mp1="${pfxc}${pad}${_G_BRANCH}"
-            local mpc="${pfxc}${pad}${_G_VERT}"
-            _zdot_g_render "${kids[$i]}" "$mp1" "$mpc" $((depth + 1))
+        # All loop-body locals declared once up front: re-running `local name`
+        # (no value) on an already-declared local prints it, which would leak
+        # "_corner=├ …" lines between siblings.
+        local i conn cont _corner _arrow _aw _vbar _fill _j
+        for (( i = start; i <= n; i++ )); do
+            if [[ "${kinds[$i]}" == hard ]]; then
+                if (( i == n )); then conn="$_G_LAST"; cont="$_G_BLANK"
+                else                  conn="$_G_BRANCH"; cont="$_G_VERT"; fi
+            else
+                # Soft edge: dim corner + direction arrow. Measure the arrow's
+                # real cell width and pad the continuation to match, so the
+                # child's own subtree stays aligned whatever the terminal does
+                # with the arrow glyph (same trick as the hourglass fix).
+                if (( i == n )); then _corner="$_G_SLAST"; _vbar=" "
+                else                  _corner="$_G_SBRANCH"; _vbar="$_G_VBAR"; fi
+                if [[ "${kinds[$i]}" == after ]]; then _arrow="$_G_AFTER_ARROW"
+                else                                   _arrow="$_G_BEFORE_ARROW"; fi
+                _zdot_g_cellwidth "$_arrow"; _aw=$REPLY
+                _fill=""
+                for (( _j = 0; _j < _aw; _j++ )); do _fill+=" "; done
+                conn="${_G_DIM}${_corner}${_arrow}${_G_DIMOFF}"
+                cont="${_vbar}${_fill}"
+            fi
+            _zdot_g_render "${kids[$i]}" "${pfxc}${pad}${conn}" "${pfxc}${pad}${cont}" $((depth + 1))
         done
-
-        local lp1="${pfxc}${pad}${_G_LAST}"
-        local lpc="${pfxc}${pad}${_G_BLANK}"
-        _zdot_g_render "${kids[$n]}" "$lp1" "$lpc" $((depth + 1))
     }
 
     # ── mode: --depends ──────────────────────────────────────────────────────
@@ -548,17 +742,26 @@ function zdot_hooks_graph() {
         fi
         _zdot_g_dir="depends"
         (( _g_show_internal )) || { _zdot_g_build_canon_map; _zdot_g_canon "$root_id"; root_id="$REPLY"; }
+        # Soft --after/--before edges need the hard-edge set (built by the reverse
+        # map) to know which pairs are already hard, and feed _zdot_g_soft_pre.
+        typeset -gA _zdot_g_rev_map=() _zdot_g_hard_edge=() _zdot_g_soft_kind=() _zdot_g_soft_pre=()
+        _zdot_g_build_reverse_map
+        _zdot_g_build_soft_edges
         _zdot_g_seen=()
         _zdot_g_render "$root_id" "" "" 0
         _zdot_g_seen=()
+        _zdot_g_rev_map=()
         return 0
     fi
 
     # ── modes that need the reverse map ──────────────────────────────────────
     # Canon map must exist before the reverse map (which contracts via it).
     (( _g_show_internal )) || _zdot_g_build_canon_map
-    typeset -gA _zdot_g_rev_map=()
+    typeset -gA _zdot_g_rev_map=() _zdot_g_hard_edge=() _zdot_g_soft_kind=() _zdot_g_soft_pre=()
     _zdot_g_build_reverse_map
+    # Fold soft --after/--before edges into the reverse map so --uses / --all and
+    # the root computation account for soft dependents too.
+    _zdot_g_build_soft_edges
 
     if [[ "$mode" == "uses" ]]; then
         if [[ -z "$target_name" ]]; then
