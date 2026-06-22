@@ -119,7 +119,7 @@ _plugins_load_fzf_tab() {
 
 zdot_define_module fzf-tab \
     --load _plugins_load_fzf_tab \
-    --requires autosuggest-abbr-ready fzf-configured \
+    --requires fzf-configured \
     --context interactive \
     --auto-configure-group
 

@@ -35,13 +35,21 @@ _autocomplete_plugins_configure() {
 zdot_use_plugin omz:plugins/zoxide defer
 
 # Deferred plugins (bespoke dependency DAG)
+# Recommended interactive load order is fzf-tab -> abbr -> autosuggest. It is
+# expressed with SOFT --after edges (not --requires): each plugin yields to the
+# prior one IF it is active, but still loads if it is absent/disabled, so the
+# chain composes and degrades gracefully. The only HARD --requires here are
+# genuine dependencies (the module gate, and the abbreviations strategy needing
+# autosuggestions loaded).
 zdot_use_plugin olets/zsh-abbr defer \
     --name zsh-abbr-load --provides abbr-ready \
-    --requires autocomplete-loaded
+    --requires autocomplete-loaded \
+    --after fzf-tab-loaded
 
 zdot_use_plugin zsh-users/zsh-autosuggestions defer \
     --name autosuggest-load --provides autosuggest-ready \
     --requires autocomplete-loaded \
+    --after abbr-ready fzf-tab-loaded \
     --context interactive
 
 zdot_use_plugin olets/zsh-autosuggestions-abbreviations-strategy defer \

@@ -167,10 +167,16 @@ _zdot_bundle_handler_for() {
 #
 # New forms (preferred):
 #   zdot_use_plugin <spec> hook  [--name <n>] [--provides <p>] [--config <fn>] [--context <c>]
+#                                [--after <t...>] [--before <t...>]
 #                                [--group <g>] [--requires-group <g>] [--provides-group <g>]
 #   zdot_use_plugin <spec> defer [--name <n>] [--provides <p>] [--config <fn>] [--context <c>]
-#                                [--requires <r>]
+#                                [--requires <r>] [--after <t...>] [--before <t...>]
 #                                [--group <g>] [--requires-group <g>] [--provides-group <g>]
+#
+# --after / --before take soft ordering targets (phase or hook name): order
+# this plugin relative to each IF it is active in context, else silent no-op.
+# Unlike --requires they never gate (a missing target does not stop the load),
+# so they compose flexibly across modules. Valid for both hook and defer.
 #
 # Legacy forms (still accepted):
 #   zdot_use_plugin <spec>              # kind=normal — record for cloning only
@@ -217,6 +223,7 @@ zdot_use_plugin() {
     local opt_requires='' opt_requires_group='' opt_provides_group=''
     local -a opt_contexts=()
     local -a opt_groups=()
+    local -a opt_after=() opt_before=()
     while [[ $# -gt 0 ]]; do
         case $1 in
             --name)           opt_name=$2;           shift 2 ;;
@@ -234,6 +241,12 @@ zdot_use_plugin() {
                     return 1
                 }
                 opt_requires=$2; shift 2 ;;
+            --after)
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do opt_after+=("$1"); shift; done ;;
+            --before)
+                shift
+                while (( $# )) && [[ "$1" != --* ]]; do opt_before+=("$1"); shift; done ;;
             --group)          opt_groups+=("$2");    shift 2 ;;
             --requires-group) opt_requires_group=$2;  shift 2 ;;
             --provides-group) opt_provides_group=$2;  shift 2 ;;
@@ -288,6 +301,8 @@ zdot_use_plugin() {
     done
     [[ -n "$opt_requires_group" ]] && hook_args+=( --requires-group  "$opt_requires_group" )
     [[ -n "$opt_provides_group" ]] && hook_args+=( --provides-group  "$opt_provides_group" )
+    (( ${#opt_after} ))  && hook_args+=( --after  "${opt_after[@]}" )
+    (( ${#opt_before} )) && hook_args+=( --before "${opt_before[@]}" )
     if [[ $subcommand == defer || $subcommand == defer-prompt ]]; then
         [[ $subcommand == defer ]]         && hook_args+=( --deferred )
         [[ $subcommand == defer-prompt ]] && hook_args+=( --deferred-prompt )
