@@ -115,6 +115,9 @@ function _zdot() {
         '--ascii[use ASCII glyphs instead of Unicode box-drawing]'
         '--max-depth[cap recursion depth]:depth:'
         '--show-internal[include synthetic group-begin/group-end hooks]'
+        # --groups-inline / --groups-after pick one group-rendering style.
+        '(--groups-after)--groups-inline[expand each group inline at first use (default)]'
+        '(--groups-inline)--groups-after[keep groups as atoms; list members in a Group contents section]'
         # -v and --verbose are one logical option (aliases) — offer just one.
         '(-v --verbose)'{-v,--verbose}'[show label and function name together]'
     )

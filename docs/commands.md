@@ -15,7 +15,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | Noun | Verbs |
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
-| `hook` | `list [-v] [-a]`, `plan`, `status`, `defer-queue`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [-v]` |
+| `hook` | `list [-v] [-a]`, `plan`, `status`, `defer-queue`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [--groups-inline\|--groups-after] [-v]` |
 | `phase` | `list` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
 | `module` | `list`, `clone <name>` |
@@ -69,6 +69,8 @@ zdot hook graph --all              # Full dependency graph for all hooks
   --ascii            Use ASCII glyphs (|-, `-) instead of Unicode box-drawing
   --max-depth N      Cap recursion depth (children below get a trailing "…")
   --show-internal    Include synthetic group-begin / group-end scaffolding hooks
+  --groups-inline    Expand each group inline at first use (default)
+  --groups-after     Keep groups as atoms; list members in a "Group contents" section
   -v, --verbose      Show "label  <func>" instead of just the label
 ```
 
@@ -84,8 +86,19 @@ _xdg_init─┬─_brew_init─┬─_op_init─┬─_dotfiler_init
           └─fzf-configure───fzf-load───fzf-post-init
 ```
 
-- Siblings sorted by display name (deterministic).
+- Siblings sorted by display name (hard `--requires` edges first, then soft).
 - Single-child chains collapse onto one line: `A───B───C`.
+- Soft ordering edges (`--after` / `--before`) render dimmed with a direction
+  arrow instead of a solid connector: `◂` = runs after the target, `▸` = runs
+  before it (e.g. `╰◂completions` / `╰▸prompt`). They feed the layout and root
+  computation like hard edges, but are never inlined so they read distinctly.
+  A soft edge is omitted entirely if its target isn't registered in context.
+- Groups are contracted to a single `[group:G]` node. By default its members
+  expand inline at the group's first occurrence (`↑` on later occurrences);
+  `--groups-after` instead keeps every `[group:G]` an atom in the main tree and
+  appends a flat "Group contents" section listing each group's direct members.
+- Column widths are measured from the terminal (cursor-position report), so the
+  layout stays aligned even when icon glyphs render two cells wide.
 - Deferral is annotated (here and in `hook list`/`hook plan`/`phase list`),
   distinguishable by glyph as well as color: magenta `[ deferred]` (Nerd Font
   hourglass-start, U+F251) for hooks registered `--deferred`, yellow
