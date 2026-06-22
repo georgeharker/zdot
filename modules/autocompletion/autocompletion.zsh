@@ -102,6 +102,15 @@ zdot_define_module autocomplete \
 #
 # Autosuggest-specific, so it lives in THIS module; compinit is launched
 # separately from the completions module.
+#
+# Soft --after compinit-done: the autosuggest `completion` strategy queries the
+# completion system, so it only yields suggestions once compinit has run. That
+# query is lazy (per keystroke at the prompt, after the drain), so it cannot go
+# on the autosuggest LOAD — compinit is deliberately ordered AFTER the load (so
+# autosuggest's fpath/completions are picked up), and a load-time edge would
+# close that cycle. Activation is the right seam: it runs after compinit when
+# the completions module provides compinit-done, and still fires if it doesn't
+# (soft, no gate).
 _autocomplete_autosuggest_start() {
     (( ${+functions[_zsh_autosuggest_start]} )) && _zsh_autosuggest_start
 }
@@ -109,4 +118,5 @@ _autocomplete_autosuggest_start() {
 zdot_register_hook _autocomplete_autosuggest_start interactive \
     --deferred \
     --requires autosuggest-abbr-ready \
+    --after compinit-done \
     --provides autosuggest-started
