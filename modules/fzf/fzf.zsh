@@ -66,9 +66,6 @@ _fzf_init() {
 }
 
 _fzf_post_plugin_keybinds() {
-    # Autosuggest control
-    bindkey '^K' autosuggest-clear
-
     # FZF ZLE widgets (must be registered after fzf functions are loaded)
     zle -N zle_fzf_rg
     zle -N zle_fzf_ripgrep
