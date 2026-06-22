@@ -66,9 +66,6 @@ _fzf_init() {
 }
 
 _fzf_post_plugin_keybinds() {
-    # Autosuggest control
-    bindkey '^K' autosuggest-clear
-
     # FZF ZLE widgets (must be registered after fzf functions are loaded)
     zle -N zle_fzf_rg
     zle -N zle_fzf_ripgrep
@@ -93,11 +90,8 @@ _fzf_post_plugin() {
         source "${XDG_CONFIG_HOME:-${HOME}/.config}/fzf/fzf.zsh"
 
     _fzf_post_plugin_keybinds
-
-    # enable fzf-tab
-    if typeset -f enable-fzf-tab &> /dev/null; then
-        enable-fzf-tab
-    fi
+    # NOTE: enabling fzf-tab is NOT done here — it must wait for compinit. See
+    # the _fzf_tab_enable hook below.
 }
 
 zdot_define_module fzf \
@@ -119,9 +113,25 @@ _plugins_load_fzf_tab() {
 
 zdot_define_module fzf-tab \
     --load _plugins_load_fzf_tab \
-    --requires autosuggest-abbr-ready fzf-configured \
+    --requires fzf-configured \
     --context interactive \
     --auto-configure-group
+
+# fzf-tab wraps the completion system, so it can only be ENABLED after compinit
+# has run. Sourcing the plugin early (the load phase above) is fine; enabling is
+# what must wait. Gated HARD on fzf-tab-loaded (the enable-fzf-tab function must
+# exist) and SOFT --after compinit-done (order behind compinit when the
+# completions module provides it; still enable if that module is absent, so the
+# dependency composes rather than gating fzf-tab off entirely).
+_fzf_tab_enable() {
+    typeset -f enable-fzf-tab &> /dev/null && enable-fzf-tab
+}
+
+zdot_register_hook _fzf_tab_enable interactive \
+    --deferred \
+    --requires fzf-tab-loaded \
+    --after compinit-done \
+    --provides fzf-tab-enabled
 
 # Lazy load module functions
 zdot_module_autoload_funcs

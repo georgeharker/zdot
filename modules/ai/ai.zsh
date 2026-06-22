@@ -36,7 +36,7 @@
 # dependency on the uv module (uv-configured). The sync runs with VIRTUAL_ENV
 # unset so it builds the plugin's own venv, not whatever venv is active. It
 # always adds the plugin's `claude` extra (Claude Agent SDK) when present, so
-# the `provider = claude_code` backend works without a manual reinstall.
+# the `adapter = claude_code` backend works without a manual reinstall.
 #
 # Module knobs (`:zdot:ai` namespace):
 #   add-cli-to-path  boolean; prepend <plugin>/bin to $PATH for the `zsh-ai`
@@ -114,7 +114,7 @@ _ai_load() {
     # syncing into whatever venv is active (the uv module activates ~/.venv).
     if [[ -f "${_ai_path}/pyproject.toml" && ! -d "${_ai_path}/.venv" ]]; then
         # First run: build the venv. ai-sync's defaults include the optional
-        # `claude` extra (Claude Agent SDK), so the claude_code provider works
+        # `claude` extra (Claude Agent SDK), so the claude_code adapter works
         # out of the box. Re-run `ai-sync` by hand to change extras later.
         ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
     fi

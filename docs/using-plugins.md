@@ -62,9 +62,11 @@ zdot_use_plugin zsh-users/zsh-autosuggestions defer \
 zdot_use_plugin some/heavy-prompt defer-prompt  # deferred + prompt refresh after load
 ```
 
-`hook`/`defer` accept `--name`, `--provides`, `--requires`, `--config <fn>`,
-`--context`, and group flags so a plugin can participate in the dependency
-graph like any hook -- see
+`hook`/`defer` accept `--name`, `--provides`, `--requires`, `--after`,
+`--before`, `--config <fn>`, `--context`, and group flags so a plugin can
+participate in the dependency graph like any hook. Use `--requires` for hard
+dependencies (it gates the load) and `--after`/`--before` for soft, optional
+ordering (a missing target is a no-op, so orderings compose) -- see
 [`zdot_use_plugin` in the API reference](api-reference.md#zdot_use_plugin)
 for the full flag table.
 

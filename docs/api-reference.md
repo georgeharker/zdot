@@ -609,7 +609,9 @@ differ only in the prompt refresh after loading.
 | `--provides` | `<p>` | hook, defer | Phase provided on load |
 | `--config` | `<fn>` | hook, defer | Config function called before loading |
 | `--context` | `<ctx...>` | hook, defer | Contexts (default: `interactive noninteractive`) |
-| `--requires` | `<r>` | defer | Required phase |
+| `--requires` | `<r>` | defer | Required phase (hard dependency — gates the load) |
+| `--after` | `<t...>` | hook, defer | **Soft** ordering: load after each target *if present in context*, else no-op (never gates). Same semantics as [`zdot_register_hook --after`](#zdot_register_hook). Composes flexibly with absent/disabled plugins |
+| `--before` | `<t...>` | hook, defer | **Soft** ordering mirror: load before each target *if present*, else no-op (never gates) |
 | `--group` | `<g>` | hook, defer | Add hook to a named group (may repeat) |
 | `--requires-group` | `<g>` | hook, defer | Require all hooks in the named group |
 | `--provides-group` | `<g>` | hook, defer | Provide into the named group |
@@ -629,9 +631,27 @@ zdot_use_plugin "zsh-users/zsh-autosuggestions" defer \
 # OMZ plugin
 zdot_use_plugin "omz:plugins/git" defer
 
+# Soft ordering for a recommended-but-not-mandatory load sequence
+# (fzf-tab -> abbr -> autosuggest). --after never gates: if fzf-tab is
+# disabled, abbr still loads — only the ordering edge drops out.
+zdot_use_plugin "olets/zsh-abbr" defer \
+  --requires autocomplete-loaded \
+  --after fzf-tab-loaded
+zdot_use_plugin "zsh-users/zsh-autosuggestions" defer \
+  --requires autocomplete-loaded \
+  --after abbr-ready fzf-tab-loaded \
+  --context interactive
+
 # Prezto module (shorthand)
 zdot_use_pz git
 ```
+
+> **`--after`/`--before` vs `--requires`.** Use `--requires` only for a genuine
+> hard dependency (the plugin is broken without the target). For a *preferred*
+> order — "load me after X if X is around" — use `--after`/`--before`: a missing
+> or disabled target is a silent no-op, so independent modules can each
+> contribute ordering edges that compose into one partial order without hard
+> gates or cycles.
 
 ---
 
