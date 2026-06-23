@@ -19,7 +19,7 @@
 # Other configuration (e.g. ZSH_PKG_UPDATE_NAG_* env vars) can be set from
 # hooks attached to the update-nag-configure group.
 
-zdot_zstyle_get ':zdot:update-nag' plugin _update_nag_plugin_spec 'grorgeharker/zsh-pkg-update-nag'
+zdot_zstyle_get ':zdot:update-nag' plugin _update_nag_plugin_spec 'georgeharker/zsh-pkg-update-nag'
 
 zdot_use_plugin "${_update_nag_plugin_spec}"  # shuck: ignore=C006  # assigned indirectly by zdot_zstyle_get
 
