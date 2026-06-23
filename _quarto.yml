@@ -55,6 +55,7 @@ website:
       - section: "Reference"
         contents:
           - docs/api-reference.md
+          - docs/dependencies.md
           - docs/zstyle-reference.md
           - docs/commands.md
           - docs/modules.md

@@ -34,6 +34,7 @@ Start where your needs are.
 | Document | What it covers |
 |----------|----------------|
 | [API Reference](api-reference.md) | Every public function with full flag tables |
+| [Dependency types](dependencies.md) | Which edge to declare (`--requires`, `--requires-optional`, `--after`, `--optional`, groups) and when |
 | [zstyle Reference](zstyle-reference.md) | Every configuration option, grouped by subsystem |
 | [CLI Reference](commands.md) | The `zdot` command: every noun and verb |
 | [compinit](compinit.md) | Completion-system controls: compaudit, cached dumps, forced refresh |

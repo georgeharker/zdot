@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="24"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="25"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
@@ -273,8 +273,18 @@ zdot_cache_save_plan() {
         echo "# Skipped optional members' group-member phases — dropped from barrier"
         echo "# edges at runtime (_zdot_hook_requirements_met). Computed in"
         echo "# zdot_build_execution_plan, which a cache hit skips, so it must persist."
-        echo "typeset -gA _ZDOT_SKIPPED_MEMBER_PHASES=("
-        for _smp in "${(@k)_ZDOT_SKIPPED_MEMBER_PHASES}"; do
+        echo "typeset -gA _ZDOT_DROPPED_GROUP_PHASES=("
+        for _smp in "${(@k)_ZDOT_DROPPED_GROUP_PHASES}"; do
+            echo "    ['$_smp']=1"
+        done
+        echo ")"
+        echo ""
+        echo "# --requires-optional phases with no provider in this context —"
+        echo "# dropped from the requirer's edges at runtime (_zdot_hook_requirements_met),"
+        echo "# same as above. Computed in zdot_build_execution_plan, which a cache hit"
+        echo "# skips, so it must persist."
+        echo "typeset -gA _ZDOT_DROPPED_OPTIONAL_PHASES=("
+        for _smp in "${(@k)_ZDOT_DROPPED_OPTIONAL_PHASES}"; do
             echo "    ['$_smp']=1"
         done
         echo ")"

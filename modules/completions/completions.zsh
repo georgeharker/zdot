@@ -73,9 +73,19 @@ zdot_register_hook _completions_init interactive \
 # joining is still correct if the gen command needs a tool the hook puts on PATH
 # (e.g. uv). Skipped optional members (a tool-gated hook on a machine without the
 # tool) are dropped from the barrier, so the group is safe for optional producers.
+# autocomplete-post-configured is provided ONLY by the optional `autocompletion`
+# module. A base `completions` module must not HARD-require an optional sibling:
+# a standalone config that loads `completions` without `autocompletion` would
+# fail to build a plan at all ("no hook provides autocomplete-post-configured").
+# Use --requires-optional: when autocompletion is loaded this is a full
+# dependency — finalize is force-deferred behind it (a deferred phase) and
+# ordered after its plugins, so compinit (gated --requires-group completions)
+# still lands after them, exactly as before; when autocompletion is absent the
+# edge is silently dropped and finalize simply runs without it.
 zdot_register_hook _completions_finalize interactive \
     --group completions \
-    --requires completions-paths-ready autocomplete-post-configured \
+    --requires completions-paths-ready \
+    --requires-optional autocomplete-post-configured \
     --requires-group completions-producers \
     --provides completions-ready
 

@@ -324,7 +324,7 @@ need ([docs/README.md](docs/README.md) is the full index):
 | Use plugins & configure shipped modules | [Using Plugins](docs/using-plugins.md) |
 | Write your own modules | [Module Writer's Guide](docs/module-guide.md) |
 | Contexts, variants, defer, bundles | [Advanced Usage](docs/advanced.md) |
-| Reference | [API](docs/api-reference.md) · [zstyle options](docs/zstyle-reference.md) · [CLI](docs/commands.md) · [Module catalog](docs/modules.md) · [compinit](docs/compinit.md) |
+| Reference | [API](docs/api-reference.md) · [Dependency types](docs/dependencies.md) · [zstyle options](docs/zstyle-reference.md) · [CLI](docs/commands.md) · [Module catalog](docs/modules.md) · [compinit](docs/compinit.md) |
 | Internals | [Implementation](docs/implementation.md) · [Plugin internals](docs/plugin-implementation.md) |
 
 ## Acknowledgements

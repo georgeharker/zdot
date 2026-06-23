@@ -220,13 +220,20 @@ zdot_simple_hook history --after-tool fzf
 ```
 
 `--after <target>` / `--after-tool <tool>` is the **soft** counterpart to
-`--requires` / `--requires-tool`. Compare the three absence behaviours:
+`--requires` / `--requires-tool`. Compare the absence behaviours:
 
-| | target/dep missing |
-|---|---|
-| `--requires-tool fzf` | hard error |
-| `--requires-tool fzf` + `--optional` | the whole hook is skipped |
-| `--after-tool fzf` | silent no-op — the hook still runs, just unordered |
+| | target/dep missing | target/dep present |
+|---|---|---|
+| `--requires-tool fzf` | hard error | full dependency (orders + inherits deferral) |
+| `--requires-tool fzf` + `--optional` | the whole hook is skipped | full dependency |
+| `--requires-optional fzf` | edge dropped — the hook still runs | **full dependency** (same as `--requires`) |
+| `--after-tool fzf` | silent no-op — the hook still runs, just unordered | ordering only (does **not** inherit deferral) |
+
+Reach for `--requires-optional` when a base/common hook wants to order behind
+an **optional** sibling module's phase *with full `--requires` semantics* (so it
+inherits the sibling's deferral) but must not fail when that sibling isn't
+loaded. The full decision guide — including why `--after` is *not* a drop-in for
+this — is in [Dependency types](dependencies.md).
 
 Each `--after` target resolves as a phase first (so `--after-tool fzf` →
 `tool:fzf` → whoever `--provides-tool fzf`), then as a hook name (so

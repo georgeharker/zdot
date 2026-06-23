@@ -85,7 +85,8 @@ zdot_register_hook <function-name> <context...> [flags...]
 
 | Flag | Argument | Description |
 |------|----------|-------------|
-| `--requires` | `<phase...>` | Phases that must complete before this hook runs |
+| `--requires` | `<phase...>` | Phases that must complete before this hook runs. **Hard:** if no hook provides the phase in the current context, the plan build aborts |
+| `--requires-optional` | `<phase...>` | **Soft requires.** When a hook provides the phase it is a full dependency — real ordering edge *and* force-defer propagation, identical to `--requires`. When nothing provides it the edge is silently dropped (the hook still runs; the build does not abort). Use when a base/common hook wants to order behind an **optional** sibling module's phase without depending on it being loaded. Contrast `--after` (ordering only, does *not* propagate deferral) and `--requires` + `--optional` (skips the whole hook when unmet). See [Dependency types](dependencies.md) |
 | `--requires-tool` | `<tool>` | Sugar for `--requires tool:<tool>` |
 | `--after` | `<target...>` | **Soft** ordering: run after each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. The declarative, soft counterpart to `--requires`; the per-hook counterpart to `zdot_defer_order`. |
 | `--after-tool` | `<tool>` | Sugar for `--after tool:<tool>` — soft-order after whoever `--provides-tool <tool>`, if any. |

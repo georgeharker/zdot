@@ -10,6 +10,7 @@
 typeset -gA _ZDOT_HOOKS              # hook_id -> function_name
 typeset -gA _ZDOT_HOOK_CONTEXTS      # hook_id -> "interactive noninteractive ..."
 typeset -gA _ZDOT_HOOK_REQUIRES      # hook_id -> "phase1 phase2 ..."
+typeset -gA _ZDOT_HOOK_REQUIRES_OPTIONAL  # hook_id -> "phase1 ..." subset of REQUIRES that is "soft": behaves like --requires when a provider exists (real ordering edge + force-defer propagation), but the edge is silently dropped (hook still runs) when no provider is present. Use for base→optional deps.
 typeset -gA _ZDOT_HOOK_PROVIDES      # hook_id -> "phase1 phase2 ..." (space-joined)
 typeset -gA _ZDOT_HOOK_OPTIONAL      # hook_id -> 1 if optional
 typeset -gA _ZDOT_HOOK_AFTER         # hook_id -> "target1 target2 ..." (soft --after ordering; phase-or-hook-name, no-op if absent)
@@ -22,7 +23,8 @@ typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred exe
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
-typeset -gA _ZDOT_SKIPPED_MEMBER_PHASES   # _group_member_* phase -> 1 when its member is a skipped optional hook (dropped from barriers at plan-build AND runtime)
+typeset -gA _ZDOT_DROPPED_GROUP_PHASES   # _group_member_* phase -> 1 when its member is a skipped optional hook (dropped from barriers at plan-build AND runtime)
+typeset -gA _ZDOT_DROPPED_OPTIONAL_PHASES  # phase -> 1 for a --requires-optional phase with no provider in this context (edge dropped at plan-build, and at runtime via _zdot_hook_requirements_met). Computed in zdot_build_execution_plan, so it must be cache-persisted (a cache hit skips the build).
 typeset -g _ZDOT_CURRENT_HOOK_FUNC   # Set by hook runner during execution; empty between hooks
 typeset -gA _ZDOT_HOOK_NAMES         # hook_id -> user-assigned name label
 typeset -gA _ZDOT_HOOK_BY_NAME       # name label -> hook_id
@@ -108,7 +110,14 @@ zdot_allow_defer() {
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-tool <tool>] [--after <target...>] [--after-tool <tool>] [--before <target...>] [--before-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-optional <phase...>] [--requires-tool <tool>] [--after <target...>] [--after-tool <tool>] [--before <target...>] [--before-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# --requires-optional <phase...>  like --requires, but a phase with no provider
+#   in the current context is silently dropped (the hook still runs) instead of
+#   aborting the plan build. When a provider IS present it is a full dependency —
+#   real ordering edge and force-defer propagation. Use when a base/common hook
+#   wants to order behind an OPTIONAL sibling module's phase without depending on
+#   it being loaded. (Contrast: --after is ordering-only and does not propagate
+#   deferral; --requires --optional skips the whole hook when unmet.)
 # Sets REPLY to the hook_id on success.
 # Contexts: interactive, noninteractive, login, nonlogin
 # --provides-tool <tool>  sugar for --provides tool:<tool>
@@ -179,6 +188,7 @@ zdot_register_hook() {
 
     local -a contexts
     local -a requires
+    local -a requires_optional
     local -a provides
     local -a after
     local -a before
@@ -198,6 +208,23 @@ zdot_register_hook() {
             --requires-tool)
                 requires+=("tool:$2")
                 shift 2
+                ;;
+            --requires-optional)
+                # Soft requires: behaves exactly like --requires WHEN some hook
+                # provides the phase in this context (real dependency edge AND
+                # force-defer propagation), but the edge is silently dropped — the
+                # hook still runs — when no provider is present. Unlike --after this
+                # propagates deferral; unlike --requires it never aborts the build;
+                # unlike --requires --optional it never skips the hook itself. The
+                # phases are recorded in REQUIRES (so all downstream machinery sees
+                # them) and ALSO flagged here so the planner softens the missing-
+                # provider case for exactly these phases.
+                shift
+                while [[ $# -gt 0 && $1 != --* ]]; do
+                    requires+=($1)
+                    requires_optional+=($1)
+                    shift
+                done
                 ;;
             --after)
                 # Soft ordering target(s): run this hook after each, but
@@ -283,6 +310,7 @@ zdot_register_hook() {
     _ZDOT_HOOKS[$hook_id]=$func_name
     _ZDOT_HOOK_CONTEXTS[$hook_id]="${contexts[*]}"
     _ZDOT_HOOK_REQUIRES[$hook_id]="${requires[*]}"
+    [[ ${#requires_optional[@]} -gt 0 ]] && _ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]="${requires_optional[*]}"
     _ZDOT_HOOK_PROVIDES[$hook_id]="${provides[*]}"
     _ZDOT_HOOK_OPTIONAL[$hook_id]=$optional
     _ZDOT_HOOK_AFTER[$hook_id]="${after[*]}"
@@ -581,6 +609,10 @@ zdot_build_execution_plan() {
             for _sp_phase in ${=_ZDOT_HOOK_REQUIRES[$_sp_hid]}; do
                 _zdot_require_active_in_ctx "$_sp_hid" "$_sp_phase" || continue
                 [[ $_sp_phase == _group_member_* ]] && continue
+                # A --requires-optional phase is droppable, not a skip trigger:
+                # an optional hook is NOT skipped just because such a phase has
+                # no provider (mirrors the _group_member_* exemption above).
+                [[ " ${_ZDOT_HOOK_REQUIRES_OPTIONAL[$_sp_hid]:-} " == *" $_sp_phase "* ]] && continue
                 if _zdot_provider_hook_in_contexts "$_sp_phase" "${current_contexts[@]}"; then
                     # Provider exists; satisfied unless it is itself skipped.
                     [[ -n ${_skipped_optional[$REPLY]} ]] || continue
@@ -597,10 +629,11 @@ zdot_build_execution_plan() {
     # (_zdot_hook_requirements_met) drop the same barrier edges. Without the
     # runtime half, a deferred group end barrier would wait forever on a skipped
     # member's phase (never provided) and stall the whole deferred drain.
-    _ZDOT_SKIPPED_MEMBER_PHASES=()
+    _ZDOT_DROPPED_GROUP_PHASES=()
+    _ZDOT_DROPPED_OPTIONAL_PHASES=()
     for _sp_hid in ${(k)_skipped_optional}; do
         for _sp_phase in ${=_ZDOT_HOOK_PROVIDES[$_sp_hid]}; do
-            [[ $_sp_phase == _group_member_* ]] && _ZDOT_SKIPPED_MEMBER_PHASES[$_sp_phase]=1
+            [[ $_sp_phase == _group_member_* ]] && _ZDOT_DROPPED_GROUP_PHASES[$_sp_phase]=1
         done
     done
 
@@ -638,9 +671,18 @@ zdot_build_execution_plan() {
             # (_zdot_hook_requirements_met) consults, so plan-build and the
             # deferred drain stay consistent. Context-absent members are handled
             # by _zdot_require_active_in_ctx above.
-            [[ -n ${_ZDOT_SKIPPED_MEMBER_PHASES[$phase]} ]] && continue
+            [[ -n ${_ZDOT_DROPPED_GROUP_PHASES[$phase]} ]] && continue
             # Check if phase is promised or has a provider hook in current contexts
             if ! _zdot_has_provider_in_contexts "$phase" "${current_contexts[@]}"; then
+                # A --requires-optional phase with no provider is dropped: the edge
+                # is omitted (not counted), the hook still runs, and the phase is
+                # recorded so the runtime deferred drain drops it too. This is what
+                # makes the dependency "optional when absent" without failing the
+                # build (hard require) or skipping the hook (--optional).
+                if [[ " ${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]:-} " == *" $phase "* ]]; then
+                    _ZDOT_DROPPED_OPTIONAL_PHASES[$phase]=1
+                    continue
+                fi
                 # Required phase has no provider in current context
                 if [[ ${_ZDOT_HOOK_OPTIONAL[$hook_id]} == 1 ]]; then
                     skipped_hooks+=("${_ZDOT_HOOKS[$hook_id]} (missing: $phase)")
@@ -1827,7 +1869,11 @@ _zdot_hook_requirements_met() {
         # A group-member edge whose member is a skipped optional hook is dropped —
         # the same edge the plan's in-degree count drops. Without this, a deferred
         # end barrier stalls forever waiting on a phase that will never be provided.
-        [[ -n ${_ZDOT_SKIPPED_MEMBER_PHASES[$req]} ]] && continue
+        [[ -n ${_ZDOT_DROPPED_GROUP_PHASES[$req]} ]] && continue
+        # A --requires-optional phase that had no provider at plan-build is dropped
+        # here too, so a deferred hook is never stalled waiting on a phase that will
+        # never be provided (mirrors the skipped-member drop above).
+        [[ -n ${_ZDOT_DROPPED_OPTIONAL_PHASES[$req]} ]] && continue
         if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
             return 1
         fi
