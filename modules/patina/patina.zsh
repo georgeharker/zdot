@@ -41,9 +41,17 @@ _patina_init() {
     eval "$(zsh-patina activate)"
 }
 
+# prompt-ready is --requires-optional, not --requires: zsh-patina wraps ZLE, so
+# it should activate after the prompt is set up when a prompt module is loaded,
+# but it highlights fine on its own. As a plain --requires it combined with
+# --optional to SKIP patina entirely on a config with no prompt module; as
+# --requires-optional, patina still activates there (just unordered re: a prompt).
+# --optional remains for the genuine gate: --requires-tool zsh-patina (skip when
+# the binary isn't installed).
 zdot_register_hook _patina_init interactive \
     --name patina \
-    --requires bootstrap-ready prompt-ready \
+    --requires bootstrap-ready \
+    --requires-optional prompt-ready \
     --requires-group patina-configure \
     --requires-tool zsh-patina \
     --provides patina-ready \

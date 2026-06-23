@@ -2,7 +2,9 @@
 # syntax-highlight: Syntax highlighting plugins
 #
 # Loads fast-syntax-highlighting and fast-abbr-highlighting as deferred plugins.
-# Depends on abbr-ready (from the autocompletion module) for fast-abbr-highlighting.
+# Orders after the autocompletion module (abbr-ready) and a prompt module
+# (prompt-ready) when they're loaded, but works standalone without either — see
+# the --requires-optional edges below.
 #
 # Configuration:
 #   zstyle ':zdot:syntax-highlight' fsh-theme '/path/to/theme.ini'
@@ -20,16 +22,28 @@ _syntax_highlight_configure() {
 # Plugin Declarations
 # ============================================================================
 
-# Deferred plugins (bespoke dependency DAG)
+# Deferred plugins (bespoke dependency DAG).
+#
+# Cross-module edges use --requires-optional, not --requires: this module must
+# load in a standalone config that doesn't pull in a prompt module or the
+# autocompletion module. --requires-optional keeps the ordering (and deferral)
+# when the provider is present, but drops the edge — the plugin still loads —
+# when it isn't, instead of aborting the plan build.
+#   prompt-ready : fsh wraps ZLE widgets, so it should come after the prompt sets
+#                  up — but it needs no prompt to function (pure ordering).
+#   abbr-ready   : fast-abbr-highlighting highlights zsh-abbr abbreviations, so it
+#                  orders after abbr when present; without abbr it loads idle
+#                  (nothing to highlight), which keeps fast-abbr-ready provided for
+#                  the module post-init below.
 zdot_use_plugin zdharma-continuum/fast-syntax-highlighting defer \
     --name fsh-load --provides fsh-ready \
     --requires syntax-highlight-loaded \
-    --requires prompt-ready
+    --requires-optional prompt-ready
 
 zdot_use_plugin 5A6F65/fast-abbr-highlighting defer \
     --name fast-abbr-load --provides fast-abbr-ready \
     --requires fsh-ready \
-    --requires abbr-ready
+    --requires-optional abbr-ready
 
 # ============================================================================
 # Post-Load Setup
