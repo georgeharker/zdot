@@ -109,14 +109,28 @@ _ai_load() {
     _ai_path="$REPLY"
 
     # The plugin ships a Python bridge (pyproject.toml; bin/zsh-ai-llm execs
-    # .venv/bin/python). Create that venv with uv when it's missing. VIRTUAL_ENV
-    # is unset for the sync so uv builds the plugin's own .venv rather than
-    # syncing into whatever venv is active (the uv module activates ~/.venv).
-    if [[ -f "${_ai_path}/pyproject.toml" && ! -d "${_ai_path}/.venv" ]]; then
-        # First run: build the venv. ai-sync's defaults include the optional
-        # `claude` extra (Claude Agent SDK), so the claude_code adapter works
-        # out of the box. Re-run `ai-sync` by hand to change extras later.
-        ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
+    # .venv/bin/python). Build/refresh that venv with uv when it's missing OR
+    # stale. VIRTUAL_ENV is unset for the sync so uv builds the plugin's own
+    # .venv rather than whatever venv is active (the uv module activates ~/.venv).
+    #
+    # Self-heal: ai-sync stamps .venv/.ai-sync-stamp on success; we re-sync when
+    # the plugin's pyproject.toml — or the vendored llmkit submodule's
+    # pyproject.toml — is newer than that stamp. That picks up dependency changes
+    # on update (e.g. the llmkit extraction adding a dep) without a manual
+    # ai-sync. A pre-stamp venv (older install, no stamp file) self-heals too:
+    # zsh's `-nt` is false when the stamp is missing, so we test for it
+    # explicitly rather than relying on the comparison.
+    if [[ -f "${_ai_path}/pyproject.toml" ]]; then
+        local _ai_stamp="${_ai_path}/.venv/.ai-sync-stamp"
+        if [[ ! -d "${_ai_path}/.venv" \
+              || ! -f "$_ai_stamp" \
+              || "${_ai_path}/pyproject.toml" -nt "$_ai_stamp" \
+              || "${_ai_path}/external/llmkit/pyproject.toml" -nt "$_ai_stamp" ]]; then
+            # ai-sync's defaults include the optional `claude` extra (Claude
+            # Agent SDK), so the claude_code adapter works out of the box.
+            # Re-run `ai-sync` by hand to change extras later.
+            ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
+        fi
     fi
 
     # Optional CLI on PATH (zsh-ai ships bin/zsh-ai). Explicit `export` so PATH
@@ -147,8 +161,15 @@ ai-sync() {
     local -a args=("$@")
     (( $# )) || args=(--no-dev --extra claude)
     zdot_info "ai: syncing zsh-ai venv (uv sync ${args[*]})…"
-    ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ) \
-        || { zdot_warn "ai: uv sync failed"; return 1; }
+    if ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ); then
+        # Stamp the venv so _ai_load's self-heal check knows it's in sync with
+        # the current pyproject(s). A dedicated marker (not the .venv dir mtime)
+        # stays stable across uv's own writes.
+        command touch "${_ai_path}/.venv/.ai-sync-stamp" 2>/dev/null
+    else
+        zdot_warn "ai: uv sync failed"
+        return 1
+    fi
 }
 
 # Declare the plugin so the zdot plugin system clones/updates it. It is *loaded*
