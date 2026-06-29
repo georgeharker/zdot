@@ -58,6 +58,7 @@ zdot_update_plugin() {
         if [[ -n "$version" ]]; then
             zdot_action "  Checking out $version for $label..."
             if (cd "$repo_dir" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null; then
+                _zdot_plugin_sync_submodules "$label" "$repo_dir"
                 after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
                 if [[ "$before" == "$after" ]]; then
                     zdot_info "    %F{244}already at $version%f"
@@ -78,6 +79,7 @@ zdot_update_plugin() {
 
         zdot_action "  Updating $label..."
         if (cd "$repo_dir" && command git pull --quiet) 2>/dev/null; then
+            _zdot_plugin_sync_submodules "$label" "$repo_dir"
             after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
             if [[ "$before" == "$after" ]]; then
                 zdot_info "    %F{244}already up to date%f"
