@@ -13,7 +13,7 @@ zdot_update_plugin() {
     fi
 
     local -A seen
-    local spec bare version repo_dir label
+    local spec bare version repo_dir label cur_branch default_ref
     local before after short_before short_after commit_count
     local updated=0 unchanged=0 failed=0
 
@@ -23,6 +23,14 @@ zdot_update_plugin() {
         if [[ $bare == *@* ]]; then
             version=${bare##*@}
             bare=${bare%@*}
+        fi
+        # Honor pins recorded by zdot_use_plugin, which strips the @ref into
+        # _ZDOT_PLUGINS_VERSION and stores only the bare spec in the order list.
+        # Without this, updating a pinned plugin by bare spec — from
+        # `zdot_update_plugin` with no args, or from the plugin-update apply
+        # step — would treat it as unpinned and drift it off its pin.
+        if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
+            version=${_ZDOT_PLUGINS_VERSION[$bare]}
         fi
 
         if ! zdot_plugin_repo "$bare"; then
@@ -75,6 +83,22 @@ zdot_update_plugin() {
                 (( failed++ ))
             fi
             continue
+        fi
+
+        # Heal unpinned drift: put the clone back on the remote's default
+        # branch before pulling. The startup reconcile (zdot_plugin_clone) is
+        # edge-triggered and can miss a flip, leaving the clone stranded so the
+        # pull below would track the wrong branch; an explicit update is the
+        # right place to catch it without taxing every shell startup.
+        if _zdot_plugin_default_ref "$repo_dir"; then
+            default_ref=$REPLY
+            cur_branch=$(cd "$repo_dir" && command git symbolic-ref --quiet --short HEAD 2>/dev/null)
+            # Mismatch covers both "on the wrong branch" and "detached HEAD".
+            if [[ "$cur_branch" != "$default_ref" ]]; then
+                if _zdot_plugin_restore_default_branch "$label" "$repo_dir"; then
+                    before=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+                fi
+            fi
         fi
 
         zdot_action "  Updating $label..."

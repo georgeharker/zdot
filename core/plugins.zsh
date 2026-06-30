@@ -428,28 +428,39 @@ _zdot_plugin_sync_submodules() {
     fi
 }
 
+# Resolve a clone's remote default branch name (origin/HEAD short name, with the
+# "origin/" prefix stripped). Tries the locally-recorded `origin/HEAD` first; if
+# absent (e.g. legacy clones that pre-date `git clone` recording it), falls back
+# to a single `git remote set-head origin --auto` to ask the remote. Sets REPLY
+# on success; returns 1 (REPLY untouched) when no default branch is discoverable.
+# Usage: _zdot_plugin_default_ref <clone-dir>
+_zdot_plugin_default_ref() {
+    local dest=$1 ref
+    ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    ref=${ref#origin/}
+    if [[ -z "$ref" ]]; then
+        # origin/HEAD wasn't recorded at clone time — ask the remote
+        (cd "$dest" && git remote set-head origin --auto >/dev/null 2>&1)
+        ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+        ref=${ref#origin/}
+    fi
+    [[ -n "$ref" ]] || return 1
+    REPLY=$ref
+}
+
 # Restore a cloned plugin to its remote's default branch.
 # Called on a pin→unpin transition: the user used to pin a ref but now no
 # longer does, so we move the working tree back to whatever `origin/HEAD`
-# points at. Tries the locally-recorded `origin/HEAD` first; if absent (e.g.
-# legacy clones that pre-date `git clone` recording it), falls back to a
-# single `git remote set-head origin --auto` to ask the remote.
+# points at.
 # Usage: _zdot_plugin_restore_default_branch <repo-label> <clone-dir>
 _zdot_plugin_restore_default_branch() {
     local repo=$1 dest=$2
     local default_ref
-    default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-    default_ref=${default_ref#origin/}
-    if [[ -z "$default_ref" ]]; then
-        # origin/HEAD wasn't recorded at clone time — ask the remote
-        (cd "$dest" && git remote set-head origin --auto >/dev/null 2>&1)
-        default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-        default_ref=${default_ref#origin/}
-    fi
-    if [[ -z "$default_ref" ]]; then
+    if ! _zdot_plugin_default_ref "$dest"; then
         print "zdot-plugins: warning: no default branch advertised by origin for $repo; leaving as-is" >&2
         return 1
     fi
+    default_ref=$REPLY
     print "zdot-plugins: restoring $repo to default branch ($default_ref)..." >&2
     if ! (cd "$dest" && git fetch --quiet origin && git checkout --quiet "$default_ref"); then
         print "zdot-plugins: warning: failed to restore $repo to $default_ref" >&2
