@@ -145,7 +145,7 @@ ai-sync() {
         return 1
     fi
     local -a args=("$@")
-    (( $# )) || args=(--no-dev --extra claude)
+    (( $# )) || args=(--no-dev --extra claude --extra anthropic --extra google)
     zdot_info "ai: syncing zsh-ai venv (uv sync ${args[*]})…"
     ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ) \
         || { zdot_warn "ai: uv sync failed"; return 1; }
