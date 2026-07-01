@@ -165,10 +165,19 @@ _zdot_plugin_update_release_lock() {
 # git fetch primes the eventual pull (via zdot_update_plugin) with no
 # extra network round-trip.
 #
+# Two independent signals are emitted per plugin:
+#   1. Ref drift (direction-agnostic): the clone is checked out somewhere other
+#      than where its spec says — covers every flip (unpin→default, default→pin,
+#      pin→pin), not just the unpin case that first surfaced the bug. Detected
+#      locally (no fetch), for pinned AND unpinned specs.
+#   2. Behind upstream: an unpinned plugin that IS on its default branch but
+#      has new upstream commits (the ordinary update nag).
+#
 # Skips silently:
 #   - Bundles with no backing repo (zdot_plugin_repo returns 1).
-#   - Pinned plugins (version set inline or via _ZDOT_PLUGINS_VERSION) —
-#     the user explicitly chose that ref.
+#   - Pinned plugins that ARE on their pin — not nagged for upstream movement;
+#     the user explicitly chose that ref. (A pinned plugin off its ref is still
+#     surfaced as drift.)
 #   - Missing repos, non-git dirs, no upstream tracked, fetch failures.
 _zdot_plugin_update_collect() {
     emulate -L zsh
@@ -176,7 +185,7 @@ _zdot_plugin_update_collect() {
 
     local -a specs=( "${_ZDOT_PLUGINS_ORDER[@]}" "${_ZDOT_BUNDLE_REPOS[@]}" )
     local -A seen
-    local spec bare version repo_dir label current upstream
+    local spec bare version repo_dir label current upstream cur_branch want reconciled want_commit head_commit
 
     for spec in "${specs[@]}"; do
         bare=$spec
@@ -188,7 +197,6 @@ _zdot_plugin_update_collect() {
         if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
             version=${_ZDOT_PLUGINS_VERSION[$bare]}
         fi
-        [[ -z "$version" ]] || continue
 
         zdot_plugin_repo "$bare" 2>/dev/null || continue
         repo_dir=$REPLY
@@ -201,6 +209,43 @@ _zdot_plugin_update_collect() {
 
         [[ -d "$repo_dir/.git" ]] || continue
 
+        # ── Drift check (direction-agnostic, local-only) ────────────────────
+        # Is the clone actually checked out where its spec wants it? The
+        # reconcile itself happens in zdot_update_plugin (the apply step); here
+        # we only surface drift so the nag fires. Local-only (branch name for
+        # unpinned, resolved commit for pinned) — frozen pins never fetch.
+        cur_branch=$(cd "$repo_dir" && command git symbolic-ref --quiet --short HEAD 2>/dev/null)
+        want=""; reconciled=0
+        if [[ -n "$version" ]]; then
+            # Pinned: reconciled iff HEAD is at the commit the pin resolves to
+            # (covers branch, tag, and sha pins, detached or not).
+            want=$version
+            want_commit=$(cd "$repo_dir" && command git rev-parse --verify -q "${version}^{commit}" 2>/dev/null) \
+                || want_commit=$(cd "$repo_dir" && command git rev-parse --verify -q "origin/${version}^{commit}" 2>/dev/null)
+            head_commit=$(cd "$repo_dir" && command git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)
+            [[ -n "$want_commit" && "$want_commit" == "$head_commit" ]] && reconciled=1
+        elif _zdot_plugin_default_ref "$repo_dir"; then
+            # Unpinned: must be ON the default branch so pulls track it.
+            want=$REPLY
+            [[ "$cur_branch" == "$want" ]] && reconciled=1
+        else
+            # Can't determine the default branch — don't cry drift; the upstream
+            # nag below is skipped too (no resolvable @{u}).
+            reconciled=1
+        fi
+
+        if (( ! reconciled )); then
+            current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
+            print -r -- "${bare}"$'\t'"${label}"$'\t'"${cur_branch:-${current:-detached}}"$'\t'"${want}"
+            continue
+        fi
+
+        # On the right ref. Pinned specs are frozen by the user's choice — don't
+        # nag for upstream movement.
+        [[ -n "$version" ]] && continue
+
+        # ── Behind-upstream check (unpinned, on default branch) ─────────────
+        # git fetch primes the eventual pull (via zdot_update_plugin).
         (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
         current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
         upstream=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)

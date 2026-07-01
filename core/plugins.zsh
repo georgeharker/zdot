@@ -410,33 +410,63 @@ zdot_plugin_name() {
 # Plugin Cloning
 # ============================================================================
 
+# Sync a plugin's git submodules to the gitlinks recorded at the current HEAD.
+# Silent no-op for the overwhelmingly common case of a repo with no submodules
+# — guarded on .gitmodules so we never spawn git for nothing. `--init` picks up
+# submodules newly added by an update; `--recursive` descends into nested ones.
+# Must be called after every operation that can move HEAD (clone+pin, pin
+# switch, default-branch restore, pull, checkout): the initial `git clone
+# --recurse-submodules` only syncs the cloned ref, and bare fetch/checkout/pull
+# never touch the working tree's submodules.
+# Usage: _zdot_plugin_sync_submodules <repo-label> <clone-dir>
+_zdot_plugin_sync_submodules() {
+    local repo=$1 dest=$2
+    [[ -f "$dest/.gitmodules" ]] || return 0
+    if ! (cd "$dest" && command git submodule update --init --recursive --quiet) 2>/dev/null; then
+        print "zdot-plugins: warning: failed to sync submodules for $repo" >&2
+        return 1
+    fi
+}
+
+# Resolve a clone's remote default branch name (origin/HEAD short name, with the
+# "origin/" prefix stripped). Tries the locally-recorded `origin/HEAD` first; if
+# absent (e.g. legacy clones that pre-date `git clone` recording it), falls back
+# to a single `git remote set-head origin --auto` to ask the remote. Sets REPLY
+# on success; returns 1 (REPLY untouched) when no default branch is discoverable.
+# Usage: _zdot_plugin_default_ref <clone-dir>
+_zdot_plugin_default_ref() {
+    local dest=$1 ref
+    ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    ref=${ref#origin/}
+    if [[ -z "$ref" ]]; then
+        # origin/HEAD wasn't recorded at clone time — ask the remote
+        (cd "$dest" && git remote set-head origin --auto >/dev/null 2>&1)
+        ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+        ref=${ref#origin/}
+    fi
+    [[ -n "$ref" ]] || return 1
+    REPLY=$ref
+}
+
 # Restore a cloned plugin to its remote's default branch.
 # Called on a pin→unpin transition: the user used to pin a ref but now no
 # longer does, so we move the working tree back to whatever `origin/HEAD`
-# points at. Tries the locally-recorded `origin/HEAD` first; if absent (e.g.
-# legacy clones that pre-date `git clone` recording it), falls back to a
-# single `git remote set-head origin --auto` to ask the remote.
+# points at.
 # Usage: _zdot_plugin_restore_default_branch <repo-label> <clone-dir>
 _zdot_plugin_restore_default_branch() {
     local repo=$1 dest=$2
     local default_ref
-    default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-    default_ref=${default_ref#origin/}
-    if [[ -z "$default_ref" ]]; then
-        # origin/HEAD wasn't recorded at clone time — ask the remote
-        (cd "$dest" && git remote set-head origin --auto >/dev/null 2>&1)
-        default_ref=$(git -C "$dest" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-        default_ref=${default_ref#origin/}
-    fi
-    if [[ -z "$default_ref" ]]; then
+    if ! _zdot_plugin_default_ref "$dest"; then
         print "zdot-plugins: warning: no default branch advertised by origin for $repo; leaving as-is" >&2
         return 1
     fi
+    default_ref=$REPLY
     print "zdot-plugins: restoring $repo to default branch ($default_ref)..." >&2
     if ! (cd "$dest" && git fetch --quiet origin && git checkout --quiet "$default_ref"); then
         print "zdot-plugins: warning: failed to restore $repo to $default_ref" >&2
         return 1
     fi
+    _zdot_plugin_sync_submodules "$repo" "$dest"
 }
 
 zdot_plugin_clone() {
@@ -477,6 +507,8 @@ zdot_plugin_clone() {
                     print "zdot-plugins: switching $repo to $version..." >&2
                     if ! (cd "$dest" && git fetch --quiet origin && git checkout --quiet "$version"); then
                         print "zdot-plugins: warning: failed to checkout $version for $repo" >&2
+                    else
+                        _zdot_plugin_sync_submodules "$repo" "$dest"
                     fi
                 else
                     # pin removed → restore the remote's default branch
@@ -493,11 +525,15 @@ zdot_plugin_clone() {
     print "zdot-plugins: cloning $repo..." >&2
     git clone --quiet --recurse-submodules "$url" "$dest"
 
-    # Check out specific version if specified
+    # Check out specific version if specified. The clone above already recursed
+    # submodules for the default branch; re-sync after moving to the pinned ref
+    # since it may record different submodule commits.
     if [[ -n "$version" ]]; then
-        (cd "$dest" && git checkout --quiet "$version") || {
+        if (cd "$dest" && git checkout --quiet "$version"); then
+            _zdot_plugin_sync_submodules "$repo" "$dest"
+        else
             print "zdot-plugins: warning: failed to checkout $version for $repo" >&2
-        }
+        fi
     fi
 }
 
