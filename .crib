@@ -1,0 +1,7 @@
+# Ties this repo to a crib memory project. `crib import` pulls the docs below
+# into the `zdot` project (one-way: source wins, ids/history preserved).
+project: zdot
+import:
+  - README.md
+  - index.md
+  - docs/**/*.md
