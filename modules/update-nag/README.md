@@ -16,7 +16,8 @@ interactive prompt.
    `madisonrickert/zsh-pkg-update-nag`) and declares it via `zdot_use_plugin`
    so zdot downloads/manages the plugin.
 2. In the configure phase, sets `ZSH_PKG_UPDATE_NAG_BACKGROUND=1` to run
-   update checks in the background.
+   update checks in the background, and bridges the `mode` / `reminder-command`
+   zstyles into the plugin's config params when they are set.
 3. In the load phase, loads the plugin via `zdot_load_plugin`.
 
 ## Configuration
@@ -40,6 +41,23 @@ _my_update_nag_config() {
     zstyle ':zdot:update-nag' plugin 'fork/zsh-pkg-update-nag'
 }
 ```
+
+### Presentation mode
+
+By default the plugin blocks on an inline `[Y/n/s]` upgrade prompt at shell
+start. Switch to a non-interactive listing that just tells you how to upgrade:
+
+```zsh
+zstyle ':zdot:update-nag' mode reminder
+# optional: point the suggested command at your own upgrade entry point
+zstyle ':zdot:update-nag' reminder-command 'zsh-pkg-update-nag --now'
+```
+
+`mode` accepts `prompt` (default) or `reminder`. Both styles are read in the
+configure phase, so — unlike `plugin` — they may be set any time before the
+module configures (directly in `.zshrc`, or from a before-module callback).
+Leaving a style unset preserves the plugin's own default and anything set in
+`config.zsh`; setting a style exports the matching `zsh_pkg_update_nag_*` param.
 
 ### Plugin env vars
 
