@@ -63,9 +63,16 @@
 #
 # Everything else (model, max_tokens, temperature, candidates, show_thinking,
 # stream_question, FIM templates/stop_tokens, per-feature endpoint/api_key
-# overrides, ...) falls through to the plugin's own defaults — set them in an
-# `ai-configure` hook. No `model` is seeded: until you set one the plugin
-# prompts you to. See the upstream lib/config.zsh for the full namespace map.
+# overrides, custom `headers`, ...) falls through to the plugin's own defaults —
+# set them in an `ai-configure` hook. No `model` is seeded: until you set one the
+# plugin prompts you to. See the upstream lib/config.zsh for the full namespace
+# map.
+#
+# Custom request headers: the `headers` zstyle (array of KEY=VALUE) and/or a
+# TOML provider's `headers` — e.g. the `x-opencode-request` key OpenCode Zen's
+# qwen pool requires (503 failover_exhausted without it). Semantics (HTTP
+# adapters only, value expansion) live upstream: see the plugin's
+# lib/config.zsh and `zsh-ai-llm chat --help`.
 #
 # Example override hook (drop in .zshrc or your own module):
 #
@@ -74,6 +81,8 @@
 #       zstyle ':zsh-ai:*'       api_key_env 'LLAMA_API_KEY'
 #       zstyle ':zsh-ai:scratch' model       'Qwen3.6-35B-A3B-Q4'
 #       zstyle ':zsh-ai:fim'     model       'Qwen3.6-35B-A3B-Q4'
+#       # Only needed when hitting OpenCode Zen without a TOML provider's headers:
+#       zstyle ':zsh-ai:*'       headers     'x-opencode-request=zsh-ai-${uuid}'
 #   }
 #   zdot_register_hook _my_ai_configure interactive --group ai-configure
 
