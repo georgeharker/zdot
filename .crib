@@ -5,3 +5,5 @@ import:
   - README.md
   - index.md
   - docs/**/*.md
+refs:                     # cross-project xref into dotfiler's index
+  - dotfiler
