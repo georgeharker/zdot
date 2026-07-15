@@ -59,7 +59,7 @@
 # (_zdot_update_get_parent_root, _zdot_update_find_dotfiler_scripts, etc.)
 # that the rest of this file depends on at source time.
 # ---------------------------------------------------------------------------
-source "${ZDOT_DIR}/core/update-impl.zsh"
+source "${ZDOT_DIR}/core/update-impl.zsh"  # shuck: source=update-impl.zsh lint=true
 
 # ---------------------------------------------------------------------------
 # Register dotfiler as a bundle dependency (opt-in users only).
@@ -75,7 +75,7 @@ source "${ZDOT_DIR}/core/update-impl.zsh"
         # or subtree inside a dotfiler-managed dotfiles repo.
         local _zdot_update_init_parent
         _zdot_update_get_parent_root "$ZDOT_REPO"
-        _zdot_update_init_parent=${reply[1]}
+        _zdot_update_init_parent=${reply[1]}  # shuck: ignore=C006  # reply set by the followed _zdot_update_get_parent_root (reply-return convention)
         if [[ ! -f "${_zdot_update_init_parent}/.nounpack/dotfiler/update_core.zsh" ]]; then
             zdot_use_bundle "georgeharker/dotfiler"
         fi

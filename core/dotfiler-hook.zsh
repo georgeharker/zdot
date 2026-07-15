@@ -46,7 +46,7 @@ fi
 # Source update-impl.zsh first (needs update_core.zsh functions), then use its
 # canonical _zdot_update_find_dotfiler_scripts to resolve the scripts path.
 # ---------------------------------------------------------------------------
-source "${ZDOT_DIR}/core/update-impl.zsh" || return 2
+source "${ZDOT_DIR}/core/update-impl.zsh" || return 2  # shuck: source=update-impl.zsh lint=true
 
 _zdot_update_find_dotfiler_scripts || {
     error "could not locate dotfiler scripts directory"

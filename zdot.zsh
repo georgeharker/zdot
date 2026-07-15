@@ -14,28 +14,28 @@
 local zdot_core_dir="${${(%):-%x}:a:h}/core"
 
 # Source base first (needed by other components)
-source "${zdot_core_dir}/ctx.zsh"
+source "${zdot_core_dir}/ctx.zsh"  # shuck: source=core/ctx.zsh lint=true
 
 # Source logging (needed by other components)
-source "${zdot_core_dir}/logging.zsh"
+source "${zdot_core_dir}/logging.zsh"  # shuck: source=core/logging.zsh lint=true
 
 # Source all components in dependency order
-source "${zdot_core_dir}/core.zsh"
-source "${zdot_core_dir}/cache.zsh"
-source "${zdot_core_dir}/hooks.zsh"
-source "${zdot_core_dir}/modules.zsh"
-source "${zdot_core_dir}/functions.zsh"
-source "${zdot_core_dir}/completions.zsh"
-source "${zdot_core_dir}/utils.zsh"
-source "${zdot_core_dir}/plugins.zsh"
-source "${zdot_core_dir}/init.zsh"
-source "${zdot_core_dir}/update.zsh"
-source "${zdot_core_dir}/plugin-update.zsh"
+source "${zdot_core_dir}/core.zsh"  # shuck: source=core/core.zsh lint=true
+source "${zdot_core_dir}/cache.zsh"  # shuck: source=core/cache.zsh lint=true
+source "${zdot_core_dir}/hooks.zsh"  # shuck: source=core/hooks.zsh lint=true
+source "${zdot_core_dir}/modules.zsh"  # shuck: source=core/modules.zsh lint=true
+source "${zdot_core_dir}/functions.zsh"  # shuck: source=core/functions.zsh lint=true
+source "${zdot_core_dir}/completions.zsh"  # shuck: source=core/completions.zsh lint=true
+source "${zdot_core_dir}/utils.zsh"  # shuck: source=core/utils.zsh lint=true
+source "${zdot_core_dir}/plugins.zsh"  # shuck: source=core/plugins.zsh lint=true
+source "${zdot_core_dir}/init.zsh"  # shuck: source=core/init.zsh lint=true
+source "${zdot_core_dir}/update.zsh"  # shuck: source=core/update.zsh lint=true
+source "${zdot_core_dir}/plugin-update.zsh"  # shuck: source=core/plugin-update.zsh lint=true
 
 # Source plugin bundles
-source "${zdot_core_dir}/compinit.zsh"              # shared compinit (before any bundle)
-source "${zdot_core_dir}/plugin-bundles/omz.zsh"
-source "${zdot_core_dir}/plugin-bundles/pz.zsh"
+source "${zdot_core_dir}/compinit.zsh"  # shuck: source=core/compinit.zsh lint=true  (shared compinit, before any bundle)
+source "${zdot_core_dir}/plugin-bundles/omz.zsh"  # shuck: source=core/plugin-bundles/omz.zsh lint=true
+source "${zdot_core_dir}/plugin-bundles/pz.zsh"  # shuck: source=core/plugin-bundles/pz.zsh lint=true
 
 # Early plugin initialization: clone/cache required plugins BEFORE hooks run
 _zdot_plugins_init

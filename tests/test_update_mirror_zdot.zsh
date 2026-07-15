@@ -27,8 +27,8 @@ source "$zdot_src/core/update-impl.zsh"
 
 harness_init
 
-# Caller-scope vars the hook expects  # shuck: ignore=C001
-typeset -ga force=() ; typeset -g dry_run="" quiet="" debug_flag=""
+# Caller-scope vars the hook expects
+typeset -ga force=() ; typeset -g dry_run="" quiet="" debug_flag=""  # shuck: ignore=C001  # consumed by the sourced hook
 typeset -gaU _dotfiler_plan_zdot_to_unpack _dotfiler_plan_zdot_to_remove
 typeset -gaU _update_core_files_to_unpack=() _update_core_files_to_remove=()
 

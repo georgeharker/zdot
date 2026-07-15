@@ -71,7 +71,7 @@ zdest="$SBX/home/.config/zdot"
 mkdir -p "$zdest"
 
 # Caller-scope vars the hook expects (update.zsh's _update_parse_args shape)
-typeset -ga force=() ; typeset -g dry_run="" quiet="" debug_flag=""  # consumed by the sourced hook  # shuck: ignore=C001
+typeset -ga force=() ; typeset -g dry_run="" quiet="" debug_flag=""  # shuck: ignore=C001  # consumed by the sourced hook
 typeset -g ZDOT_REPO="$zrepo"
 typeset -g  _dotfiler_plan_zdot_repo_dir="$zrepo"
 typeset -g  _dotfiler_plan_zdot_link_dest="$zdest"
@@ -130,7 +130,7 @@ _zdot_update_hook_unpack
 assert_link_at "forced unpack replaces a divergent file with the link" \
     "$zdest/core/zdot.zsh" "$zrepo/core/zdot.zsh"
 rm -f "$zdest/core/zdot.zsh"
-force=()
+force=()  # shuck: ignore=C001  # consumed by the sourced hook
 _dotfiler_plan_zdot_to_unpack=()
 
 # …but a NON-forced unpack of the same divergence refuses non-interactively
