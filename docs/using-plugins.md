@@ -175,8 +175,16 @@ zdot plugin update                    # update everything
 zdot plugin update Aloxaf/fzf-tab     # update one plugin
 zdot plugin clean --dry-run           # show stale plugin directories
 zdot plugin clean --remove-unused     # remove undeclared plugin clones
-zdot plugin reclone                   # delete and re-clone everything
+zdot plugin clean Aloxaf/fzf-tab      # purge one plugin's clone (git-safe)
+zdot plugin clean --all               # purge every declared plugin
+zdot plugin reclone Aloxaf/fzf-tab    # remove and re-clone one plugin, now
+zdot plugin reclone --all             # remove and re-clone everything, now
 ```
+
+> **Note (breaking change).** `reclone` now needs an explicit target — bare
+> `zdot plugin reclone` errors instead of wiping the whole cache. Use
+> `zdot plugin reclone --all`; it re-clones immediately (not on next start) and
+> is git-safe. See [commands.md](commands.md#plugin) for the full migration.
 
 The `plugins` module also ships a background update reminder that scans every
 git-backed plugin and bundle repo:

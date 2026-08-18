@@ -4,50 +4,36 @@
 # to a single fetch/pull.
 
 zdot_update_plugin() {
+    emulate -L zsh
+    local all=0
     local -a specs
     if (( $# )); then
         specs=( "$@" )
     else
         zdot_info "Updating all declared plugins..."
-        specs=( "${_ZDOT_PLUGINS_ORDER[@]}" "${_ZDOT_BUNDLE_REPOS[@]}" )
+        all=1
     fi
 
-    local -A seen
-    local spec bare version repo_dir label cur_branch default_ref
+    # Selection + @ver parse + backing-repo resolution + dedupe-by-repo is shared
+    # with reclone/clean via _zdot_plugins_resolve_targets. It sets index-aligned
+    # _zdot_rt_* arrays (bare/version/dir/label/spec/bundle) plus REPLY = the count
+    # of specs whose bundle exposes no repo — which used to be counted here as
+    # failures, so seed `failed` with it. (update pulls the whole backing repo for
+    # a bundle spec by design, so it ignores the _zdot_rt_bundle flag.)
+    _zdot_plugins_resolve_targets "$all" "${specs[@]}"
+    local -a t_version=( "${_zdot_rt_version[@]}" )  # shuck: ignore=C006  # set by _zdot_plugins_resolve_targets
+    local -a t_dir=( "${_zdot_rt_dir[@]}" )          # shuck: ignore=C006
+    local -a t_label=( "${_zdot_rt_label[@]}" )      # shuck: ignore=C006
+
+    local version repo_dir label cur_branch default_ref
     local before after short_before short_after commit_count
-    local updated=0 unchanged=0 failed=0
+    local updated=0 unchanged=0 failed=$REPLY
+    integer i
 
-    for spec in "${specs[@]}"; do
-        bare=$spec
-        version=""
-        if [[ $bare == *@* ]]; then
-            version=${bare##*@}
-            bare=${bare%@*}
-        fi
-        # Honor pins recorded by zdot_use_plugin, which strips the @ref into
-        # _ZDOT_PLUGINS_VERSION and stores only the bare spec in the order list.
-        # Without this, updating a pinned plugin by bare spec — from
-        # `zdot_update_plugin` with no args, or from the plugin-update apply
-        # step — would treat it as unpinned and drift it off its pin.
-        if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
-            version=${_ZDOT_PLUGINS_VERSION[$bare]}
-        fi
-
-        if ! zdot_plugin_repo "$bare"; then
-            zdot_warn "  $bare: bundle does not expose a backing repo (cannot update)"
-            (( failed++ ))
-            continue
-        fi
-        repo_dir=$REPLY
-        zdot_plugin_name "$bare"
-        label=$REPLY
-
-        # Dedupe by physical repo dir so multiple specs sharing a bundle repo,
-        # or a bundle backing repo plus its sub-specs, collapse to one pull.
-        if (( ${+seen[$repo_dir]} )); then
-            continue
-        fi
-        seen[$repo_dir]=1
+    for (( i = 1; i <= ${#t_dir}; i++ )); do
+        version=${t_version[i]}
+        repo_dir=${t_dir[i]}
+        label=${t_label[i]}
 
         if [[ ! -d "$repo_dir" ]]; then
             zdot_error "  $label: not installed"

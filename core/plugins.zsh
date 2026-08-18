@@ -406,6 +406,115 @@ zdot_plugin_name() {
     REPLY=$spec
 }
 
+# Resolve an update/reclone/clean target selection into a deduplicated set of
+# backing-repo targets, shared by all three explicit plugin commands. Mirrors
+# what each used to do inline: expand the selection, strip @ver (honouring an
+# inline pin, else _ZDOT_PLUGINS_VERSION), map each spec to its backing repo via
+# zdot_plugin_repo, and collapse by physical repo dir — so specs sharing one
+# repo (e.g. every omz:* spec, all backed by a single ohmyzsh/ohmyzsh checkout)
+# resolve to a single target, first-spec-wins for its version/label.
+#
+# NOT used by the startup reconcile (zdot_plugins_clone_all): that path is
+# sentinel-optimised, edge-triggered and per-spec by design. But every actual
+# clone still funnels through zdot_plugin_clone, and each `_zdot_rt_spec` below is
+# a plain user/repo whose path IS the repo dir — the exact spec the bundle
+# early-setup lines clone with — so remove/clone here can never diverge from
+# startup.
+#
+# Usage: _zdot_plugins_resolve_targets <all> <spec>...
+#   <all>  1 → every declared plugin (order + bundle repos); 0 → the given specs
+#
+# Sets these index-aligned global arrays, one entry per deduped target. They are
+# namespaced (_zdot_rt_*, "resolve targets") rather than plain reply/reply_* so
+# they cannot collide with a user or plugin variable — the resolver is called
+# from the interactive shell:
+#   _zdot_rt_bare     the bare spec (first one seen for this repo)
+#   _zdot_rt_version  pin to honour ('' = unpinned)
+#   _zdot_rt_dir      backing repo working dir (for raw-git callers like update)
+#   _zdot_rt_label    display name (zdot_plugin_name)
+#   _zdot_rt_spec     repo dir relative to cache — a plain user/repo spec for the
+#                     spec-keyed primitives (zdot_plugin_remove/zdot_plugin_clone)
+#   _zdot_rt_bundle   1 if the target is a *shared* backing repo — reached via a
+#                     bundle sub-spec that collapsed onto it, or a repo declared
+#                     as a bundle dependency. Destructive callers (reclone/clean)
+#                     warn-and-continue on these, since acting on the repo touches
+#                     every plugin it backs.
+# and the scalar:
+#   REPLY             count of specs skipped (bundle exposes no backing repo);
+#                     raw-git callers fold this into their own failure tally.
+_zdot_plugins_resolve_targets() {
+    emulate -L zsh
+    local all=$1; shift
+    local -a specs
+    if (( all )); then
+        specs=( "${_ZDOT_PLUGINS_ORDER[@]}" "${_ZDOT_BUNDLE_REPOS[@]}" )
+    else
+        specs=( "$@" )
+    fi
+
+    typeset -ga _zdot_rt_bare _zdot_rt_version _zdot_rt_dir _zdot_rt_label _zdot_rt_spec _zdot_rt_bundle
+    _zdot_rt_bare=() _zdot_rt_version=() _zdot_rt_dir=() _zdot_rt_label=() _zdot_rt_spec=() _zdot_rt_bundle=()
+
+    local cache=${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
+    local -A seen
+    local spec bare version repo_dir repo_spec bundle
+    integer skipped=0
+    for spec in "${specs[@]}"; do
+        bare=$spec
+        version=""
+        if [[ $bare == *@* ]]; then
+            version=${bare##*@}
+            bare=${bare%@*}
+        fi
+        # Honour pins recorded by zdot_use_plugin (@ref stripped into
+        # _ZDOT_PLUGINS_VERSION, keyed by bare spec) when none was given inline.
+        if [[ -z "$version" && -n "${_ZDOT_PLUGINS_VERSION[$bare]:-}" ]]; then
+            version=${_ZDOT_PLUGINS_VERSION[$bare]}
+        fi
+
+        if ! zdot_plugin_repo "$bare"; then
+            zdot_warn "  $bare: bundle does not expose a backing repo (skipping)"
+            (( skipped++ ))
+            continue
+        fi
+        repo_dir=$REPLY
+
+        # Dedupe by physical repo dir so specs sharing one backing repo (a
+        # bundle plus its sub-specs) collapse to a single target.
+        if (( ${+seen[$repo_dir]} )); then
+            continue
+        fi
+        seen[$repo_dir]=1  # shuck: ignore=C001  # read above via ${+seen[...]}
+
+        if [[ $repo_dir == "${cache}"/* ]]; then
+            repo_spec=${repo_dir#"${cache}"/}
+        else
+            # Repo lives outside the cache (unusual bundle layout): fall back to
+            # the bare spec so removal/clone still target something sane.
+            repo_spec=$bare
+        fi
+
+        # Bundle-affecting when a sub-spec collapsed onto its backing repo
+        # (repo_spec differs from what the user named) or the resolved repo is a
+        # registered bundle dependency. Either way the repo is shared.
+        bundle=0
+        if [[ "$repo_spec" != "$bare" ]] || (( ${_ZDOT_BUNDLE_REPOS[(Ie)$repo_spec]} )); then
+            bundle=1
+        fi
+
+        zdot_plugin_name "$bare"
+
+        _zdot_rt_bare+=( "$bare" )        # shuck: ignore=C001  # out-param (reply-return convention)
+        _zdot_rt_version+=( "$version" )  # shuck: ignore=C001
+        _zdot_rt_dir+=( "$repo_dir" )     # shuck: ignore=C001
+        _zdot_rt_label+=( "$REPLY" )      # shuck: ignore=C001
+        _zdot_rt_spec+=( "$repo_spec" )   # shuck: ignore=C001
+        _zdot_rt_bundle+=( "$bundle" )    # shuck: ignore=C001
+    done
+    REPLY=$skipped
+    return 0
+}
+
 # ============================================================================
 # Plugin Cloning
 # ============================================================================

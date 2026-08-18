@@ -17,7 +17,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | `cache` | `status`, `invalidate`, `compile` |
 | `hook` | `list [-v] [-a]`, `plan`, `status`, `defer-queue`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [--groups-inline\|--groups-after] [-v]` |
 | `phase` | `list` |
-| `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [--dry-run] [--remove-unused]`, `reclone` |
+| `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [spec...\|--all] [--remove-unused] [--dry-run]`, `reclone [spec...\|--all] [--dry-run]` |
 | `module` | `list`, `clone <name>` |
 | `completion` | `refresh [--force]` |
 | `secret` | `refresh` |
@@ -150,16 +150,48 @@ zdot plugin check-updates [spec...]
   # Performs git fetch in each plugin and compares HEAD to upstream.
   # One line per plugin that's behind; silent for up-to-date or pinned plugins.
 
-zdot plugin clean [--dry-run] [--remove-unused]
-  # Remove stale plugin directories.
-  # --dry-run        Show what would be removed without deleting anything
+zdot plugin clean [<spec>... | --all] [--remove-unused] [--dry-run]
+  # Purge plugin cache directories. Removals are git-safe: a clone with
+  # uncommitted work is skipped, not destroyed. Clean only removes; it never
+  # re-clones (see reclone for that).
+  # <spec>...        Purge the named plugin(s)
+  # --all            Purge every declared plugin
   # --remove-unused  Also remove directories for plugins not declared anywhere
+  # --dry-run        Show what would be removed without deleting anything
+  #                  (a bare `--dry-run` previews the --remove-unused scan)
 
-zdot plugin reclone
-  # Delete and re-clone all declared plugins from scratch.
+zdot plugin reclone [<spec>... | --all] [--dry-run]
+  # Remove and immediately re-clone plugin(s) — the clone happens now, not on
+  # the next shell start. Removals are git-safe (a dirty clone is skipped, and
+  # then not re-cloned over). A target that isn't installed yet is just cloned.
+  # <spec>...  Reclone the named plugin(s)
+  # --all      Reclone every declared plugin
+  # --dry-run  Show what would be recloned without changing anything
+  # Restart the shell (or `exec zsh`) afterwards to load the fresh copies.
 ```
 
-**Implementation**: delegates to `zdot_list_plugins`, `zdot_update_plugin`, `zdot_check_plugin_updates`, `zdot_clean_plugins`, `zdot_reclone_plugins` (core/plugins.zsh).
+> **Changed (breaking).** `zdot plugin reclone` previously took no arguments: it
+> `rm -rf`'d the entire plugin cache and re-cloned on the *next* shell start.
+> It now **requires an explicit target** (`<spec>...` or `--all`), re-clones
+> **immediately**, and is **git-safe** — a clone with uncommitted work is skipped,
+> not force-removed. Bare `zdot plugin reclone` now errors (exit 1) instead of
+> wiping everything.
+>
+> Migration:
+> - `zdot plugin reclone` → `zdot plugin reclone --all` (nearest equivalent).
+> - `--all` re-clones only *declared* plugins and never blows past uncommitted
+>   work. To also drop orphaned/corrupt cache dirs, add
+>   `zdot plugin clean --remove-unused`. To force-discard a wedged clone (the old
+>   unconditional nuke), remove its directory under
+>   `${XDG_CACHE_HOME:-~/.cache}/zdot/plugins` by hand.
+
+For both `clean` and `reclone`, targets are resolved bundle-aware and
+deduplicated by backing repo (the same resolution `zdot plugin update` uses).
+Specs that share one repo collapse to a single operation — e.g. any `omz:*`
+spec acts on the whole shared `ohmyzsh/ohmyzsh` checkout, and passing several
+`omz:*` specs (or `--all`) reclones/purges that repo once.
+
+**Implementation**: delegates to `zdot_list_plugins`, `zdot_update_plugin`, `zdot_check_plugin_updates`, `zdot_clean_plugins`, `zdot_reclone_plugins`. `clean` and `reclone` share `_zdot_plugins_resolve_targets` (core/plugins.zsh) for bundle-aware, dedup-by-repo target resolution, and both build on the `zdot_plugin_remove` / `zdot_plugin_clone` primitives.
 
 ---
 
@@ -390,4 +422,4 @@ compdef _zdot zdot
 It provides:
 - **Word 2**: noun completions with descriptions
 - **Word 3**: verb completions per noun
-- **Word 4+**: flag completions for `hook list`, `plugin list`, and `plugin clean`
+- **Word 4+**: flag completions for `hook list`, `hook graph`, `phase list`, `plugin list`, and `update`; flags **and** declared-plugin-spec completions for `plugin update`, `plugin check-updates`, `plugin clean`, and `plugin reclone`; module-name completions for `module clone`

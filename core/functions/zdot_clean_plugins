@@ -1,102 +1,178 @@
 #!/usr/bin/env zsh
-# zdot_clean_plugins: Clean up plugin cache
+# zdot_clean_plugins: Purge plugin cache directories.
+#
+#   zdot plugin clean <spec>...        Purge the named plugin(s)
+#   zdot plugin clean --all            Purge every declared plugin
+#   zdot plugin clean --remove-unused  Purge clones not declared anywhere
+#   zdot plugin clean --dry-run ...    Preview any of the above
+#
+# Targeted purges (<spec>... / --all) resolve bundle-aware and deduplicate by
+# backing repo via _zdot_plugins_resolve_targets (the same resolution
+# zdot_update_plugin uses), so an omz:* spec collapses to its ohmyzsh/ohmyzsh
+# checkout. All removals go through zdot_plugin_remove, so a repo with
+# uncommitted work is skipped rather than destroyed, and the clone sentinel is
+# invalidated.
+#
+# Unlike reclone, clean only removes — it never re-clones.
 
 zdot_clean_plugins() {
-    local dry_run=0
-    local remove_unused=0
+    emulate -L zsh
+    local dry_run=0 remove_unused=0 all=0
+    local -a specs
 
-    while [[ $# -gt 0 ]]; do
+    while (( $# )); do
         case $1 in
-            --dry-run) dry_run=1 ;;
+            --dry-run)       dry_run=1 ;;
             --remove-unused) remove_unused=1 ;;
-            --help)
-                zdot_info "Usage: zdot_clean_plugins [options]"
-                zdot_info "  --dry-run        Show what would be removed"
-                zdot_info "  --remove-unused  Remove plugins not in declared list"
+            --all)           all=1 ;;
+            --help|-h)
+                zdot_info "Usage: zdot plugin clean [<spec>... | --all] [--remove-unused] [--dry-run]"
+                zdot_info "  <spec>           Purge the named plugin(s)"
+                zdot_info "  --all            Purge every declared plugin"
+                zdot_info "  --remove-unused  Purge clones not declared anywhere"
+                zdot_info "  --dry-run        Show what would be removed; change nothing"
                 return 0
                 ;;
+            -*)
+                zdot_error "zdot plugin clean: unknown option '$1'"
+                return 1
+                ;;
+            *) specs+=( "$1" ) ;;
         esac
         shift
     done
 
-    local cache_dir
-    zstyle -s ':zdot:plugins' directory cache_dir
-    cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
-    local cache=$cache_dir
+    if (( all && ${#specs} )); then
+        zdot_error "zdot plugin clean: cannot combine --all with a plugin spec"
+        return 1
+    fi
 
-    # -------------------------------------------------------------------------
-    # 1. Remove unused top-level namespace dirs (--remove-unused mode)
-    # -------------------------------------------------------------------------
-    if [[ $remove_unused -eq 0 && $dry_run -eq 0 ]]; then
+    # A bare `clean` with no target and no scan is a no-op — but point the user
+    # at what actually removes something instead of silently doing nothing.
+    if (( ! all && ! remove_unused && ! ${#specs} && ! dry_run )); then
+        zdot_info "Nothing to clean. Pass a <spec>, --all, or --remove-unused."
+        zdot_info "  usage: zdot plugin clean [<spec>... | --all] [--remove-unused] [--dry-run]"
         return 0
     fi
 
-    # Always keep these top-level namespace dirs
-    local -A keep
-    keep[ohmyzsh]=1
-    keep[romkatv]=1
+    _zdot_plugins_init
 
-    # Build keep-set from declared plugin specs
-    local spec
-    for spec in $_ZDOT_PLUGINS_ORDER; do
-        if [[ $spec == omz:* ]]; then
-            keep[ohmyzsh]=1
-        else
-            keep[${spec%%/*}]=1
-        fi
-    done
+    local cache_dir
+    zstyle -s ':zdot:plugins' directory cache_dir
+    cache_dir=${cache_dir:-${_ZDOT_PLUGINS_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}}
+    local cache=$cache_dir
 
-    # Also keep repos declared as bundle dependencies
-    local repo
-    for repo in $_ZDOT_BUNDLE_REPOS; do
-        keep[${repo%%/*}]=1
-    done
+    local removed=0 skipped=0
 
-    local removed=0
-    local dir
-    for dir in "$cache"/*(N); do
-        [[ ! -d "$dir" ]] && continue
+    # -------------------------------------------------------------------------
+    # 1. Purge explicitly targeted plugins (<spec>... or --all)
+    # -------------------------------------------------------------------------
+    if (( all || ${#specs} )); then
+        _zdot_plugins_resolve_targets "$all" "${specs[@]}"
+        local -a t_spec=( "${_zdot_rt_spec[@]}" )      # shuck: ignore=C006  # set by _zdot_plugins_resolve_targets
+        local -a t_bundle=( "${_zdot_rt_bundle[@]}" )  # shuck: ignore=C006
 
-        local name=${dir:t}
-
-        # Dirs with a colon in the name are corrupt/stale artifacts (e.g. omz:plugins/).
-        # They can never be valid user/repo namespace dirs, so remove them directly.
-        if [[ "$name" == *:* ]]; then
-            if [[ $dry_run -eq 1 ]]; then
-                zdot_info "Would remove corrupt cache entry: $name"
+        local spec
+        integer i
+        for (( i = 1; i <= ${#t_spec}; i++ )); do
+            spec=${t_spec[i]}
+            # A shared backing repo (bundle sub-spec, or a bundle-dep repo):
+            # purging it removes every plugin it backs. Warn, but continue.
+            if (( t_bundle[i] )); then
+                zdot_warn "  $spec is a shared bundle repo — clean removes every plugin backed by it (continuing)"
+            fi
+            if (( dry_run )); then
+                zdot_plugin_path "$spec"
+                [[ -d "$REPLY" ]] && zdot_info "Would remove: $spec"
+                continue
+            fi
+            if zdot_plugin_remove "$spec"; then
+                (( removed++ ))
             else
-                zdot_warn "zdot_clean_plugins: removing corrupt cache entry: $name"
-                rm -rf "$dir"
+                (( skipped++ ))
             fi
-            continue
-        fi
+        done
+    fi
 
-        [[ -n "${keep[$name]}" ]] && continue
+    # -------------------------------------------------------------------------
+    # 2. Remove unused top-level namespace dirs (--remove-unused mode)
+    #    A bare `--dry-run` (no explicit target) also previews this scan, so
+    #    `zdot plugin clean --dry-run` still reports stale directories.
+    # -------------------------------------------------------------------------
+    local do_unused=0
+    (( remove_unused )) && do_unused=1
+    (( dry_run && ! all && ! ${#specs} )) && do_unused=1
 
-        if [[ $dry_run -eq 1 ]]; then
-            zdot_info "Would remove: $name"
-        elif [[ $remove_unused -eq 1 ]]; then
-            # Use zdot_plugin_remove for each user/repo inside the namespace dir
-            # so the git-safety guard and sentinel invalidation are applied.
-            local subdir
-            for subdir in "$dir"/*(N); do
-                [[ ! -d "$subdir" ]] && continue
-                local sub_spec="${name}/${subdir:t}"
-                zdot_action "Removing: ${sub_spec}"
-                if zdot_plugin_remove "$sub_spec"; then
-                    ((removed++))
+    if (( do_unused )); then
+        # Always keep these top-level namespace dirs
+        local -A keep
+        keep[ohmyzsh]=1
+        keep[romkatv]=1
+
+        # Build keep-set from declared plugin specs
+        local spec
+        for spec in $_ZDOT_PLUGINS_ORDER; do
+            if [[ $spec == omz:* ]]; then
+                keep[ohmyzsh]=1
+            else
+                keep[${spec%%/*}]=1
+            fi
+        done
+
+        # Also keep repos declared as bundle dependencies
+        local repo
+        for repo in $_ZDOT_BUNDLE_REPOS; do
+            keep[${repo%%/*}]=1
+        done
+
+        local dir
+        for dir in "$cache"/*(N); do
+            [[ ! -d "$dir" ]] && continue
+
+            local name=${dir:t}
+
+            # Dirs with a colon in the name are corrupt/stale artifacts (e.g.
+            # omz:plugins/). They can never be valid user/repo namespace dirs,
+            # so remove them directly.
+            if [[ "$name" == *:* ]]; then
+                if (( dry_run )); then
+                    zdot_info "Would remove corrupt cache entry: $name"
+                else
+                    zdot_warn "zdot_clean_plugins: removing corrupt cache entry: $name"
+                    rm -rf "$dir"
                 fi
-            done
-            # If the namespace dir is now empty, remove it too
-            if [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
-                rm -rf "$dir"
+                continue
             fi
-        fi
-    done
 
-    if [[ $dry_run -eq 1 ]]; then
+            [[ -n "${keep[$name]}" ]] && continue
+
+            if (( dry_run )); then
+                zdot_info "Would remove: $name"
+            elif (( remove_unused )); then
+                # Use zdot_plugin_remove for each user/repo inside the namespace
+                # dir so the git-safety guard and sentinel invalidation apply.
+                local subdir
+                for subdir in "$dir"/*(N); do
+                    [[ ! -d "$subdir" ]] && continue
+                    local sub_spec="${name}/${subdir:t}"
+                    zdot_action "Removing: ${sub_spec}"
+                    if zdot_plugin_remove "$sub_spec"; then
+                        (( removed++ ))
+                    else
+                        (( skipped++ ))
+                    fi
+                done
+                # If the namespace dir is now empty, remove it too
+                if [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+                    rm -rf "$dir"
+                fi
+            fi
+        done
+    fi
+
+    if (( dry_run )); then
         zdot_info "(dry run - no changes made)"
-    elif [[ $remove_unused -eq 1 ]]; then
-        zdot_info "Removed $removed plugin(s)."
+    else
+        zdot_info "Removed $removed plugin(s)$( (( skipped )) && print " ($skipped skipped)" )."
     fi
 }

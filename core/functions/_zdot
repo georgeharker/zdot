@@ -48,8 +48,8 @@ function _zdot() {
         'list:list plugins'
         'update:update one, several, or all plugins'
         'check-updates:report plugins with available updates'
-        'clean:remove stale plugin directories'
-        'reclone:delete and re-clone all plugins'
+        'clean:purge plugin cache directories (spec, --all, or --remove-unused)'
+        'reclone:remove and immediately re-clone plugin(s) (spec or --all)'
         'help:show help for plugin'
     )
 
@@ -94,7 +94,7 @@ function _zdot() {
     # ── flags per noun+verb ──────────────────────────────────────────────────
 
     local -a flags_hook_list flags_hook_graph flags_plugin_list flags_plugin_clean \
-             flags_update flags_phase_list
+             flags_plugin_reclone flags_update flags_phase_list
 
     flags_hook_list=(
         '-v[show full hook metadata]'
@@ -129,8 +129,14 @@ function _zdot() {
     )
 
     flags_plugin_clean=(
+        '--all[purge every declared plugin]'
         '--dry-run[show what would be removed without deleting]'
         '--remove-unused[also remove plugins not declared anywhere]'
+    )
+
+    flags_plugin_reclone=(
+        '--all[reclone every declared plugin]'
+        '--dry-run[show what would be recloned without changing anything]'
     )
 
     flags_update=(
@@ -186,12 +192,26 @@ function _zdot() {
                 hook:graph)             _arguments -s "${flags_hook_graph[@]}" ;;
                 phase:list)             _arguments -s "${flags_phase_list[@]}" ;;
                 plugin:list)            _arguments -s "${flags_plugin_list[@]}" ;;
-                plugin:clean)           _arguments -s "${flags_plugin_clean[@]}" ;;
                 update:check-updates)   _arguments -s "${flags_update[@]}" ;;
                 update:apply)           _arguments -s "${flags_update[@]}" ;;
                 plugin:update|plugin:check-updates)
                     local -a all_specs=( "${_ZDOT_PLUGINS_ORDER[@]}" )
                     _describe -t plugins 'plugin spec' all_specs
+                    ;;
+                plugin:clean|plugin:reclone)
+                    # Both take flags *and* one-or-more declared plugin specs,
+                    # so offer the flag set and fall through to spec completion
+                    # for the positional args.
+                    local -a _rc_flags all_specs
+                    all_specs=( "${_ZDOT_PLUGINS_ORDER[@]}" )
+                    if [[ $verb == clean ]]; then
+                        _rc_flags=( "${flags_plugin_clean[@]}" )
+                    else
+                        _rc_flags=( "${flags_plugin_reclone[@]}" )
+                    fi
+                    local state
+                    _arguments -s "${_rc_flags[@]}" '*:plugin spec:->specs'
+                    [[ $state == specs ]] && _describe -t plugins 'plugin spec' all_specs
                     ;;
                 module:clone)
                     # Offer all modules visible in the search path as clone candidates

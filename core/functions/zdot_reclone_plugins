@@ -1,16 +1,103 @@
 #!/usr/bin/env zsh
-# zdot_reclone_plugins: Remove and re-clone all plugins
+# zdot_reclone_plugins: Remove and immediately re-clone plugin(s).
+#
+# Unlike the old behaviour (purge the whole cache, defer the re-clone to the
+# next shell start), this operates *now*: each target is removed git-safely
+# (a repo with uncommitted work is skipped, not destroyed) and re-cloned in the
+# same call, so a fresh copy exists the moment the command returns.
+#
+# Targets are resolved bundle-aware and deduplicated by backing repo via
+# _zdot_plugins_resolve_targets (the same resolution zdot_update_plugin uses),
+# so specs sharing one repo — e.g. every omz:* spec, all backed by a single
+# ohmyzsh/ohmyzsh checkout — collapse to one reclone of that repo.
+#
+# Usage: zdot plugin reclone <spec>... | --all [--dry-run]
+#   <spec>     One or more plugin specs to reclone
+#   --all      Reclone every declared plugin
+#   --dry-run  Show what would be recloned; change nothing
 
 zdot_reclone_plugins() {
-    local cache_dir
-    zstyle -s ':zdot:plugins' directory cache_dir
-    cache_dir=${cache_dir:-${XDG_CACHE_HOME:-${HOME}/.cache}/zdot/plugins}
-    
-    zdot_report "Removing plugin cache at $cache_dir..."
-    rm -rf "$cache_dir"
-    
-    # Reset plugin state so they'll be re-cloned on next shell start
-    unset _ZDOT_PLUGINS_INITIALIZED
-    
-    zdot_info "Cache removed. Plugins will be re-cloned on next shell start."
+    emulate -L zsh
+    local all=0 dry_run=0
+    local -a specs
+    while (( $# )); do
+        case $1 in
+            --all)     all=1 ;;
+            --dry-run) dry_run=1 ;;
+            --help|-h)
+                zdot_info "Usage: zdot plugin reclone <spec>... | --all [--dry-run]"
+                zdot_info "  Remove and immediately re-clone plugin(s) from scratch."
+                zdot_info "  <spec>     One or more plugin specs"
+                zdot_info "  --all      Reclone every declared plugin"
+                zdot_info "  --dry-run  Show what would be recloned; change nothing"
+                return 0
+                ;;
+            -*)
+                zdot_error "zdot plugin reclone: unknown option '$1'"
+                return 1
+                ;;
+            *) specs+=( "$1" ) ;;
+        esac
+        shift
+    done
+
+    if (( all && ${#specs} )); then
+        zdot_error "zdot plugin reclone: cannot combine --all with a plugin spec"
+        return 1
+    fi
+    if (( ! all && ! ${#specs} )); then
+        zdot_error "zdot plugin reclone: specify a plugin spec or --all"
+        zdot_info  "  usage: zdot plugin reclone <spec>... | --all"
+        return 1
+    fi
+
+    _zdot_plugins_init
+
+    # Resolve + dedupe to backing-repo specs (bundle-aware). Each _zdot_rt_spec
+    # is a plain user/repo whose path is the repo dir, so the existing
+    # zdot_plugin_remove / zdot_plugin_clone primitives handle it directly;
+    # _zdot_rt_bundle[i] flags a shared backing repo (warn-and-continue).
+    _zdot_plugins_resolve_targets "$all" "${specs[@]}"
+    local -a t_spec=( "${_zdot_rt_spec[@]}" )      # shuck: ignore=C006  # set by _zdot_plugins_resolve_targets
+    local -a t_bundle=( "${_zdot_rt_bundle[@]}" )  # shuck: ignore=C006
+
+    if (( ! ${#t_spec} )); then
+        zdot_info "No plugins to reclone."
+        return 0
+    fi
+
+    local spec recloned=0 skipped=0 failed=0
+    integer i
+    for (( i = 1; i <= ${#t_spec}; i++ )); do
+        spec=${t_spec[i]}
+        # A shared backing repo (bundle sub-spec, or a bundle-dep repo): acting
+        # on it re-clones every plugin it backs. Warn, but continue.
+        if (( t_bundle[i] )); then
+            zdot_warn "  $spec is a shared bundle repo — reclone affects every plugin backed by it (continuing)"
+        fi
+        if (( dry_run )); then
+            zdot_info "Would reclone: $spec"
+            continue
+        fi
+        # Remove git-safely. If the removal is refused (dirty repo, or the dir
+        # isn't a git clone) we must not clone over the surviving directory.
+        if ! zdot_plugin_remove "$spec"; then
+            (( skipped++ ))
+            continue
+        fi
+        zdot_action "Re-cloning $spec..."
+        if zdot_plugin_clone "$spec"; then
+            (( recloned++ ))
+        else
+            zdot_error "  $spec: re-clone failed"
+            (( failed++ ))
+        fi
+    done
+
+    if (( dry_run )); then
+        zdot_info "(dry run - no changes made)"
+    else
+        zdot_info "Done ($recloned re-cloned, $skipped skipped, $failed failed)"
+        (( recloned )) && zdot_info "Restart your shell (or 'exec zsh') to load the fresh copies."
+    fi
 }

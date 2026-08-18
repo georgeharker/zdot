@@ -6,7 +6,7 @@
 #   cache   status | invalidate | compile
 #   hook    list [--verbose|-v] [--all|-a] [--ordered|-o] | plan | status | defer-queue
 #   phase   list [--context <ctx>]
-#   plugin  list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [--dry-run] [--remove-unused] | reclone
+#   plugin  list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [spec...|--all] [--remove-unused] [--dry-run] | reclone [spec...|--all] [--dry-run]
 #   module  list | clone <name>
 #   completion refresh
 #   secret  refresh
@@ -59,9 +59,17 @@ function zdot() {
         zdot_info "                          Update one, several, or all plugins"
         zdot_info "  zdot plugin check-updates [spec...]"
         zdot_info "                          Report plugins with available updates (no changes)"
-        zdot_info "  zdot plugin clean [--dry-run] [--remove-unused]"
-        zdot_info "                          Remove stale plugin directories"
-        zdot_info "  zdot plugin reclone     Delete and re-clone all plugins"
+        zdot_info "  zdot plugin clean [<spec>...|--all] [--remove-unused] [--dry-run]"
+        zdot_info "                          Purge plugin cache directories"
+        zdot_info "                          <spec>...        Purge the named declared plugin(s)"
+        zdot_info "                          --all            Purge every declared plugin"
+        zdot_info "                          --remove-unused  Purge clones not declared anywhere"
+        zdot_info "                          --dry-run        Show what would be removed"
+        zdot_info "  zdot plugin reclone [<spec>...|--all] [--dry-run]"
+        zdot_info "                          Remove and immediately re-clone plugin(s)"
+        zdot_info "                          <spec>...  Reclone the named declared plugin(s)"
+        zdot_info "                          --all      Reclone every declared plugin"
+        zdot_info "                          --dry-run  Show what would be recloned"
     }
 
     function _zdot_help_module() {
@@ -166,7 +174,7 @@ function zdot() {
         zdot_info "  cache      status | invalidate | compile"
         zdot_info "  hook       list [-v] [-a] [-o] | plan | status | defer-queue | graph [--depends <name>|--uses <name>|--all]"
         zdot_info "  phase      list [--context <ctx>]"
-        zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [--dry-run] [--remove-unused] | reclone"
+        zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [spec...|--all] | reclone [spec...|--all]"
         zdot_info "  module     list | clone <name>"
         zdot_info "  update     check-updates [--force] | apply [--force]"
         zdot_info "  completion refresh"
@@ -236,11 +244,11 @@ function zdot() {
                 update)        zdot_update_plugin "${@:3}" ;;
                 check-updates) zdot_check_plugin_updates "${@:3}" ;;
                 clean)         zdot_clean_plugins "${@:3}" ;;
-                reclone)       zdot_reclone_plugins ;;
+                reclone)       zdot_reclone_plugins "${@:3}" ;;
                 help|--help|-h) _zdot_help_plugin ;;
                 *)
                     zdot_error "zdot plugin: unknown verb '${verb}'"
-                    zdot_info "  verbs: list | update [spec...] | check-updates [spec...] | clean | reclone"
+                    zdot_info "  verbs: list | update [spec...] | check-updates [spec...] | clean [spec...|--all] | reclone [spec...|--all]"
                     return 1
                     ;;
             esac
