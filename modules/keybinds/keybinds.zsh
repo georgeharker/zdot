@@ -25,6 +25,9 @@ _keybinds_init() {
         bindkey -M $km '\e[5~' history-search-backward
         bindkey -M $km '\e[6~' history-search-forward
         bindkey -M $km '\e[1;3A' history-search-backward
+        
+        # Allow actual opt-8
+        bindkey -M $km -s '\e8' '•'
     done
 }
 

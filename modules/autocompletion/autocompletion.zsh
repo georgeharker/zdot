@@ -24,6 +24,7 @@ _autocomplete_plugins_configure() {
     ABBR_SET_EXPANSION_CURSOR=1  # shuck: ignore=C001
     ABBR_SET_LINE_CURSOR=1  # shuck: ignore=C001
     ABBR_GET_AVAILABLE_ABBREVIATION=1  # shuck: ignore=C001
+    ABBR_CURSOR_MARKER='•'  # shuck: ignore=C001
     ABBR_USER_ABBREVIATIONS_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/zsh-abbr/user-abbreviations  # shuck: ignore=C001
     
     # Autosuggest control
