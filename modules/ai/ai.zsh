@@ -34,9 +34,10 @@
 # The plugin ships a Python bridge (its own pyproject.toml). _ai_load runs
 # `uv sync` in the plugin dir to create its `.venv` when missing — hence the
 # dependency on the uv module (uv-configured). The sync runs with VIRTUAL_ENV
-# unset so it builds the plugin's own venv, not whatever venv is active. It
-# always adds the plugin's `claude` extra (Claude Agent SDK) when present, so
-# the `adapter = claude_code` backend works without a manual reinstall.
+# unset so it builds the plugin's own venv, not whatever venv is active. The
+# native-protocol SDK backends (claude_code adapter etc.) install by DEFAULT
+# — they ride in on the plugin's `llmkit[bridge,md,claude,anthropic,google]`
+# dependency — so a plain `uv sync` is all the venv ever needs.
 #
 # Module knobs (`:zdot:ai` namespace):
 #   add-cli-to-path  boolean; prepend <plugin>/bin to $PATH for the `zsh-ai`
@@ -135,9 +136,9 @@ _ai_load() {
               || ! -f "$_ai_stamp" \
               || "${_ai_path}/pyproject.toml" -nt "$_ai_stamp" \
               || "${_ai_path}/external/llmkit/pyproject.toml" -nt "$_ai_stamp" ]]; then
-            # ai-sync's defaults include the optional `claude` extra (Claude
-            # Agent SDK), so the claude_code adapter works out of the box.
-            # Re-run `ai-sync` by hand to change extras later.
+            # ai-sync's defaults are just `uv sync --no-dev`: the SDK
+            # backends (claude_code adapter etc.) install unconditionally
+            # via the llmkit extra set in the plugin's dependencies.
             ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
         fi
     fi
@@ -153,10 +154,10 @@ _ai_load() {
 
 # (Re)sync the zsh-ai plugin's Python venv with uv. _ai_load bootstraps the
 # venv only when it's missing; this command re-syncs an existing one too, so you
-# can change what's installed after the fact — most usefully adding an optional
-# extra: `ai-sync --extra claude` enables the claude_code chat backend on a venv
-# that was built without it. Args are forwarded verbatim to `uv sync`; with none
-# it uses the same flags the first-run bootstrap does (--no-dev --extra claude).
+# can change what's installed after the fact. Args are forwarded verbatim to
+# `uv sync`; with none it uses the same flags the first-run bootstrap does
+# (--no-dev). There are no project extras to toggle — the SDK backends
+# (claude_code adapter etc.) install by default via llmkit's extra set.
 # VIRTUAL_ENV is unset so uv targets the plugin's own .venv, not an active one
 # (the uv module activates ~/.venv).
 ai-sync() {
@@ -168,7 +169,7 @@ ai-sync() {
         return 1
     fi
     local -a args=("$@")
-    (( $# )) || args=(--no-dev --extra claude --extra anthropic --extra google)
+    (( $# )) || args=(--no-dev)
     zdot_info "ai: syncing zsh-ai venv (uv sync ${args[*]})…"
     if ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ); then
         # Stamp the venv so _ai_load's self-heal check knows it's in sync with
