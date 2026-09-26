@@ -48,10 +48,9 @@
 # Commands:
 #   ai-sync [uv-sync-args...]  (re)sync the plugin's Python venv. _ai_load only
 #                      bootstraps the venv on first run (when .venv is missing);
-#                      this re-syncs an existing one too. Run it to add an extra
-#                      after the fact — e.g. `ai-sync --extra claude` to enable
-#                      the claude_code backend on a venv built without it. With
-#                      no args it forwards the same flags _ai_load uses.
+#                      this re-syncs an existing one too. With no args it
+#                      forwards the same flags _ai_load uses (--no-dev); the
+#                      SDK backends install by default via llmkit's extra set.
 #
 # Plugin knobs this module seeds as backstop defaults:
 #   :zsh-ai:*        endpoint           http://localhost:11434/v1
