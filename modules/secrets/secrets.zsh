@@ -61,6 +61,22 @@ _op_get_secrets_dirs() {
     secrets_cache="${XDG_CACHE_HOME:-$HOME/.cache}/secrets/"
 }
 
+# Get secrets filename
+# Returns via caller-declared local variables:
+#   op_secrets_profile_suffix - shell file to source 
+_op_get_secrets_profile_suffix() {
+    # shuck: disable=C001
+    local op_secrets_profile
+    zstyle -s ':zdot:secrets:op' profile op_secrets_profile \
+        || op_secrets_profile=''
+    op_secrets_profile_suffix=''
+    # shuck: disable=C019
+    if [[ -n op_secrets_profile ]]; then
+        # shuck: disable=C001
+        op_secrets_profile_suffix="-${op_secrets_profile}"
+    fi
+}
+
 # Set up SSH_AUTH_SOCK to use 1Password SSH agent
 #
 # Platform guard:
@@ -136,11 +152,14 @@ _op_init() {
         # If we have a token, mark as active
         [[ -n "$OP_SERVICE_ACCOUNT_TOKEN" ]] && _ZDOT_OP_ACTIVE=1
     fi
+        
+    local op_secrets_profile_suffix
+    _op_get_secrets_profile_suffix
 
     # Only proceed with shell secrets if OP is active
     if [[ $_ZDOT_OP_ACTIVE -eq 1 ]]; then
         # Refresh shell secrets if needed
-        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
+        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets${op_secrets_profile_suffix}.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
             refresh_shell_secrets
         else
             zdot_verbose "secrets: cache is up to date, skipping refresh"
@@ -152,7 +171,7 @@ _op_init() {
         fi
     else
         # Warn if secrets template is stale but OP is not active to refresh it
-        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
+        if zdot_is_newer_or_missing "${secrets_src_dir}/secrets${op_secrets_profile_suffix}.zsh" "${secrets_cache}/${USER}.secrets.zsh"; then
             zdot_warn "secrets: template is newer than cache but OP is not active — run refresh_shell_secrets manually once OP is available"
         fi
     fi

@@ -64,6 +64,7 @@ hook (see below). The following zstyles are read by `op_get_vault_config` inside
 | `':zdot:secrets:op' service-acct-grants` | `(API:read_items,write_items SSHKeys:read_items,write_items)` | Array of `vault:permissions` strings granted to newly created service accounts |
 | `':zdot:secrets' ssh-platforms` | `(mac)` | Platform names or `$OSTYPE` globs; SSH agent setup only runs when at least one matches. Accepts `mac`, `linux`, `debian`, or raw globs like `darwin*` |
 | `':zdot:secrets' ssh-func` | *(unset)* | Name of a function to call as an additional gate; setup only proceeds if it returns 0 |
+| `':zdot:secrets' profile` | *(unset)* | Profile used to derive a suffix eg secrets-${PROFILE}.zsh for sourcing secrets from |
 
 The `service-acct-grants` default is derived from the resolved `api-vault` and
 `ssh-vault` values, so overriding those two is usually sufficient.
