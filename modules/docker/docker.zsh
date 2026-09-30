@@ -11,7 +11,9 @@ _docker_init() {
             zdot_add_fpath "${HOME}/.docker/completions" --glob '_*'
         fi
         if command -v docker &>/dev/null; then
-            export DOCKER_HOST=`docker context ls --format json | jq -r 'select(.Current) | .DockerEndpoint'`
+            if (( ! $+DOCKER_HOST )); then
+                export DOCKER_HOST=`docker context ls --format json | jq -r 'select(.Current) | .DockerEndpoint'`
+            fi
         fi
     fi
 }
