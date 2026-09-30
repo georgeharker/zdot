@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# bun: Bun toolchain and cargo environment
+# bun: Bun toolchain and environment
 # Manages Bun installation and completions
 
 _bun_init() {

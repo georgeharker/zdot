@@ -10,8 +10,8 @@
 # Configuration is handled via ~/.config/zsh-patina/config.toml.
 
 # requires
-zstyle ':zdot:brew' verify-tools zsh-patina
-zstyle ':zdot:apt' verify-tools zsh-patina
+# zstyle ':zdot:brew' verify-tools zsh-patina
+# zstyle ':zdot:apt' verify-tools zsh-patina
 
 # Completion registration lives in its OWN eager hook, separate from _patina_init
 # (which activates zsh-patina at prompt time — gated on prompt-ready, deferred).
