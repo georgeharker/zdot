@@ -9,30 +9,35 @@ initialised (`$HOMEBREW_PREFIX` set).
 - macOS only — silently skips on Linux/other platforms
 - Homebrew installed at `/opt/homebrew` (Apple Silicon) or `/usr/local` (Intel)
 
-## What it does
-
-1. Sets `HOMEBREW_AUTO_UPDATE_SECS=3600`, `HOMEBREW_BAT=1`,
-   `HOMEBREW_NO_ENV_HINTS=1`
-2. Runs `brew shellenv` to add Homebrew's `bin/` and `sbin/` to `PATH` and
-   set `HOMEBREW_PREFIX`, `HOMEBREW_CELLAR`, etc.
-3. Verifies that expected tools are present on `PATH` (warning only —
-   does not abort)
-
 ## Configuration
 
-Override the default tool list to verify:
+Tool verification is **config-driven** — the module states no list of its own
+here. Two zstyles, both read at module source time (set them before
+`zdot_load_module brew`, e.g. via `zdot_before_module`):
 
 ```zsh
-zstyle ':zdot:brew' verify-tools op eza gh tmux
+zstyle ':zdot:brew' verify-tools   op eza oh-my-posh gh tmux tailscale
+zstyle ':zdot:brew' optional-tools eza oh-my-posh gh tmux tailscale
 ```
 
-The default list is: `op eza oh-my-posh gh tmux tailscale`
-
-This zstyle is read **at module source time** (not in a configure hook), so it
-must be set before `zdot_load_module brew` is called.
+- `verify-tools` is **mandatory**: if it is not configured at all, the hook
+  fails with an error at shell start (an unconfigured manifest is a
+  configuration error, not a silent default). Set it explicitly — even to
+  `zstyle ':zdot:brew' verify-tools ''` to declare "no manifest tools" — on a
+  working-but-bare machine.
+- `optional-tools` is the subset of `verify-tools` whose absence is expected:
+  those are verified **quietly** (verbose only) instead of warning. Unset it
+  and nothing is quiet — every missing manifest tool warns. Consumers of an
+  optional tool gate themselves with `--requires-optional-tool <tool>` and are
+  skipped when the tool wasn't installed; keep essential tools (e.g. `op`)
+  out of the optional list so a missing one still warns.
+- Missing non-optional tools produce a warning only — verification never
+  aborts the shell.
 
 ## Provides
 
 - Phase: `brew-ready`
-- Tools: whatever is in the `verify-tools` list (advertised to the hook
-  dependency system so downstream hooks can declare `--requires-tool`)
+- Tools: the `verify-tools` list (or, at source time only, the module's
+  fallback claim list when the zstyle is unset — see brew.zsh; advertised to
+  the hook dependency system so downstream hooks can declare
+  `--requires-tool` / `--requires-optional-tool`)

@@ -21,9 +21,14 @@ _brew_init() {
         eval "$(/usr/local/bin/brew shellenv)"
     fi
 
-    zdot_verify_tools_zstyle ':zdot:brew' op eza oh-my-posh gh tmux tailscale
+    zdot_verify_tools_zstyle ':zdot:brew'
 }
 
-# Tool list: override via zstyle ':zdot:brew' verify-tools <tool...>
+# Tool manifest (single statement): fallback for CLAIMS at source time only.
+# Verification is config-driven: zdot_verify_tools_zstyle REQUIRES
+#   zstyle ':zdot:brew' verify-tools <tool...>    # in user config, even to ''
+# and demotes to quiet the subset configured as
+#   zstyle ':zdot:brew' optional-tools <tool...>  # unset = nothing quiet
+# (optionals' consumers gate with --requires-optional-tool and skip when absent).
 zdot_provides_tool_args ':zdot:brew' op eza oh-my-posh gh tmux tailscale
 zdot_simple_hook brew --provides brew-ready --requires-group brew-configure "${reply[@]}"

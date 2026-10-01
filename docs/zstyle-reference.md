@@ -356,7 +356,8 @@ Source: `modules/brew/brew.zsh`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `verify-tools` | array | `(op eza oh-my-posh gh tmux tailscale)` | List of tools whose presence is verified after brew init. Override to add or replace. |
+| `verify-tools` | array | *none — must be configured* | Tool manifest declared for this machine after brew init. UNSET is a configuration error (the verify hook fails at startup); `''` configures an intentionally empty manifest. The module's fallback list (`op eza oh-my-posh gh tmux tailscale` in brew.zsh) feeds CLAIMS only (`zdot_provides_tool_args` at source time). |
+| `optional-tools` | array | *none — unset = nothing quiet* | Subset of `verify-tools` verified **quietly**: a miss is verbose-only, because consumers gate on availability via `--requires-optional-tool` (they skip when the tool didn't get installed). Keep essential tools (e.g. `op`) out of it so a missing one still warns. |
 
 ---
 
@@ -366,7 +367,8 @@ Source: `modules/apt/apt.zsh`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `verify-tools` | array | `(op eza oh-my-posh gh tailscale zoxide rg bat fd)` | List of tools whose presence is verified after apt setup. Override to add or replace. |
+| `verify-tools` | array | *none — must be configured* | Tool manifest declared for this machine after apt setup. UNSET is a configuration error (the verify hook fails at startup); `''` configures an empty manifest. The module's fallback list (`op eza oh-my-posh gh tailscale zoxide rg bat fd` in apt.zsh) feeds CLAIMS only. |
+| `optional-tools` | array | *none — unset = nothing quiet* | Subset of `verify-tools` verified **quietly** — same semantics as the brew module's key: consumers use `--requires-optional-tool` and skip when the tool is absent. |
 
 ---
 

@@ -25,8 +25,16 @@ The choice comes down to two questions:
 |------|---------------------------|--------------------------|
 | `--requires <phase>` | hard graph edge **+ force-defer propagation** | **abort the plan build** |
 | `--requires-optional <phase>` | **identical to `--requires`** (hard edge + force-defer) | **drop dependency** — the hook still runs |
+| `--requires-optional-tool <tool>` | hard edge + force-defer, **plus a body-entry availability gate** (skips the hook when the tool isn't on PATH at execution time, after the provider ran) | **drop dependency** — the hook still runs (and the gate still applies) |
 | `--optional` *(modifies `--requires`)* | hard edge + force-defer | **skip the whole hook** |
 | `--after <target>` | **ordering only** — no force-defer propagation | silent no-op |
+
+A runtime-skip cascade mirrors the plan-build optional-skip cascade: when a
+hook is skipped at execution ('skipped-tool' — unavailable best-effort tool,
+or 'skipped-cascade'), its provides are never marked and its phases enter a
+per-shell runtime-dropped set; eager consumers of those phases skip (hard) or
+keep running with the edge dropped (requires-optional), and deferred consumers
+are skipped/dropped by the dispatch gate before they can stall.
 
 Two separate axes are in play, and it helps to read the table as such:
 

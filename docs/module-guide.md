@@ -227,7 +227,24 @@ zdot_simple_hook history --after-tool fzf
 | `--requires-tool fzf` | hard error | full dependency (orders + inherits deferral) |
 | `--requires-tool fzf` + `--optional` | the whole hook is skipped | full dependency |
 | `--requires-optional fzf` | edge dropped — the hook still runs | **full dependency** (same as `--requires`) |
+| `--requires-optional-tool fzf` | edge dropped — the hook still runs, **but is skipped at execution when fzf isn't on PATH** | full dependency **+ availability gate** |
 | `--after-tool fzf` | silent no-op — the hook still runs, just unordered | ordering only (does **not** inherit deferral) |
+
+`--requires-optional-tool` is what you use for **optional tools** (a.k.a.
+best-effort installs): brew/apt
+manifest tools that may or may not be installed on a given machine. Tool
+availability is unknowable at plan-build time (the provider's own hook — e.g.
+`brew shellenv` — is usually what puts the tool's bin dir on PATH; nothing
+about PATH is settled before hooks run). So the flag splits its work across
+the two phases where the two facts live: at plan-build the edge is
+`--requires-optional`'s (registry semantics: full dependency when a provider
+module registered the tool, soft edge when none did), and at execution time
+— by which point the DAG has run the provider, so `command -v` is reliable —
+an availability gate skips the hook, marks no provides, and records the
+skipped phases so that consumers of this hook's phases drop (requires-optional)
+or cascade-skip (hard) instead of running on absent state. Modules no longer
+need the imperative `command -v x || return` guard in their bodies — register
+with `--requires-optional-tool x` and the scheduler does it.
 
 Reach for `--requires-optional` when a base/common hook wants to order behind
 an **optional** sibling module's phase *with full `--requires` semantics* (so it

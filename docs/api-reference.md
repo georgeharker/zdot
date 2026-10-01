@@ -88,6 +88,7 @@ zdot_register_hook <function-name> <context...> [flags...]
 | `--requires` | `<phase...>` | Phases that must complete before this hook runs. **Hard:** if no hook provides the phase in the current context, the plan build aborts |
 | `--requires-optional` | `<phase...>` | **Soft requires.** When a hook provides the phase it is a full dependency — real ordering edge *and* force-defer propagation, identical to `--requires`. When nothing provides it the edge is silently dropped (the hook still runs; the build does not abort). Use when a base/common hook wants to order behind an **optional** sibling module's phase without depending on it being loaded. Contrast `--after` (ordering only, does *not* propagate deferral) and `--requires` + `--optional` (skips the whole hook when unmet). See [Dependency types](dependencies.md) |
 | `--requires-tool` | `<tool>` | Sugar for `--requires tool:<tool>` |
+| `--requires-optional-tool` | `<tool>` | Sugar for `--requires-optional tool:<tool>` **plus a runtime availability gate**: at plan-build the edge is exactly `--requires-optional`'s (soft when no provider module is registered, full dependency when one is — ordering + force-defer propagation). Additionally the hook is **skipped at execution time** (body-entry gate, before the hook function runs) when the tool isn't on PATH — a check only reliable there, since a provider's own hook may be what puts the tool on PATH. A skipped hook marks no provides, so its consumers drop (requires-optional) or cascade-skip (hard) instead of running without it. Intended for optional tools in brew/apt manifests — tools the machine tries to install but doesn't guarantee. |
 | `--after` | `<target...>` | **Soft** ordering: run after each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. The declarative, soft counterpart to `--requires`; the per-hook counterpart to `zdot_defer_order`. |
 | `--after-tool` | `<tool>` | Sugar for `--after tool:<tool>` — soft-order after whoever `--provides-tool <tool>`, if any. |
 | `--before` | `<target...>` | **Soft** ordering mirror of `--after`: run *before* each target *if present*, else no-op (never errors, never skips the hook). Each target resolves as a phase first, else as a hook name. Lets a hook insert itself ahead of another without editing it. |
@@ -202,6 +203,7 @@ Registers up to five lifecycle hooks from a single call:
 | `--context` | `<ctx...>` | Default contexts for all phases |
 | `--provides-tool` | `<tool>` | Tool provided by the load phase (may repeat) |
 | `--requires-tool` | `<tool>` | Tool required by the load phase (may repeat) |
+| `--requires-optional-tool` | `<tool>` | Best-effort tool requirement for the load phase — sugar for `--requires-optional tool:<tool>` with the runtime availability gate; the load hook is skipped when `<tool>` isn't on PATH at execution time (may repeat) |
 | `--requires` | `<phase...>` | Extra requirements for the load phase |
 | `--after` / `--after-tool` | `<target...>` / `<tool>` | Soft ordering for the load phase — same semantics as on [`zdot_register_hook`](#zdot_register_hook) |
 | `--before` / `--before-tool` | `<target...>` / `<tool>` | Soft ordering mirror, applied to the load phase |
@@ -1302,15 +1304,45 @@ zdot_verify_tools git curl jq
 
 ---
 
-### `zdot_verify_tools_zstyle`
+### `zdot_tool_available`
 
-Read a tool list from zstyle and verify each exists.
+Silent predicate: succeeds (rc 0) iff every named tool is on PATH.
 
 ```zsh
-zdot_verify_tools_zstyle <zstyle-context> <default-tool...>
+zdot_tool_available <tool1> [tool2 ...]
 ```
 
-Falls back to the default list if the zstyle is unset.
+No output. Use in a module body that wants to gate its own work on tool
+availability; for scheduling-level gating prefer the declarative
+`--requires-optional-tool`.
+
+**Example:**
+
+```zsh
+if zdot_tool_available uv; then _register_uv_completion; fi
+```
+
+---
+
+### `zdot_verify_tools_zstyle`
+
+Read the configured tool manifest from zstyle and verify it. **Config-driven:
+the function takes no list.**
+
+```zsh
+zdot_verify_tools_zstyle <zstyle-context>
+
+zstyle <ctx> verify-tools   <tool...>   # the manifest; '' = none; UNSET = error
+zstyle <ctx> optional-tools <tool...>   # subset verified quietly; unset = nothing quiet
+```
+
+**Config contract:** `verify-tools` must be configured — an unset manifest is
+a configuration error and FAILS the calling hook at startup (`rc 1` + error
+message). Set it explicitly, even to an empty value, to assert intent. Set-but-
+blank verifies trivially (nothing to check). A missing non-optional tool warns
+(`zdot_verify_tools`); a missing `optional-tools` member logs verbose-only,
+because its consumers gate on availability via `--requires-optional-tool`
+instead of requiring the tool to exist.
 
 ---
 

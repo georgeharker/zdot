@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "shellcheck-zsh-dialect": {
+      "disable": [
+        "SC1071", "shellcheck:SC1071",
+        "SC2034", "shellcheck:SC2034"
+      ]
+    }
+  }
+}

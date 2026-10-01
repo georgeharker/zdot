@@ -308,6 +308,11 @@ zdot_module_list() {
 #   --context <ctx...>            Default contexts (default: interactive noninteractive)
 #   --provides-tool <tool>        Tool provided by the load phase
 #   --requires-tool <tool>        Tool required by the load phase
+#   --requires-optional-tool <t>  Best-effort: like --requires-tool, but the
+#                                 load hook is skipped when <t> isn't on PATH
+#                                 at execution time (see --requires-optional-tool
+#                                 in core/hooks.zsh). Use for tools whose
+#                                 provider manifests them best-effort (brew/apt).
 #   --requires <phase...>         Extra requirements for the load phase
 #   --after <target...>           Soft ordering: run load phase after each
 #                                 target (phase or hook name), no-op if absent
@@ -345,7 +350,7 @@ zdot_define_module() {
     local configure_fn="" load_fn="" post_init_fn=""
     local interactive_init_fn="" noninteractive_init_fn=""
     local -a load_plugins=()
-    local -a provides_tools=() requires_tools=()
+    local -a provides_tools=() requires_tools=() requires_optional_tools=()
     local -a extra_requires=() extra_groups=()
     local -a after_targets=() before_targets=()
     local -a configure_contexts=() load_contexts=()
@@ -378,6 +383,8 @@ zdot_define_module() {
                 provides_tools+=("$2"); shift 2 ;;
             --requires-tool)
                 requires_tools+=("$2"); shift 2 ;;
+            --requires-optional-tool)
+                requires_optional_tools+=("$2"); shift 2 ;;
             --requires)
                 shift
                 while (( $# )) && [[ "$1" != --* ]]; do
@@ -522,6 +529,9 @@ zdot_define_module() {
     done
     for t in "${requires_tools[@]}"; do
         load_hook_args+=(--requires-tool "$t")
+    done
+    for t in "${requires_optional_tools[@]}"; do
+        load_hook_args+=(--requires-optional-tool "$t")
     done
 
     # Extra requires/groups from flags

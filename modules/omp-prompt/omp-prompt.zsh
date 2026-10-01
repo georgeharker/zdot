@@ -13,10 +13,9 @@
 #     zstyle ':zdot:omp-prompt' theme '/path/to/theme.toml'
 
 _omp_prompt_init() {
-    command -v oh-my-posh &>/dev/null || {
-        zdot_verbose "omp-prompt: oh-my-posh not found, skipping"
-        return 0
-    }
+    # Availability is gated declaratively: --requires-optional-tool skips this
+    # hook when oh-my-posh isn't on PATH (after the tool provider ran), so the
+    # body only runs when the binary exists.
 
     local _theme
     zstyle -s ':zdot:omp-prompt' theme _theme \
@@ -30,6 +29,5 @@ zdot_register_hook _omp_prompt_init interactive \
     --deferred-prompt \
     --requires bootstrap-ready \
     --requires-group omp-prompt-configure \
-    --requires-tool oh-my-posh \
-    --provides prompt-ready \
-    --optional
+    --requires-optional-tool oh-my-posh \
+    --provides prompt-ready

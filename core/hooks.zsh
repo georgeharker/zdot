@@ -25,6 +25,7 @@ typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
 typeset -gA _ZDOT_DROPPED_GROUP_PHASES   # _group_member_* phase -> 1 when its member is a skipped optional hook (dropped from barriers at plan-build AND runtime)
 typeset -gA _ZDOT_DROPPED_OPTIONAL_PHASES  # phase -> 1 for a --requires-optional phase with no provider in this context (edge dropped at plan-build, and at runtime via _zdot_hook_requirements_met). Computed in zdot_build_execution_plan, so it must be cache-persisted (a cache hit skips the build).
+typeset -gA _ZDOT_DROPPED_EXECUTION_PHASES  # phase -> 1 when its provider hook did NOT run to completion in this shell (best-effort tool gate skip, runtime cascade, or hook failure rc≠0). Terminal record for consumers: never waited on again. Computed AT EXECUTION — eager pass and deferred drain alike — so it is per-shell and never cache-persisted (contrast _ZDOT_DROPPED_OPTIONAL_PHASES, which is a plan-build/registry fact). Consulted by _zdot_tool_gate_skip/_zdot_runtime_gate_skip/_zdot_hook_requirements_met and the deferred dispatch loop.
 typeset -g _ZDOT_CURRENT_HOOK_FUNC   # Set by hook runner during execution; empty between hooks
 typeset -gA _ZDOT_HOOK_NAMES         # hook_id -> user-assigned name label
 typeset -gA _ZDOT_HOOK_BY_NAME       # name label -> hook_id
@@ -110,7 +111,7 @@ zdot_allow_defer() {
 # ============================================================================
 
 # Register a hook function with dependency metadata
-# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-optional <phase...>] [--requires-tool <tool>] [--after <target...>] [--after-tool <tool>] [--before <target...>] [--before-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
+# Usage: zdot_register_hook <function-name> <context...> [--requires <phase...>] [--requires-optional <phase...>] [--requires-tool <tool>] [--requires-optional-tool <tool>] [--after <target...>] [--after-tool <tool>] [--before <target...>] [--before-tool <tool>] [--provides <phase>] [--provides-tool <tool>] [--optional]
 # --requires-optional <phase...>  like --requires, but a phase with no provider
 #   in the current context is silently dropped (the hook still runs) instead of
 #   aborting the plan build. When a provider IS present it is a full dependency —
@@ -118,6 +119,23 @@ zdot_allow_defer() {
 #   wants to order behind an OPTIONAL sibling module's phase without depending on
 #   it being loaded. (Contrast: --after is ordering-only and does not propagate
 #   deferral; --requires --optional skips the whole hook when unmet.)
+# --requires-optional-tool <tool>  sugar for --requires-optional tool:<tool>,
+#   with the tool-phase entry ALSO gated on real availability: the hook is
+#   skipped at execution time (body-entry) when the tool is not on PATH. At
+#   plan-build the edge is exactly --requires-optional's (soft when no provider
+#   module registered; full dependency — ordering + force-defer propagation —
+#   when one is), which is safe because tool availability is NOT knowable at
+#   plan time (the provider's own hook may still be the thing that adds the
+#   tool's bin dir to PATH); the DAG edge guarantees the provider ran by
+#   body-entry, so the command -v check there is reliable. Skipped hooks mark
+#   no provides and their phases are recorded as runtime-dropped, so eager
+#   consumers cascade skip and deferred consumers drop the edge instead of
+#   stalling. This makes optional (best-effort) tools in brew/apt manifests
+#   usable: consumers opt out when the tool simply didn't get installed. (Contrast:
+#   --requires-tool stays pure claim semantics — hard error when unmanifested,
+#   no availability gate.) There is no separate tool list kept for the gate:
+#   the tool:* entries of _ZDOT_HOOK_REQUIRES_OPTIONAL ARE the gate list, so
+#   the longhand "--requires-optional tool:<t>" gets identical semantics.
 # Sets REPLY to the hook_id on success.
 # Contexts: interactive, noninteractive, login, nonlogin
 # --provides-tool <tool>  sugar for --provides tool:<tool>
@@ -207,6 +225,16 @@ zdot_register_hook() {
                 ;;
             --requires-tool)
                 requires+=("tool:$2")
+                shift 2
+                ;;
+            --requires-optional-tool)
+                # Best-effort tool require — pure sugar for
+                # --requires-optional tool:<t> with the added body-entry
+                # availability gate derived from the same record (see the
+                # flag docs in the usage header above; no separate tool list
+                # is stored).
+                requires+=("tool:$2")
+                requires_optional+=("tool:$2")
                 shift 2
                 ;;
             --requires-optional)
@@ -1743,18 +1771,68 @@ zdot_verify_tools() {
     done
 }
 
-# Read tool list from zstyle at call time and verify each.
-# Usage: zdot_verify_tools_zstyle <zstyle-context> <default-tool...>
-# Reads array from zstyle; falls back to default list if unset.
-zdot_verify_tools_zstyle() {
-    local _ctx="$1"; shift
-    local -a _tools
-    zstyle -a "$_ctx" verify-tools _tools
-    [[ ${#_tools} -eq 0 ]] && _tools=("$@")
-    zdot_verify_tools "${_tools[@]}"
+# Silent predicate: return 0 (success) iff EVERY named tool is on PATH.
+# No output — use it in module bodies that want to gate on availability without
+# the imperative `command -v x &>/dev/null ||` idiom. Prefer the declarative
+# --requires-optional-tool for scheduling-level gating; this predicate is for
+# bodies that do their own partial work.
+# Usage: zdot_tool_available <tool1> [tool2 ...]
+zdot_tool_available() {
+    local tool
+    for tool in "$@"; do
+        command -v "$tool" &>/dev/null || return 1
+    done
+    return 0
 }
 
-# Build a --provides-tool arg list from a zstyle tool list.
+# Read the tool manifest from zstyle and verify it. Config-driven — no list is
+# ever supplied in code here; the manifest lives in user config:
+# Usage: zdot_verify_tools_zstyle <zstyle-context>
+#   zstyle <ctx> verify-tools   <tool...>   # the manifest; '' = none
+#   zstyle <ctx> optional-tools <tool...>   # subset verified QUIETLY; unset = nothing quiet
+#
+# CONFIG CONTRACT: verify-tools MUST be configured — unset is a configuration
+# ERROR (zdot_error + rc 1, failing the calling hook), not a silent default.
+# Set it explicitly, even to '', to assert intent. (The module's
+# zdot_provides_tool_args fallback supplies claim args at source time only;
+# this check is the enforcement point.)
+#
+# Verification: a missing non-optional tool warns (zdot_verify_tools); a
+# missing optional tool logs verbose-only — its consumers gate themselves via
+# --requires-optional-tool and skip when the tool is absent.
+zdot_verify_tools_zstyle() {
+    local _ctx="$1"
+    local -a _tools _optional
+    if ! zstyle -a "$_ctx" verify-tools _tools; then
+        zdot_error "zdot_verify_tools_zstyle: tool manifest not configured for '$_ctx'" \
+            "(set zstyle '$_ctx' verify-tools <tool...>, or '' if the machine has none)"
+        return 1
+    fi
+    # A blank-configured manifest (single empty element) == empty manifest
+    _tools=("${(@)_tools:#}")
+    zstyle -a "$_ctx" optional-tools _optional
+    _optional=("${(@)_optional:#}")
+    (( ${#_tools} == 0 )) && return 0
+    local _t _hard_missing=() _opt_missing=()
+    for _t in "${_tools[@]}"; do
+        command -v "$_t" &>/dev/null && continue
+        if (( ${_optional[(Ie)$_t]} )); then
+            _opt_missing+=("$_t")
+        else
+            _hard_missing+=("$_t")
+        fi
+    done
+    (( ${#_hard_missing[@]} )) && zdot_verify_tools "${_hard_missing[@]}"
+    (( ${#_optional[@]} )) && \
+        _zdot_internal_debug "zdot_verify_tools_zstyle: optional tool(s) not on PATH (ok; consumers using --requires-optional-tool will skip): ${_opt_missing[*]:-none}"
+    return 0
+}
+
+# Build a --provides-tool arg list from a zstyle tool list. This is the
+# manifest's CLAIM half (source-time): zstyle value if set, else the default
+# list — used only to advertise tool:* phases to the dependency system.
+# VERIFICATION is separate and stricter: zdot_verify_tools_zstyle REQUIRES the
+# manifest to be configured (unset = configuration error) and never falls back.
 # Usage: zdot_provides_tool_args <zstyle-context> <default-tool...>
 # Returns the arg array in $REPLY (as a scalar with args separated by \0).
 # Typical use: eval "$(zdot_provides_tool_args ':zdot:brew' op eza gh)"
@@ -1773,10 +1851,107 @@ zdot_provides_tool_args() {
     done
 }
 
+# ============================================================================
+# Runtime Gates (execution-time skip + cascade)
+# "Execution" contrasts with plan-build: these gates decide DURING the run —
+# eager pass AND deferred drain alike — as opposed to the registry decisions
+# made in zdot_build_execution_plan. NOT a deferred-only concept.
+# ============================================================================
+
+# Best-effort tool gate: return 0 (hook must be skipped) if any tool-phase in
+# its --requires-optional set is not on PATH; 1 otherwise. The gate list is
+# DERIVED from _ZDOT_HOOK_REQUIRES_OPTIONAL (the tool:* entries) — no separate
+# registry is kept, so the sugar (--requires-optional-tool) and the longhand
+# (--requires-optional tool:<t>) behave identically.
+#
+# Timing: called from _zdot_execute_hook immediately before the hook body runs.
+# The DAG edge (tool:<t> → this hook) guarantees that any REGISTERED provider
+# already ran — eager plan order, or the deferred drain chain — so the
+# provider's own PATH manipulation (e.g. brew shellenv) is in effect and
+# `command -v` is reliable HERE, though it is NOT at module-source or
+# plan-build time (which is why tool availability is deliberately not consulted
+# there). A tool with no registered provider (hand-installed) is checked at
+# whatever point the unordered hook happens to run: PATH from the bootstrap
+# environment only — best-effort by construction.
+#
+# When it returns 0 the caller records 'skipped-tool' in
+# _ZDOT_HOOKS_EXEC_RESULT, runs no body, marks NO provides, and drops the
+# hook's phases (including synthetic _group_member_* terms) into
+# _ZDOT_DROPPED_EXECUTION_PHASES — see _zdot_runtime_gate_skip for how consumers
+# react.
+_zdot_tool_gate_skip() {
+    local hook_id="$1"
+    local soft_reqs="${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]:-}"
+    [[ -n "$soft_reqs" ]] || return 1
+    local phase tool
+    for phase in ${=soft_reqs}; do
+        [[ $phase == tool:* ]] || continue
+        tool="${phase#tool:}"
+        if ! command -v "$tool" &>/dev/null; then
+            _zdot_internal_debug "zdot: hooks: tool gate: '$tool' not on PATH -> will skip hook '${_ZDOT_HOOKS[$hook_id]}' (best-effort tool require)"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Runtime cascade gate: return 0 (hook must be skipped) if a HARD required
+# phase can never be provided because its provider was runtime-skipped or
+# failed; 1 otherwise. Requires-optional edges to a runtime-dropped phase are
+# dropped (the consumer still runs, mirroring the plan-build softness of
+# --requires-optional), so they never trigger a skip.
+#
+# Invariant relied on by the callers: by body-entry time in the EAGER plan
+# loop, every provider that will run has ALREADY run (Kahn order — providers
+# precede consumers). So a required phase that is neither provided nor
+# plan-build-dropped means its provider either failed (rc ≠ 0, no provides)
+# or was itself runtime-skipped ('skipped-tool' / 'skipped-cascade', phases in
+# _ZDOT_DROPPED_EXECUTION_PHASES). Either way the consumer would operate on
+# absent state: cascade-skip it, drop ITS provides, and let the cascade
+# continue transitively.
+#
+# The DEFERRED dispatch loop calls this too (see _zdot_run_deferred_phase_check):
+# a hard require's verdict is final the moment its provider's fate is known,
+# so the hook is skipped even before its remaining requirements are met.
+_zdot_runtime_gate_skip() {
+    local hook_id="$1"
+    local req
+    for req in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
+        _zdot_require_active_in_ctx "$hook_id" "$req" || continue
+        # Plan-build drops are already accounted for (provider never existed;
+        # the edge is gone from the plan) — not a runtime-skip trigger.
+        [[ -n ${_ZDOT_DROPPED_GROUP_PHASES[$req]} ]] && continue
+        [[ -n ${_ZDOT_DROPPED_OPTIONAL_PHASES[$req]} ]] && continue
+        # Runtime-dropped (provider skipped/failed after the plan was built):
+        # requires-optional edges drop, hard edges cascade-skip.
+        if [[ -n ${_ZDOT_DROPPED_EXECUTION_PHASES[$req]} ]] || [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
+            if [[ " ${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]:-} " == *" $req "* ]]; then
+                continue
+            fi
+            _zdot_internal_debug "zdot: hooks: runtime gate: phase '$req' of '${_ZDOT_HOOKS[$hook_id]}' can never be provided -> will cascade-skip"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Record a runtime skip for hook_id: the caller has already set
+# _ZDOT_HOOKS_EXEC_RESULT ('skipped-tool' or 'skipped-cascade'); this drops the
+# hook's provides into _ZDOT_DROPPED_EXECUTION_PHASES so consumers see a terminal
+# fate rather than an eternally-pending one. Group-member synthetic provides are
+# included; they are ordinary dropped-phase terms for consumers.
+_zdot_register_runtime_skip() {
+    local hook_id="$1"
+    local phase
+    for phase in ${=_ZDOT_HOOK_PROVIDES[$hook_id]}; do
+        _ZDOT_DROPPED_EXECUTION_PHASES[$phase]=1
+    done
+}
+
 # Internal helper to execute a single hook
 # Usage: _zdot_execute_hook <hook_id> <function_name> [stop_callback]
 # Returns:
-#   0 - Success
+#   0 - Success (or a runtime gate skipped the hook — no body ran, provides dropped)
 #   1 - Failure (function failed or not found)
 #   2 - Success with early termination signal (stop_callback returned 0)
 _zdot_execute_hook() {
@@ -1786,6 +1961,27 @@ _zdot_execute_hook() {
 
     local func=${_ZDOT_HOOKS[$hook_id]}
     local -a provides=(${=_ZDOT_HOOK_PROVIDES[$hook_id]})
+
+    # ── runtime gates: run before the body so BOTH eager hooks and deferred
+    # wrappers get identical skip semantics ──
+    #   1) best-effort tool gate (--requires-optional-tool): any listed tool
+    #      off PATH → skip ('skipped-tool')
+    #   2) runtime cascade gate: a hard required phase whose provider was
+    #      itself skipped/failed → skip ('skipped-cascade')
+    # Skipped hooks run no body, mark NO provides, and drop their phases into
+    # _ZDOT_DROPPED_EXECUTION_PHASES so their consumers see a terminal fate.
+    if _zdot_tool_gate_skip "$hook_id"; then
+        _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='skipped-tool'
+        _zdot_register_runtime_skip "$hook_id"
+        _zdot_internal_debug "zdot: hooks: run: SKIP (tool gate): ${func} (soft tool requires=${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]})"
+        return 0
+    fi
+    if _zdot_runtime_gate_skip "$hook_id"; then
+        _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='skipped-cascade'
+        _zdot_register_runtime_skip "$hook_id"
+        _zdot_internal_debug "zdot: hooks: run: SKIP (cascade): ${func}"
+        return 0
+    fi
 
     # Execute the hook function
     if typeset -f "$func" > /dev/null; then
@@ -1811,6 +2007,13 @@ _zdot_execute_hook() {
             return 0
         else
             _zdot_internal_error "${function_name}: Hook '$func' failed (exit code: $_rc)"
+            # Terminal for consumers: the provider will not run again, so its
+            # provides enter the execution-dropped set — downstream
+            # requires-optional edges drop quietly and hard consumers
+            # cascade-skip, instead of pending forever (soft) or false-stalling
+            # (hard). The failure itself is still reported above; this only
+            # makes the SUBTREE's behaviour deterministic.
+            _zdot_register_runtime_skip "$hook_id"
             return 1
         fi
     else
@@ -1874,6 +2077,15 @@ _zdot_hook_requirements_met() {
         # here too, so a deferred hook is never stalled waiting on a phase that will
         # never be provided (mirrors the skipped-member drop above).
         [[ -n ${_ZDOT_DROPPED_OPTIONAL_PHASES[$req]} ]] && continue
+        # A phase whose provider was skipped/failed at RUNTIME (best-effort tool
+        # unavailable, or runtime cascade) is dropped for --requires-optional
+        # edges — the consumer still runs, mirroring the plan-build softness.
+        # Hard consumers of runtime-dropped phases are cascade-skipped in the
+        # dispatch loop (_zdot_runtime_gate_skip) before this check runs.
+        if [[ -n ${_ZDOT_DROPPED_EXECUTION_PHASES[$req]} ]] && \
+           [[ " ${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]:-} " == *" $req "* ]]; then
+            continue
+        fi
         if [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
             return 1
         fi
@@ -1927,6 +2139,20 @@ _zdot_run_deferred_phase_check() {
         # drained, so the finally subgraph runs strictly last. (Skipped here
         # without adding to pending_hooks so it never trips stall detection.)
         if [[ -n $_ZDOT_FINALLY_BEGIN && "$hook_id" == "$_ZDOT_FINALLY_BEGIN" ]]; then
+            continue
+        fi
+
+        # Runtime cascade gate: a provider skipped at runtime ('skipped-tool' /
+        # 'skipped-cascade') or failed will never provide its phases. Hard
+        # requires of such a phase skip this hook outright (its own provides
+        # are runtime-dropped, propagating the cascade); requires-optional
+        # edges drop and fall through to the requirements check below, which
+        # also consults the runtime-dropped set.
+        if _zdot_runtime_gate_skip "$hook_id"; then
+            _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='skipped-cascade'
+            _zdot_register_runtime_skip "$hook_id"
+            dispatched=$(( dispatched + 1 ))
+            _zdot_internal_debug "zdot: hooks: deferred SKIP (cascade): ${_ZDOT_HOOKS[$hook_id]}"
             continue
         fi
 
@@ -2292,6 +2518,12 @@ _zdot_hook_display_marks() {
             _status_mark=" %F{red}[not found]%f"
         elif [[ "$_frc" == '0' ]]; then
             _status_mark=" %F{green}[ok]%f"
+        elif [[ "$_frc" == 'skipped-tool' ]]; then
+            # Runtime gate: best-effort tool (--requires-optional-tool) not on PATH.
+            _status_mark=" %F{yellow}[skipped: tool]%f"
+        elif [[ "$_frc" == 'skipped-cascade' ]]; then
+            # Runtime cascade: a required phase's provider was skipped/failed.
+            _status_mark=" %F{yellow}[skipped: cascade]%f"
         else
             _status_mark=" %F{red}[failed: rc=${_frc}]%f"
         fi

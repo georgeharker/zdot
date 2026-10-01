@@ -17,10 +17,12 @@
 # (which activates zsh-patina at prompt time — gated on prompt-ready, deferred).
 # Making _patina_init a completions-producer would force-defer completion
 # finalization (and compinit) behind the prompt lifecycle. Registration only needs
-# the binary available, so gate this hook on --requires-tool zsh-patina (provided
-# eagerly by _brew_init, after PATH setup) and keep it eager: it joins
-# completions-producers without dragging in the prompt phase. Cannot register at
-# module-source time — the brew PATH isn't set up yet, so zsh-patina isn't found.
+# the binary available: gate the completions hook on --requires-optional-tool
+# zsh-patina (registration happens eagerly via the brew manifest, and the
+# gate skips it when the binary turns out not to be installed) and keep it
+# eager: it joins completions-producers without dragging in the prompt phase.
+# Cannot register at module-source time — the brew PATH isn't set up yet, so
+# zsh-patina isn't found.
 _patina_register_completions() {
     zdot_register_completion_file "zsh-patina" "zsh-patina completion"
 }
@@ -28,15 +30,12 @@ _patina_register_completions() {
 zdot_register_hook _patina_register_completions interactive \
     --name patina-completions \
     --requires bootstrap-ready \
-    --requires-tool zsh-patina \
-    --group completions-producers \
-    --optional
+    --requires-optional-tool zsh-patina \
+    --group completions-producers
 
 _patina_init() {
-    command -v zsh-patina &>/dev/null || {
-        zdot_verbose "patina: zsh-patina not found, skipping"
-        return 0
-    }
+    # Availability is gated declaratively: --requires-optional-tool skips this
+    # hook when zsh-patina isn't on PATH (after the tool provider ran).
 
     eval "$(zsh-patina activate)"
 }
@@ -46,14 +45,18 @@ _patina_init() {
 # but it highlights fine on its own. As a plain --requires it combined with
 # --optional to SKIP patina entirely on a config with no prompt module; as
 # --requires-optional, patina still activates there (just unordered re: a prompt).
-# --optional remains for the genuine gate: --requires-tool zsh-patina (skip when
-# the binary isn't installed).
+# --requires-optional-tool, not a plain --requires-tool: zsh-patina wraps ZLE,
+# so (a) availability gets its own gate — skip the hook when the binary ends up
+# not installed after all; (b) prompt-ready stays --requires-optional instead
+# of --requires so patina still activates when no prompt module is loaded
+# (just unordered re: a prompt). A plain --requires-tool + --optional would
+# additionally have skipped patina whenever no hook provides tool:zsh-patina,
+# even when the binary is installed by hand (cargo install).
 zdot_register_hook _patina_init interactive \
     --name patina \
     --requires bootstrap-ready \
     --requires-optional prompt-ready \
     --requires-group patina-configure \
-    --requires-tool zsh-patina \
+    --requires-optional-tool zsh-patina \
     --provides patina-ready \
-    --after autosuggestions-ready \
-    --optional
+    --after autosuggestions-ready

@@ -1,6 +1,11 @@
 #!/usr/bin/env zsh
 # venv: Python virtual environment management
 #
+# HARD --requires-tool uv: venv's entire purpose is uv-managed venv work, so a
+# manifest without uv is a configuration error (plan abort). Like op/secrets,
+# runtime absence with a manifested uv is inert-by-construction: _venv_init
+# exports UV_* env and defines aliases that fail lazily only when invoked.
+#
 # To configure Python versions, register a hook into the venv-configure group:
 #
 #   _my_venv_config() {

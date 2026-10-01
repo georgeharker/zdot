@@ -13,10 +13,8 @@
 #     zstyle ':zdot:starship-prompt' config '/path/to/starship.toml'
 
 _starship_prompt_init() {
-    command -v starship &>/dev/null || {
-        zdot_verbose "starship-prompt: starship not found, skipping"
-        return 0
-    }
+    # Availability is gated declaratively: --requires-optional-tool skips this
+    # hook when starship isn't on PATH (after the tool provider ran).
 
     local _config
     if zstyle -s ':zdot:starship-prompt' config _config && [[ -n "$_config" ]]; then
@@ -31,6 +29,5 @@ zdot_register_hook _starship_prompt_init interactive \
     --deferred-prompt \
     --requires bootstrap-ready \
     --requires-group starship-prompt-configure \
-    --requires-tool starship \
-    --provides prompt-ready \
-    --optional
+    --requires-optional-tool starship \
+    --provides prompt-ready
