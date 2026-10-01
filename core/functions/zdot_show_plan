@@ -46,9 +46,10 @@ function zdot_show_plan() {
         fi
         local contexts=${_ZDOT_HOOK_CONTEXTS[$hook_id]}
 
-        local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
         _zdot_hook_display_marks "$hook_id" "$func"
-        zdot_info "$i. $func$_deferred_mark"
+        typeset -A _mk
+        _mk=("${reply[@]}")
+        zdot_info "$i. $func${_mk[deferred]}"
         zdot_info "   contexts: $contexts"
         zdot_info "   provides: $provides"
         zdot_info "   requires: $requires"

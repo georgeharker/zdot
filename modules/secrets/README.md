@@ -157,7 +157,8 @@ All functions are autoloaded on first call.
 | `op_refresh` | Rebuild the service account token cache. Interactive: may prompt to create/select account. |
 | `refresh_shell_secrets` | Re-inject `secrets.zsh` template into cache and source the result. Requires `_ZDOT_OP_ACTIVE=1`. |
 | `op_auth` | Interactively sign in to 1Password. Called by `op_refresh`; rarely needed directly. |
-| `op_get_vault_config` | Populate caller-local `op_svc_vault`, `op_api_vault`, `op_ssh_vault`, `op_svc_grants` from zstyle. |
+| `op_get_vault_config` | Return vault names in `$reply` as name/value pairs (`svc`/`api`/`ssh`) — read into `typeset -A _v`; consumer pattern in the function header. |
+| `op_get_vault_grants` | Return the service-account grant ARRAY in `$reply` (zstyle `service-acct-grants`, or the default derived from the api/ssh vault names passed as args). |
 | `op_get_config_dir` | Print the `op` config directory (sudo-aware). |
 | `op_get_config_args` | Print `--config <dir>` args for `op` invocations (one token per line). |
 

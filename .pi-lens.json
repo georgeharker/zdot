@@ -1,9 +1,19 @@
 {
   "rules": {
-    "shellcheck-zsh-dialect": {
+    "shellcheck-cannot-parse-zsh": {
       "disable": [
+        "shellcheck",
+        "SC1009", "shellcheck:SC1009",
+        "SC1027", "shellcheck:SC1027",
+        "SC1036", "shellcheck:SC1036",
+        "SC1056", "shellcheck:SC1056",
+        "SC1058", "shellcheck:SC1058",
         "SC1071", "shellcheck:SC1071",
-        "SC2034", "shellcheck:SC2034"
+        "SC1072", "shellcheck:SC1072",
+        "SC1073", "shellcheck:SC1073",
+        "SC1085", "shellcheck:SC1085",
+        "SC2034", "shellcheck:SC2034",
+        "SC2296", "shellcheck:SC2296"
       ]
     }
   }

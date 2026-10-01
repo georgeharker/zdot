@@ -2488,10 +2488,18 @@ _zdot_defer_order_display() {
     fi
 }
 
-# Set _name_mark, _deferred_mark, _noquiet_mark, _status_mark for a given hook_id/func pair.
-# Usage: _zdot_hook_display_marks <hook_id> <func>
-# Sets: _name_mark, _deferred_mark, _noquiet_mark, _status_mark (in caller's scope, no local)
+# Return the display marks for a hook_id/func pair as a flat NAME/VALUE pair
+# list in $reply (always even length; marks may be empty words):
+#   name      " [name: …]"    deferred " [ deferred]"|" [ deferred: forced]"
+#   noquiet   " [<defer flag name>]"
+#   status    "[ok]"/"[not found]"/"[skipped|skipped: tool|skipped: cascade|…"
+# Consumer (typeset -A at consumer scope — see test_op_secrets_env for why;
+# capture IMMEDIATELY after the call, anything else that sets reply clobbers):
+#   typeset -A _mk
+#   _zdot_hook_display_marks "$hook_id" "$func" && _mk=("${reply[@]}")
+#   zdot_info "  [$_pos] $func${_mk[status]}"
 _zdot_hook_display_marks() {
+    local _name_mark _deferred_mark _noquiet_mark _status_mark
     local _hname="${_ZDOT_HOOK_NAMES[$1]:-$2}"
     _name_mark=""
     [[ "$_hname" != "$2" ]] && _name_mark=" %F{blue}[name: $_hname]%f"
@@ -2511,7 +2519,7 @@ _zdot_hook_display_marks() {
         local _flag_label="${_ZDOT_DEFER_FLAG_NAMES[$_defer_arg]:-$_defer_arg}"
         _noquiet_mark=" %F{yellow}[${_flag_label}]%f"
     fi
-    _status_mark=""
+    _status_mark=""  # (composed below into the reply pairs)
     if [[ -n "${_ZDOT_HOOKS_EXEC_RESULT[$1]:-}" ]]; then
         local _frc="${_ZDOT_HOOKS_EXEC_RESULT[$1]}"
         if [[ "$_frc" == 'missing' ]]; then
@@ -2550,19 +2558,31 @@ _zdot_hook_display_marks() {
             _status_mark=" %F{red}[skipped]%f"
         fi
     fi
+    reply=(
+        name      "$_name_mark"
+        deferred  "$_deferred_mark"
+        noquiet   "$_noquiet_mark"
+        status    "$_status_mark"
+    )
 }
 
-# Set defer_mark based on whether any hook in the id list ran deferred work.
+# Return in REPLY the deferred-work mark for a provider id list: non-empty
+# ("[ran deferred]") when any hook in the list submitted deferred work, else an
+# empty word. Returns 0 always.
 # Usage: _zdot_ran_deferred_mark "${id_list[@]}"
-# Sets: defer_mark (in caller's scope, no local)
+# Consumer: (capture immediately after the call)
+#   local defer_mark
+#   _zdot_ran_deferred_mark "${id_list[@]}"
+#   defer_mark=$REPLY
 _zdot_ran_deferred_mark() {
     local _rd=0
-    local _id
+    local _id _f
     for _id in "$@"; do
-        local _f="${_ZDOT_HOOKS[$_id]}"
-        (( ${_ZDOT_DEFER_HOOKS[(Ie)${_f}]} )) && _rd=1 && break
+        _f="${_ZDOT_HOOKS[$_id]}"
+        (( ${_ZDOT_DEFER_HOOKS[(Ie)${_f}]} )) && { _rd=1; break }
     done
-    defer_mark=""
-    [[ $_rd -eq 1 ]] && defer_mark=" %F{magenta}[ran deferred]%f"  # shuck: ignore=C001
+    REPLY=""
+    (( _rd == 1 )) && REPLY=" %F{magenta}[ran deferred]%f"
+    return 0
 }
 

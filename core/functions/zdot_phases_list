@@ -88,16 +88,18 @@ function zdot_phases_list() {
             fi
 
             # Check if any hook providing this phase submitted deferred work
-            local defer_mark=""
+            local defer_mark
             _zdot_ran_deferred_mark "${id_list[@]}"
+            defer_mark=$REPLY
 
             zdot_info "  ${phase}${conflict}${defer_mark}"
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
-                local _name_mark="" _deferred_mark="" _noquiet_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "    • $func${_name_mark}${_deferred_mark}${_noquiet_mark}"
+                typeset -A _mk
+                _mk=("${reply[@]}")
+                zdot_info "    • $func${_mk[name]}${_mk[deferred]}${_mk[noquiet]}"
             done
         done
         zdot_info ""
@@ -122,16 +124,18 @@ function zdot_phases_list() {
             command -v "$tool_name" > /dev/null 2>&1 && available=" [available]"
 
             # Check if any hook providing this phase submitted deferred work
-            local defer_mark=""
+            local defer_mark
             _zdot_ran_deferred_mark "${id_list[@]}"
+            defer_mark=$REPLY
 
             zdot_info "  ${phase}${available}${defer_mark}"
 
             for hook_id in "${id_list[@]}"; do
                 local func="${_ZDOT_HOOKS[$hook_id]}"
-                local _name_mark="" _deferred_mark=""
                 _zdot_hook_display_marks "$hook_id" "$func"
-                zdot_info "    • $func${_name_mark}${_deferred_mark}"
+                typeset -A _mk
+                _mk=("${reply[@]}")
+                zdot_info "    • $func${_mk[name]}${_mk[deferred]}"
             done
         done
         zdot_info ""

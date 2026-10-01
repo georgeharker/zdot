@@ -28,9 +28,10 @@ function zdot_hooks_status() {
         local _pos=1
         for hook_id in "${_ZDOT_EXECUTION_PLAN[@]}"; do
             local func="${_ZDOT_HOOKS[$hook_id]}"
-            local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
             _zdot_hook_display_marks "$hook_id" "$func"
-            zdot_info "    [$_pos] $func$_status_mark"
+            typeset -A _mk
+            _mk=("${reply[@]}")
+            zdot_info "    [$_pos] $func${_mk[status]}"
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
             if [[ -z "$_rc" ]]; then
                 (( _notrun++ ))
@@ -50,9 +51,10 @@ function zdot_hooks_status() {
         local _pos=1
         for hook_id in "${_ZDOT_EXECUTION_PLAN_DEFERRED[@]}"; do
             local func="${_ZDOT_HOOKS[$hook_id]}"
-            local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
             _zdot_hook_display_marks "$hook_id" "$func"
-            zdot_info "    [$_pos] $func$_status_mark"
+            typeset -A _mk
+            _mk=("${reply[@]}")
+            zdot_info "    [$_pos] $func${_mk[status]}"
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
             if [[ -n "$_rc" && "$_rc" != '0' ]]; then
                 (( _failed++ ))

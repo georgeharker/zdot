@@ -206,10 +206,11 @@ function zdot_hooks_graph() {
         # magenta [ deferred] for --deferred hooks, yellow
         # [ deferred: forced] for hooks promoted into the deferred plan by
         # their dependencies. ASCII mode keeps the words, drops the glyphs.
-        local _name_mark="" _deferred_mark="" _noquiet_mark="" _status_mark=""
         _zdot_hook_display_marks "$hid" "$func"
-        (( _g_ascii )) && _deferred_mark="${_deferred_mark//[] /}"
-        out+="$_deferred_mark"
+        typeset -A _mk
+        _mk=("${reply[@]}")
+        (( _g_ascii )) && _mk[deferred]="${_mk[deferred]//[] /}"
+        out+="${_mk[deferred]}"
         print -r -- "$out"
     }
 

@@ -6,7 +6,10 @@
 # are guarded to only run in interactive shells.
 #
 # Inline Functions:
-#   - _op_get_secrets_dirs: Returns secrets_src_dir and secrets_cache
+#   - _op_get_secrets_env: resolves the shared secrets env (paths + profile
+#     suffix) into $reply as a flat name/value pair list — the SINGLE place
+#     these derivations live; consumed by _op_init, the autoloaded refresh
+#     functions, and the mcp module
 #   - _setup_ssh_auth_sock: Sets up SSH_AUTH_SOCK for 1Password agent
 #   - _op_init: Module initialization, orchestrates secret loading
 #
@@ -52,29 +55,38 @@ typeset -g _ZDOT_OP_ACTIVE=0
 # Autoload module functions
 zdot_module_autoload_funcs
 
-# Get secrets directories
-# Returns via caller-declared local variables:
-#   secrets_src_dir - source directory for secret templates
-#   secrets_cache - cache directory for processed secrets
-_op_get_secrets_dirs() {
-    secrets_src_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/secrets"
-    secrets_cache="${XDG_CACHE_HOME:-$HOME/.cache}/secrets/"
-}
-
-# Get secrets filename
-# Returns via caller-declared local variables:
-#   op_secrets_profile_suffix - shell file to source 
-_op_get_secrets_profile_suffix() {
-    # shuck: disable=C001
+# Resolve the shared secrets environment: paths and the op profile suffix.
+# Reads ':zdot:secrets:op profile' at CALL time (config-driven, like
+# zdot_verify_tools_zstyle) and returns a flat NAME/VALUE pair list in $reply
+# (always even length):
+#   src_dir - source directory for secret templates
+#   cache   - cache directory for processed secrets (no trailing slash;
+#             interpolate "${cache}/${USER}.…" — canonical; do NOT re-derive
+#             these paths elsewhere, the mcp module consumed to duplicate them)
+#   suffix  - "-<profile>" when a profile is configured, else '' (an EMPTY word,
+#             which consumers must not confuse with an unset pair)
+# Consumer pattern (copy before any other reply/REPLY-setting call):
+#   typeset -A _se
+#   _op_get_secrets_env && _se=("${reply[@]}")
+#   local secrets_src_dir="${_se[src_dir]}" secrets_cache="${_se[cache]}" \
+#       op_secrets_profile_suffix="${_se[suffix]}"
+_op_get_secrets_env() {
     local op_secrets_profile
     zstyle -s ':zdot:secrets:op' profile op_secrets_profile \
         || op_secrets_profile=''
-    op_secrets_profile_suffix=''
-    # shuck: disable=C019
-    if [[ -n op_secrets_profile ]]; then
-        # shuck: disable=C001
+    local op_secrets_profile_suffix=""
+    # NOTE: the variable MUST be expanded here — zsh [[ ]] args do not expand,
+    # so a bare "[[ -n op_secrets_profile ]]" tests the literal string and is
+    # always true (the old helper had exactly that bug behind its C019 marker:
+    # a bare machine got a "-" suffix and looked for secrets-.zsh).
+    if [[ -n "$op_secrets_profile" ]]; then
         op_secrets_profile_suffix="-${op_secrets_profile}"
     fi
+    reply=(
+        src_dir "${XDG_CONFIG_HOME:-${HOME}/.config}/secrets"
+        cache   "${XDG_CACHE_HOME:-$HOME/.cache}/secrets"
+        suffix  "${op_secrets_profile_suffix}"
+    )
 }
 
 # Set up SSH_AUTH_SOCK to use 1Password SSH agent
@@ -125,9 +137,11 @@ _setup_ssh_auth_sock() {
 _op_init() {
     command -v op &> /dev/null || return 0
 
-    # Get secrets directories
-    local secrets_src_dir secrets_cache
-    _op_get_secrets_dirs
+    # Secrets environment — one resolver, named keys (see _op_get_secrets_env)
+    typeset -A _se
+    _op_get_secrets_env && _se=("${reply[@]}")
+    local secrets_src_dir="${_se[src_dir]}" secrets_cache="${_se[cache]}" \
+        op_secrets_profile_suffix="${_se[suffix]}"
     [[ ! -d "${secrets_cache}" ]] && mkdir -p "${secrets_cache}"
 
     # Get op config
@@ -153,9 +167,6 @@ _op_init() {
         [[ -n "$OP_SERVICE_ACCOUNT_TOKEN" ]] && _ZDOT_OP_ACTIVE=1
     fi
         
-    local op_secrets_profile_suffix
-    _op_get_secrets_profile_suffix
-
     # Only proceed with shell secrets if OP is active
     if [[ $_ZDOT_OP_ACTIVE -eq 1 ]]; then
         # Refresh shell secrets if needed
