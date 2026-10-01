@@ -1089,6 +1089,16 @@ zdot_build_execution_plan() {
             # finally begin requires it; context-restricted to H's contexts.
             _ZDOT_HOOK_REQUIRES[$_fin_begin]+="${_ZDOT_HOOK_REQUIRES[$_fin_begin]:+ }$_mphase"
             _ZDOT_HOOK_REQUIRES_CONTEXTS[${_fin_begin}:${_mphase}]="${_ZDOT_HOOK_CONTEXTS[$_finx]}"
+            # H may have already executed BEFORE this injection: zdot_init runs
+            # the plugins-cloned hook (_zdot_init_clone) before group resolution
+            # and plan build, so its exec result is already recorded and — in
+            # the eager pass — "already executed" skips re-execution, meaning
+            # the injected member phase would never be marked provided. Mark
+            # it now for such hooks, or the finally begin barrier keeps a
+            # permanently-unmet require.
+            if [[ "${_ZDOT_HOOKS_EXEC_RESULT[$_finx]:-}" == "0" ]]; then
+                _ZDOT_PHASES_PROVIDED[$_mphase]=1
+            fi
             adjacency_list[$_mphase]+=" $_fin_begin"
             (( in_degree[$_fin_begin]++ ))
         done
@@ -1901,20 +1911,26 @@ _zdot_tool_gate_skip() {
 # dropped (the consumer still runs, mirroring the plan-build softness of
 # --requires-optional), so they never trigger a skip.
 #
-# Invariant relied on by the callers: by body-entry time in the EAGER plan
+# Invariant relied on by the EAGER caller: by body-entry time in the eager plan
 # loop, every provider that will run has ALREADY run (Kahn order — providers
 # precede consumers). So a required phase that is neither provided nor
-# plan-build-dropped means its provider either failed (rc ≠ 0, no provides)
-# or was itself runtime-skipped ('skipped-tool' / 'skipped-cascade', phases in
-# _ZDOT_DROPPED_EXECUTION_PHASES). Either way the consumer would operate on
-# absent state: cascade-skip it, drop ITS provides, and let the cascade
-# continue transitively.
+# plan-build-dropped means its provider either failed (rc ≠ 0, no provides),
+# was 'missing', or was itself runtime-skipped ('skipped-tool' /
+# 'skipped-cascade', phases in _ZDOT_DROPPED_EXECUTION_PHASES). Either way the
+# consumer would operate on absent state: cascade-skip it, drop ITS provides,
+# and let the cascade continue transitively.
 #
-# The DEFERRED dispatch loop calls this too (see _zdot_run_deferred_phase_check):
-# a hard require's verdict is final the moment its provider's fate is known,
-# so the hook is skipped even before its remaining requirements are met.
+# DO NOT reuse this in the DEFERRED dispatch loop: there the invariant does NOT
+# hold — a provider may simply not have run yet (queued for a later wave), and
+# "not provided yet" is NOT terminal. The deferred loop calls this with a
+# second argument ('deferred', the deferred execution pass), which restricts
+# the triggers to the terminal _ZDOT_DROPPED_EXECUTION_PHASES set (provider
+# was really skipped/failed — a fate known the moment it happened);
+# unprovided-but-pending phases leave the hook pending instead. See
+# _zdot_run_deferred_phase_check.
 _zdot_runtime_gate_skip() {
     local hook_id="$1"
+    local exec_pass="${2:-eager}"  # 'eager' (full semantics) or 'deferred'
     local req
     for req in ${=_ZDOT_HOOK_REQUIRES[$hook_id]}; do
         _zdot_require_active_in_ctx "$hook_id" "$req" || continue
@@ -1924,7 +1940,13 @@ _zdot_runtime_gate_skip() {
         [[ -n ${_ZDOT_DROPPED_OPTIONAL_PHASES[$req]} ]] && continue
         # Runtime-dropped (provider skipped/failed after the plan was built):
         # requires-optional edges drop, hard edges cascade-skip.
-        if [[ -n ${_ZDOT_DROPPED_EXECUTION_PHASES[$req]} ]] || [[ ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
+        # DEFERRED pass: only this terminal-fate trigger applies — "not yet
+        # provided" just means the provider is queued for a later wave, and
+        # cascade-skipping on it makes the drain kill every deferred hook that
+        # waits on a deferred (force-deferred) barrier, e.g. compinit behind
+        # the completions group's deferred end barrier.
+        if [[ -n ${_ZDOT_DROPPED_EXECUTION_PHASES[$req]} ]] || \
+           [[ $exec_pass != deferred && ${+_ZDOT_PHASES_PROVIDED[$req]} -eq 0 ]]; then
             if [[ " ${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]:-} " == *" $req "* ]]; then
                 continue
             fi
@@ -1962,6 +1984,15 @@ _zdot_execute_hook() {
     local func=${_ZDOT_HOOKS[$hook_id]}
     local -a provides=(${=_ZDOT_HOOK_PROVIDES[$hook_id]})
 
+    # Execution pass: hooks executed through the deferred drain (the wrapper
+    # sets _ZDOT_DEFERRED_CURRENT_HOOK) must NOT treat "required phase not
+    # provided yet" as terminal — their providers may run in later waves, and
+    # dispatch already enforced requirements. Only a terminal runtime-drop
+    # (provider skipped/failed) legitimises a skip there. The eager pass keeps
+    # full semantics (its Kahn invariant: providers precede consumers).
+    local _zdot_execution_pass=eager
+    [[ -n "$_ZDOT_DEFERRED_CURRENT_HOOK" ]] && _zdot_execution_pass=deferred
+
     # ── runtime gates: run before the body so BOTH eager hooks and deferred
     # wrappers get identical skip semantics ──
     #   1) best-effort tool gate (--requires-optional-tool): any listed tool
@@ -1976,7 +2007,7 @@ _zdot_execute_hook() {
         _zdot_internal_debug "zdot: hooks: run: SKIP (tool gate): ${func} (soft tool requires=${_ZDOT_HOOK_REQUIRES_OPTIONAL[$hook_id]})"
         return 0
     fi
-    if _zdot_runtime_gate_skip "$hook_id"; then
+    if _zdot_runtime_gate_skip "$hook_id" "$_zdot_execution_pass"; then
         _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='skipped-cascade'
         _zdot_register_runtime_skip "$hook_id"
         _zdot_internal_debug "zdot: hooks: run: SKIP (cascade): ${func}"
@@ -2019,6 +2050,10 @@ _zdot_execute_hook() {
     else
         _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='missing'
         zdot_error "${function_name}: Hook function '$func' not found"
+        # Terminal for consumers, same as a failing body: without this the
+        # deferred drain would pend forever on the missing provider's
+        # provides instead of skipping (stall instead of deterministic skip).
+        _zdot_register_runtime_skip "$hook_id"
         return 1
     fi
 }
@@ -2142,13 +2177,13 @@ _zdot_run_deferred_phase_check() {
             continue
         fi
 
-        # Runtime cascade gate: a provider skipped at runtime ('skipped-tool' /
-        # 'skipped-cascade') or failed will never provide its phases. Hard
-        # requires of such a phase skip this hook outright (its own provides
-        # are runtime-dropped, propagating the cascade); requires-optional
-        # edges drop and fall through to the requirements check below, which
-        # also consults the runtime-dropped set.
-        if _zdot_runtime_gate_skip "$hook_id"; then
+        # Runtime cascade gate (deferred execution pass): only a hard required
+        # phase that is TERMINALLY runtime-dropped (provider skipped-tool /
+        # skipped-cascade / failed) can never be provided. A phase that is
+        # merely not yet provided leaves this hook pending — its provider may
+        # be queued for a later wave. (Eager-mode "not provided" is NOT
+        # terminal here.)
+        if _zdot_runtime_gate_skip "$hook_id" deferred; then
             _ZDOT_HOOKS_EXEC_RESULT[$hook_id]='skipped-cascade'
             _zdot_register_runtime_skip "$hook_id"
             dispatched=$(( dispatched + 1 ))

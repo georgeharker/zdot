@@ -8,7 +8,7 @@
 
 typeset -g _ZDOT_CACHE_ENABLED=0            # Whether caching is enabled
 typeset -g _ZDOT_CACHE_DIR=""               # Cache directory path
- typeset -g _ZDOT_CACHE_VERSION="25"         # Cache format version (bump to invalidate stale plans)
+ typeset -g _ZDOT_CACHE_VERSION="26"         # Cache format version (bump to invalidate stale plans)
 
 # ============================================================================
 # Cache Configuration
