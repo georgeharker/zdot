@@ -32,25 +32,44 @@
 # to PATH, and sources the plugin (which reads those zstyles at source time).
 #
 # The plugin ships a Python bridge (its own pyproject.toml). _ai_load runs
-# `uv sync` in the plugin dir to create its `.venv` when missing — hence the
-# dependency on the uv module (uv-configured). The sync runs with VIRTUAL_ENV
-# unset so it builds the plugin's own venv, not whatever venv is active. The
-# native-protocol SDK backends (claude_code adapter etc.) install by DEFAULT
-# — they ride in on the plugin's `llmkit[bridge,md,claude,anthropic,google]`
-# dependency — so a plain `uv sync` is all the venv ever needs.
+# `ai-sync` in the plugin dir to create its `.venv` when missing or stale —
+# hence the dependency on the uv module (uv-configured). The sync runs with
+# VIRTUAL_ENV unset so it builds the plugin's own venv, not whatever venv is
+# active. Note the bridge's base deps (polyllmkit[bridge,md]) do NOT install
+# the SDK adapters' SDKs (claude_code, anthropic, google — polyllmkit's base
+# extras are empty by design, unlike pre-split llmkit 0.1.0). ai-sync's
+# no-arg path therefore seeds sync-extras on by default (see the knob
+# below); a machine can narrow or empty the list, and whatever's set
+# persists across self-heal syncs.
 #
 # Module knobs (`:zdot:ai` namespace):
 #   add-cli-to-path  boolean; prepend <plugin>/bin to $PATH for the `zsh-ai`
 #                      CLI (default off)
 #   api-key-env      shortcut: forwarded to `:zsh-ai:* api_key_env` when that
 #                      upstream value isn't already set
+#   sync-extras      extra names forwarded as `--extra <name>` to ai-sync's
+#                      default (no-arg) invocation, via zdot_zstyle_get's
+#                      seed-if-unset. Default: `claude anthropic google` —
+#                      all SDK adapters work out of the box, as the old
+#                      monolithic llmkit implied. Override the whole list
+#                      per machine (e.g. just `claude` when the TOML only
+#                      maps claude); an explicitly empty value disables
+#                      extras. A widget mapped to an SDK adapter without its
+#                      extra fails at call time with "the claude_code adapter
+#                      needs the Claude Agent SDK". Manual
+#                      `ai-sync <uv-args...>` is forwarded verbatim (extras
+#                      never auto-added there); a later plain sync
+#                      re-seeds/re-reads the list, so it persists.
 #
 # Commands:
 #   ai-sync [uv-sync-args...]  (re)sync the plugin's Python venv. _ai_load only
 #                      bootstraps the venv on first run (when .venv is missing);
 #                      this re-syncs an existing one too. With no args it
-#                      forwards the same flags _ai_load uses (--no-dev); the
-#                      SDK backends install by default via llmkit's extra set.
+#                      forwards `--no-dev --extra <name>...` from the
+#                      sync-extras knob (default: claude anthropic google,
+#                      so the SDK adapters work out of the box); with args it
+#                      forwards them verbatim (a later plain sync re-applies
+#                      the list — see the knob above).
 #
 # Plugin knobs this module seeds as backstop defaults:
 #   :zsh-ai:*        endpoint           http://localhost:11434/v1
@@ -156,9 +175,10 @@ _ai_load() {
               || ! -f "$_ai_stamp" \
               || "${_ai_path}/pyproject.toml" -nt "$_ai_stamp" \
               || "${_ai_path}/external/llmkit/pyproject.toml" -nt "$_ai_stamp" ]]; then
-            # ai-sync's defaults are just `uv sync --no-dev`: the SDK
-            # backends (claude_code adapter etc.) install unconditionally
-            # via the llmkit extra set in the plugin's dependencies.
+            # ai-sync's default (no args) is `uv sync --no-dev` plus the
+            # :zdot:ai sync-extras knob — SDK adapter extras (claude etc.)
+            # persist across self-heal syncs that way, since uv's `sync` makes
+            # extras an exact set.
             ai-sync || zdot_warn "ai: the zsh-ai LLM bridge may not work without its venv"
         fi
     fi
@@ -173,11 +193,13 @@ _ai_load() {
 }
 
 # (Re)sync the zsh-ai plugin's Python venv with uv. _ai_load bootstraps the
-# venv only when it's missing; this command re-syncs an existing one too, so you
-# can change what's installed after the fact. Args are forwarded verbatim to
-# `uv sync`; with none it uses the same flags the first-run bootstrap does
-# (--no-dev). There are no project extras to toggle — the SDK backends
-# (claude_code adapter etc.) install by default via llmkit's extra set.
+# venv only when it's missing/stale; this command re-syncs an existing one too,
+# so you can change what's installed after the fact. Args are forwarded
+# verbatim to `uv sync`; with none it applies the default flag set (--no-dev)
+# plus every name from the sync-extras knob (see the comment above the module
+# knob — default claude/anthropic/google, seeded-on-read via zdot_zstyle_get,
+# so SDK adapters work out of the box). (uv's `sync` treats extras as an
+# exact set: a plain sync strips any extra that isn't named, which is why the knob rides on the no-arg path.)
 # VIRTUAL_ENV is unset so uv targets the plugin's own .venv, not an active one
 # (the uv module activates ~/.venv).
 ai-sync() {
@@ -189,7 +211,22 @@ ai-sync() {
         return 1
     fi
     local -a args=("$@")
-    (( $# )) || args=(--no-dev)
+    if (( ! $# )); then
+        # Seed-if-unset + read in one call (zdot_zstyle_get — presence via
+        # zstyle -g, so even an explicit blank value counts as "already set").
+        # Default: every SDK adapter, so a models.toml mapping a widget to
+        # claude_code/anthropic/google works without per-machine wiring. A
+        # machine overrides the whole list (e.g. just `claude`) or sets an
+        # explicit empty value to opt out; either suppresses the default.
+        args=(--no-dev)
+        local -a _ai_extras
+        zdot_zstyle_get -a ':zdot:ai' sync-extras _ai_extras claude anthropic google
+        local _ai_e
+        for _ai_e in "${_ai_extras[@]}"; do
+            # Empty elements (explicit opt-out) collapse to "no extras".
+            [[ -n "$_ai_e" ]] && args+=(--extra "$_ai_e")
+        done
+    fi
     zdot_info "ai: syncing zsh-ai venv (uv sync ${args[*]})…"
     if ( unset VIRTUAL_ENV; builtin cd "$_ai_path" && uv sync "${args[@]}" ); then
         # Stamp the venv so _ai_load's self-heal check knows it's in sync with
