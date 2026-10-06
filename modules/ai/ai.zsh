@@ -68,20 +68,41 @@
 # plugin prompts you to. See the upstream lib/config.zsh for the full namespace
 # map.
 #
+# The zstyle axis stays fully supported — with no TOML models file the widget
+# config resolves entirely from these zstyles. Machines that carry their whole
+# provider config in the plugin's TOML models file (adapter/model/endpoint/key/
+# tuning in [providers.*], widget→provider wiring in [profiles.*]; parsed to a
+# session cache on first use) need only pick a profile section per host — see
+# the example hook below. Per field TOML wins: provider → [defaults] → zstyle.
+#
 # Custom request headers: the `headers` zstyle (array of KEY=VALUE) and/or a
 # TOML provider's `headers` — e.g. the `x-opencode-request` key OpenCode Zen's
 # qwen pool requires (503 failover_exhausted without it). Semantics (HTTP
 # adapters only, value expansion) live upstream: see the plugin's
 # lib/config.zsh and `zsh-ai-llm chat --help`.
 #
-# Example override hook (drop in .zshrc or your own module):
+# Example override hook (drop in .zshrc or your own module) — the profile
+# pattern, all provider config in the plugin's TOML models file:
+#
+#   _my_ai_configure() {
+#       # Pick a [profiles.*] section of ~/.config/zsh-ai/models.toml (the
+#       # widget→provider map; providers themselves live in the TOML too):
+#       zstyle ':zsh-ai:*' profile my-machine
+#       # Display/tuning knobs that aren't provider fields stay zstyle-side:
+#       zstyle ':zsh-ai:scratch' stream_question yes
+#   }
+#   zdot_register_hook _my_ai_configure interactive --group ai-configure
+#
+# Or the pure-zstyle pattern (no models file, single backend):
 #
 #   _my_ai_configure() {
 #       zstyle ':zsh-ai:*'       endpoint    'http://localhost:11435/v1'
 #       zstyle ':zsh-ai:*'       api_key_env 'LLAMA_API_KEY'
 #       zstyle ':zsh-ai:scratch' model       'Qwen3.6-35B-A3B-Q4'
 #       zstyle ':zsh-ai:fim'     model       'Qwen3.6-35B-A3B-Q4'
-#       # Only needed when hitting OpenCode Zen without a TOML provider's headers:
+#       # This pattern has no models.toml, so no TOML provider is present to
+#       # carry headers — this zstyle is then the only mechanism. Only needed
+#       # when hitting OpenCode Zen (its qwen pool 503s without it):
 #       zstyle ':zsh-ai:*'       headers     'x-opencode-request=zsh-ai-${uuid}'
 #   }
 #   zdot_register_hook _my_ai_configure interactive --group ai-configure
