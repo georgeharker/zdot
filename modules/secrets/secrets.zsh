@@ -72,8 +72,13 @@ zdot_module_autoload_funcs
 #       op_secrets_profile_suffix="${_se[suffix]}"
 _op_get_secrets_env() {
     local op_secrets_profile
-    zstyle -s ':zdot:secrets:op' profile op_secrets_profile \
-        || op_secrets_profile=''
+    # A secrets-specific profile wins (explicit — even empty counts as
+    # configured "none"); the generic :zdot:profile name (profiles module)
+    # is the backstop when the secrets-specific one is unset.
+    if ! zstyle -s ':zdot:secrets:op' profile op_secrets_profile; then
+        zdot_profile_get
+        op_secrets_profile="$REPLY"
+    fi
     local op_secrets_profile_suffix=""
     # NOTE: the variable MUST be expanded here — zsh [[ ]] args do not expand,
     # so a bare "[[ -n op_secrets_profile ]]" tests the literal string and is
@@ -198,6 +203,7 @@ _op_init() {
 # interactive prompts only happen in interactive shells due to function guards.
 zdot_register_hook _op_init interactive noninteractive \
     --requires bootstrap-ready \
+    --requires profiles-configured \
     --requires-tool op \
     --requires-group secrets-configure \
     --provides secrets-loaded
