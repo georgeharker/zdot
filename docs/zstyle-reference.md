@@ -318,6 +318,31 @@ zstyle ':zdot:nodejs' lazy-cmd node npm npx corepack
 
 ---
 
+## Module: profiles — `:zdot:profile`
+
+Source: `modules/profiles/profiles.zsh` · Exports `ZDOT_PROFILE` (always set
+after the hook has run; empty = explicitly no profile — distinguish from
+"module absent" via `[[ -n "${ZDOT_PROFILE+x}" ]]`). Resolution is zstyle-only;
+the env var is an output, never read back.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `:zdot:profile` `name` | string | _(empty)_ | Profile name (machine persona). Set from a `profile-configure` group hook. |
+| `:zdot:profile` `allowed-names` | array | _(unset)_ | Optional list of valid names; a configured name outside the list warns. |
+
+**Example:**
+```zsh
+zstyle ':zdot:profile' name work
+zstyle ':zdot:profile' allowed-names work personal
+```
+
+Consumers: `secrets` selects its `<profile>` secrets template set via this
+name when `':zdot:secrets:op' profile` is unset; per-machine env modules map
+the profile to tool backends (e.g. `MINUET_BACKEND` for the editor's AI
+completion). Depend on the `profiles-configured` phase.
+
+---
+
 ## Module: secrets — `:zdot:secrets` / `:zdot:secrets:op`
 
 Source: `modules/secrets/secrets.zsh`
@@ -330,6 +355,7 @@ Source: `modules/secrets/secrets.zsh`
 | `:zdot:secrets:op` `api-vault` | string | _(empty)_ | 1Password vault name for API tokens. |
 | `:zdot:secrets:op` `ssh-vault` | string | _(empty)_ | 1Password vault name for SSH keys. |
 | `:zdot:secrets:op` `service-acct-grants` | array | _(empty)_ | List of grants to configure for the service account. |
+| `:zdot:secrets:op` `profile` | string | _(falls back to `:zdot:profile` `name`)_ | 1Password secrets profile suffix — selects the `secrets-<profile>.zsh` template set. Explicit value (even empty) always wins over the generic profiles-module backstop. |
 
 ---
 

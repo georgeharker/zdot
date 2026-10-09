@@ -134,6 +134,31 @@ enables `share_history`. Optionally enables per-directory history via the
 
 ---
 
+### `profiles`
+
+Declares "which profile variant is this setup" as a generic, consumer-agnostic
+concept and exports it as `ZDOT_PROFILE` (always set once the hook has run;
+empty = explicitly no profile — consumers distinguish this from "module did
+not run" via `[[ -n "${ZDOT_PROFILE+x}" ]]`). Resolution is zstyle-only —
+`ZDOT_PROFILE` is an output, never read back. See
+[modules/profiles](../modules/profiles/README.md).
+
+| | |
+|---|---|
+| **Provides** | `profiles-configured` |
+| **Requires** | group `profile-configure` (configure-group consumers) |
+| **Context** | interactive + noninteractive |
+| **Functions** | `zdot_profile_get` (resolved name in `$REPLY`, empty when none) |
+
+**zstyle options:**
+
+| Key | Description |
+|---|---|
+| `':zdot:profile' name` | Profile name (set from a `profile-configure` group hook; unset = no profile) |
+| `':zdot:profile' allowed-names` | Optional array of valid names; an unknown configured name warns |
+
+---
+
 ### `secrets`
 
 Manages 1Password integration. Loads and caches service account tokens and
@@ -144,13 +169,14 @@ cache.
 | | |
 |---|---|
 | **Provides** | `secrets-loaded` |
-| **Requires** | `bootstrap-ready`, tool `op` |
+| **Requires** | `bootstrap-ready`, `profiles-configured`, tool `op` |
 | **Context** | interactive + noninteractive |
 
 **zstyle options:**
 
 | Key | Description |
 |---|---|
+| `':zdot:secrets:op' profile` | 1Password secrets profile — selects the `secrets-<profile>.zsh` template set. Wins over the generic `:zdot:profile name` backstop (profiles module); explicit (even empty) secrets value always counts as configured. |
 | `':zdot:secrets:op' service-acct-vault` | 1Password vault name for service account credentials |
 | `':zdot:secrets:op' api-vault` | 1Password vault name for API keys |
 | `':zdot:secrets:op' ssh-vault` | 1Password vault name for SSH keys |

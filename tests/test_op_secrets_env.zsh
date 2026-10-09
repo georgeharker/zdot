@@ -15,6 +15,7 @@ ZDOT_ROOT="${${(%):-%x}:a:h:h}"
 
 if [[ "${1:-}" == --case ]]; then
     source "${ZDOT_ROOT}/zdot.zsh" || { print -u2 "FAIL: cannot source zdot.zsh"; exit 2 }
+    source "${ZDOT_ROOT}/modules/profiles/profiles.zsh" || { print -u2 "FAIL: cannot source profiles module"; exit 2 }
     source "${ZDOT_ROOT}/modules/secrets/secrets.zsh" || { print -u2 "FAIL: cannot source secrets module"; exit 2 }
 
     # NOTE: _se must be declared at THIS (case) scope BEFORE assignment —
@@ -60,12 +61,34 @@ if [[ "${1:-}" == --case ]]; then
             [[ -z "$op_secrets_profile_suffix" ]] || { print "RESULT: FAIL (consumer got suffix='$op_secrets_profile_suffix')"; exit 1 }
             print "RESULT: PASS" ;;
 
+        generic-profile-backstop)
+            # ':zdot:secrets:op' profile unset → :zdot:profile name backstop.
+            zstyle ':zdot:profile' name work
+            typeset -A _se
+            _op_get_secrets_env && _se=("${reply[@]}")
+            [[ "${_se[suffix]}" == '-work' ]] || { print "RESULT: FAIL (generic profile backstop ignored, suffix='${_se[suffix]}')"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        secrets-specific-wins)
+            # Explicit secrets zstyle (even a DIFFERENT name) still wins over
+            # the generic backstop; empty counts as configured "none".
+            zstyle ':zdot:profile' name work
+            zstyle ':zdot:secrets:op' profile personal
+            typeset -A _se
+            _op_get_secrets_env && _se=("${reply[@]}")
+            [[ "${_se[suffix]}" == '-personal' ]] || { print "RESULT: FAIL (secrets-specific zstyle did not win, got '${_se[suffix]}')"; exit 1 }
+            zstyle ':zdot:secrets:op' profile ''
+            _se=()
+            _op_get_secrets_env && _se=("${reply[@]}")
+            [[ -z "${_se[suffix]}" ]] || { print "RESULT: FAIL (explicit-empty secrets zstyle should keep suffix empty, got '${_se[suffix]}')"; exit 1 }
+            print "RESULT: PASS" ;;
+
         *) print "RESULT: FAIL (unknown case $2)"; exit 2 ;;
     esac
     exit 0
 fi
 
-typeset -a cases=(no-profile-suffix-empty profile-suffix-dash xdg-overrides consumer-pattern)
+typeset -a cases=(no-profile-suffix-empty profile-suffix-dash xdg-overrides consumer-pattern generic-profile-backstop secrets-specific-wins)
 typeset -i fails=0
 for c in $cases; do
     out="$(zsh -f "${(%):-%x}" --case "$c" 2>&1 | grep '^RESULT:')"
