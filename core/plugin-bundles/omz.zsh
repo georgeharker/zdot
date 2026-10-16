@@ -462,7 +462,7 @@ if [[ "$_zdot_omz_enabled" == yes ]]; then
     _zdot_compdump_bundle_stamp() {
         zdot_plugin_path ohmyzsh/ohmyzsh
         local cache=$REPLY
-        cd "$cache" 2>/dev/null && git rev-parse HEAD 2>/dev/null
+        command git -C "$cache" rev-parse HEAD 2>/dev/null
     }
 
     # ------------------------------------------------------------------

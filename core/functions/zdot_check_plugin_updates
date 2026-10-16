@@ -56,10 +56,10 @@ zdot_check_plugin_updates() {
             continue
         fi
 
-        (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
+        command git -C "$repo_dir" fetch --quiet 2>/dev/null
 
-        local_sha=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
-        upstream_sha=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)
+        local_sha=$(command git -C "$repo_dir" rev-parse --short HEAD 2>/dev/null)
+        upstream_sha=$(command git -C "$repo_dir" rev-parse --short '@{u}' 2>/dev/null)
 
         if [[ -z "$upstream_sha" ]]; then
             zdot_info "  $label: no upstream tracked"
@@ -70,7 +70,7 @@ zdot_check_plugin_updates() {
             continue
         fi
 
-        behind=$(cd "$repo_dir" && command git rev-list --count "HEAD..@{u}" 2>/dev/null)
+        behind=$(command git -C "$repo_dir" rev-list --count "HEAD..@{u}" 2>/dev/null)
         zdot_info "  $label: $behind behind ($local_sha -> $upstream_sha)"
     done
 }

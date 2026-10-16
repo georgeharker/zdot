@@ -57,11 +57,11 @@ _zdot_update_get_parent_root() {
     fi
     local _repo_dir=$1 _root
     reply=()
-    _root=$(git -C "$_repo_dir" rev-parse --show-superproject-working-tree 2>/dev/null)
+    _root=$(command git -C "$_repo_dir" rev-parse --show-superproject-working-tree 2>/dev/null)
     if [[ -n "$_root" ]]; then
         reply=( ${_root:A} superproject ); return 0
     fi
-    _root=$(git -C "$_repo_dir" rev-parse --show-toplevel 2>/dev/null) || {
+    _root=$(command git -C "$_repo_dir" rev-parse --show-toplevel 2>/dev/null) || {
         reply=( "" none ); return 0
     }
     reply=( ${_root:A} toplevel ); return 0
@@ -227,7 +227,7 @@ _zdot_update_hook_plan() {
     # (set when update.zsh is run with --range or --commit-hash and was able
     # to resolve the zdot component range from the dotfiles range via markers).
     local _old _new _remote _branch
-    _old=$(git -C "$ZDOT_REPO" rev-parse HEAD 2>/dev/null) || return 0
+    _old=$(command git -C "$ZDOT_REPO" rev-parse HEAD 2>/dev/null) || return 0
 
     if [[ -n "${_dotfiler_hint_range_zdot:-}" ]]; then
         # Phase dotfiles: hint range set by dotfiler from dotfiles refs.
@@ -241,7 +241,7 @@ _zdot_update_hook_plan() {
         _branch=$(_update_core_get_default_branch "$ZDOT_REPO" "$_remote" ':zdot:update')
         # Fetch to materialise _new objects locally for build_file_lists.
         local _fetch_err
-        _fetch_err=$(git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>&1 >/dev/null) || \
+        _fetch_err=$(command git -C "$ZDOT_REPO" fetch -q "$_remote" "$_branch" 2>&1 >/dev/null) || \
             log_debug "zdot: plan: fetch ${_remote}/${_branch} failed: ${_fetch_err}"
     elif [[ "$_phase" == components ]]; then
         # Phase components: self-directed. No hint; fetch own remote, advance to tip.
@@ -637,7 +637,7 @@ _zdot_update_handle_update() {
     # 2. Early-exit guards
     [[ -n "$ZDOT_REPO" && -d "$ZDOT_REPO" ]] || return 0
     command -v git &>/dev/null || return 0
-    git -C "$ZDOT_REPO" rev-parse --is-inside-work-tree &>/dev/null || return 0
+    command git -C "$ZDOT_REPO" rev-parse --is-inside-work-tree &>/dev/null || return 0
 
     # 3. Acquire lock (prevents concurrent shells racing)
     local _lock_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdot/update.lock"

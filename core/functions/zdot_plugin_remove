@@ -37,7 +37,7 @@ zdot_plugin_remove() {
 
     # Pending-changes guard: abort if the repo has uncommitted work
     local _git_status
-    _git_status=$(git -C "$dest" status --porcelain 2>/dev/null)
+    _git_status=$(command git -C "$dest" status --porcelain 2>/dev/null)
     if [[ -n "$_git_status" ]]; then
         zdot_warn "zdot_plugin_remove: $spec has uncommitted changes, skipping removal"
         zdot_warn "  Commit or stash changes in $dest before running zdot_clean_plugins."
