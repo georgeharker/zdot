@@ -604,6 +604,24 @@ if [[ "${1:-}" == --case ]]; then
                 || { print -r -- "RESULT: FAIL (no_op must stay quiet: $(tr '\n' '|' < "$errq"))"; exit 1 }
             print "RESULT: PASS" ;;
 
+        inject-template-untagged-uses-default-account)
+            # Untagged template + default-account configured: the inject must
+            # name that account (regression: it ran a bare `op inject`, which
+            # op rejects once two accounts are signed in). Same router the
+            # mcp refresher uses.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' default-account personal
+            zstyle ':zdot:secrets:op:personal' account-url my.1password.com
+            local tpl5="$XDG_CONFIG_HOME/mcp.json" out5="$XDG_CACHE_HOME/mcp.json"
+            print '{"key": "op://API/Item/credential"}' > "$tpl5"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            op_inject_template "$tpl5" "$out5" \
+                || { print "RESULT: FAIL (rc=$?; log: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            grep -q 'inject .*--account my.1password.com' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (inject did not name the account; log: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            [[ -s "$out5" ]] || { print "RESULT: FAIL (no output written)"; exit 1 }
+            print "RESULT: PASS" ;;
+
         *) print "RESULT: FAIL (unknown case $2)"; exit 2 ;;
     esac
     exit 0
@@ -619,7 +637,8 @@ typeset -a cases=(default-mode login-mode unknown-mode-falls-back empty-mode-fal
     op-multi-pipe-mode op-multi-explicit-order op-multi-fallback-names-account \
     account-url-map op-multi-signedout-error op-multi-rawref-no-default op-auth-reset \
     op-calls-carry-sudo-config headless-signin-evals-session \
-    init-inactive-sources-stale-cache init-no-op-quiet-but-sources)
+    init-inactive-sources-stale-cache init-no-op-quiet-but-sources \
+    inject-template-untagged-uses-default-account)
 typeset -i fails=0
 for c in $cases; do
     out="$(zsh -f "${(%):-%x}" --case "$c" 2>&1 | grep '^RESULT:')"
