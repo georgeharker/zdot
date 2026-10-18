@@ -32,7 +32,9 @@
 #   2. _zdot_plugin_update_precmd fires before each prompt. While the scan
 #      is in flight it prints a one-shot faded "checking…" notice; once the
 #      pending file lands it consumes it and either prints a faded
-#      "no plugin updates" line, logs an error, or pops the y/n prompt.
+#      "no plugin updates" line, logs an error, or presents the results:
+#      the y/n prompt only if they were waiting before the user ran any
+#      command, otherwise a non-blocking notice (stdin untouched).
 #   3. _zdot_plugin_update_prompt_and_upgrade renders the summary, gates on
 #      _zdot_plugin_update_has_typed_input (auto-skips as 'n' if the user
 #      is mid-typing), and on Y runs git pull --ff-only per plugin.
@@ -47,31 +49,59 @@ _zdot_plugin_update_state_dir() {
 # _zdot_plugin_update_pending_path — per-shell pending file, keyed by PID.
 # Scan results belong to the shell that spawned them, so another window's
 # precmd can no longer consume them and pop a presentation (with its blocking
-# [Y/n] read) there. Memoized into a global so the parent, the deferred scan
-# subshell, and the precmd hook all agree on the name. (Legacy shared name
-# was "pending"; a stale legacy file is harmless — never consumed, and the
-# rate limit gates the next real scan.)
+# [Y/n] read) there. zsh keeps $$ as the parent shell's PID inside
+# subshells, so the parent, the deferred scan subshell, and the precmd hook
+# all agree on the name. (Legacy shared name was "pending"; a stale legacy
+# file is harmless — never consumed, and the rate limit gates the next real
+# scan.)
 _zdot_plugin_update_pending_path() {
-    if [[ -z ${_ZDOT_PLUGIN_UPDATE_PENDING_PATH:-} ]]; then
-        typeset -g _ZDOT_PLUGIN_UPDATE_PENDING_PATH="$(_zdot_plugin_update_state_dir)/pending.$$"
-    fi
-    print -r -- "$_ZDOT_PLUGIN_UPDATE_PENDING_PATH"
+    print -r -- "$(_zdot_plugin_update_state_dir)/pending.$$"
 }
 
-# _zdot_plugin_update_pending_gc — drop pending files belonging to shells
-# that died more than an hour ago. Fresher leftovers are adopted as
-# non-blocking notices by _zdot_plugin_update_main (the
-# _ZDOT_PLUGIN_UPDATE_LEFTOVERS → precmd path); older results are stale
-# enough to let the rate limit govern the next real scan.
-_zdot_plugin_update_pending_gc() {
+# _zdot_plugin_update_pending_owner_alive <pending-file> — 0 when the shell
+# that owns the file (PID suffix) is still running. Such a file is NOT a
+# leftover: its owner is merely busy in a foreground command and will
+# consume it at its next prompt. `kill -0` is a builtin, so this costs no
+# fork. A PID reused by an unrelated process reads as alive, which errs on
+# the side of leaving the file alone.
+_zdot_plugin_update_pending_owner_alive() {
     emulate -L zsh
     setopt local_options
-    local f mtime now
-    now=$(date +%s)
-    for f in "$(_zdot_plugin_update_state_dir)"/pending.*(N); do
-        [[ $f == *.tmp ]] && continue
-        mtime=$(_zdot_plugin_update_mtime "$f")
-        (( now - mtime > 3600 )) && rm -f "$f" 2>/dev/null
+    local pid=${1##*/pending.}
+    [[ $pid == <-> ]] || return 1
+    kill -0 $pid 2>/dev/null
+}
+
+# _zdot_plugin_update_pending_leftovers <own-pending> — set reply to the
+# pending files in <own-pending>'s directory left by shells that have died,
+# excluding <own-pending> itself and in-progress `.tmp` writes. Files of
+# shells that died over an hour ago are deleted instead of returned: stale
+# enough to let the rate limit govern the next real scan. Runs on the
+# startup path, so it is fork-free: the directory comes from the argument,
+# and the glob qualifier `mh+1` does the age test without `date`/`stat`.
+_zdot_plugin_update_pending_leftovers() {
+    emulate -L zsh
+    setopt local_options extended_glob
+    # Used via ${(b)exclude} below, which the linter does not see.
+    # shuck: disable=C001
+    local exclude=$1
+    local dir=${exclude:h}
+    local -a candidates stale
+    candidates=( $dir/pending.<->(N) )
+    stale=( $dir/pending.<->(Nmh+1) )
+    candidates=( ${candidates:#${(b)exclude}} )
+    stale=( ${stale:#${(b)exclude}} )
+    local f
+    reply=()
+    for f in "${candidates[@]}"; do
+        if ! _zdot_plugin_update_pending_owner_alive "$f"; then
+            reply+=( "$f" )
+        fi
+    done
+    for f in "${stale[@]}"; do
+        (( ${reply[(Ie)$f]} )) || continue
+        rm -f "$f" 2>/dev/null
+        reply=( ${reply:#${(b)f}} )
     done
     return 0
 }
@@ -297,15 +327,84 @@ _zdot_plugin_update_has_typed_input() {
     setopt local_options
     [[ -t 0 ]] || return 1
     zmodload zsh/zselect 2>/dev/null || return 1
-    local saved
-    saved=$(stty -g 2>/dev/null) || return 1
+    local REPLY token
+    _zdot_plugin_update_tty_apply -icanon || return 1
+    token=$REPLY
     {
-        stty -icanon
         zselect -t 0 -r 0
         return $?
     } always {
-        stty "$saved"
+        _zdot_plugin_update_tty_undo "$token"
     }
+}
+
+# ============================================================================
+# tty mode changes: compare-then-restore
+# ============================================================================
+#
+# Every tty change here is made and undone synchronously at a prompt (the
+# typed-input peek, the [Y/n] key read), so the shell is in the foreground.
+# Still, the undo never blindly replays a `stty -g` snapshot. If the tty no
+# longer matches the state we left it in, something else changed it while we
+# held it, and replaying the snapshot would silently revert that change. In
+# that case only the flags we changed are flipped back.
+
+# _zdot_plugin_update_tty_apply <mode…> — switch the tty flags named by
+# <mode…> (each `echo`/`-echo`/`icanon`/`-icanon`; `-icanon` also forces
+# `min 1 time 0` so a blocking `read -k` returns on the first byte) and set
+# REPLY to an opaque token for _zdot_plugin_update_tty_undo: the tty before,
+# the tty as we left it, and the minimal flag list reversing only what we
+# changed. Returns 1 with the tty untouched when stdin isn't a TTY or its
+# modes can't be read.
+_zdot_plugin_update_tty_apply() {
+    emulate -L zsh
+    setopt local_options
+    REPLY=
+    [[ -t 0 ]] || return 1
+    local raw
+    raw=$(stty -a 2>/dev/null) || return 1
+    # Normalise both BSD ("lflags: icanon … echo …") and GNU ("… icanon …;")
+    # layouts into space-delimited tokens so " echo " can't match "echoe".
+    local cur=" ${raw//[;$'\n'$'\t']/ } "
+    local m flag cbreak=0
+    local -a apply undo
+    for m in "$@"; do
+        flag=${m#-}
+        [[ $m == -icanon ]] && cbreak=1
+        if [[ $m == -* ]]; then
+            [[ $cur == *" $flag "* ]] || continue
+            apply+=( -$flag ); undo+=( $flag )
+        else
+            [[ $cur == *" -$flag "* ]] || continue
+            apply+=( $flag ); undo+=( -$flag )
+        fi
+    done
+    (( cbreak )) && apply+=( min 1 time 0 )
+    local before after
+    before=$(stty -g 2>/dev/null) || return 1
+    stty "${apply[@]}" 2>/dev/null
+    after=$(stty -g 2>/dev/null)
+    REPLY="${before}"$'\t'"${after}"$'\t'"${undo[*]}"
+    return 0
+}
+
+# _zdot_plugin_update_tty_undo <token> — reverse a tty_apply: the saved
+# snapshot verbatim if the tty is exactly as we left it, otherwise only the
+# flags we changed.
+_zdot_plugin_update_tty_undo() {
+    emulate -L zsh
+    setopt local_options
+    [[ -n $1 && -t 0 ]] || return 0
+    local -a parts
+    parts=( "${(@ps:\t:)1}" )
+    local before=$parts[1] after=$parts[2] undo=$parts[3] now
+    now=$(stty -g 2>/dev/null) || return 0
+    if [[ -n $before && $now == "$after" ]]; then
+        stty "$before" 2>/dev/null
+    elif [[ -n $undo ]]; then
+        stty ${=undo} 2>/dev/null
+    fi
+    return 0
 }
 
 # ============================================================================
@@ -379,18 +478,22 @@ _zdot_plugin_update_read_key() {
     emulate -L zsh
     setopt local_options
     local valid=$1 default=$2 key
-    local saved_tty
-    if [[ -t 0 ]]; then
-        saved_tty=$(stty -g 2>/dev/null)
-        [[ -n $saved_tty ]] && stty -icanon echo min 1 time 0 2>/dev/null
+    local REPLY
+    if _zdot_plugin_update_tty_apply -icanon echo; then
+        # The token is `stty -g` strings, flags, and tabs — never a single
+        # quote — so it is safe to embed (expanding it now is the point).
         # shuck: disable=C008
-        trap "[[ -n '$saved_tty' ]] && stty '$saved_tty' 2>/dev/null" EXIT
+        trap "_zdot_plugin_update_tty_undo '$REPLY'" EXIT
     fi
     if ! read -k 1 -u 0 key; then
         # EOF (Ctrl-D, closed stdin) must DECLINE, not accept: only an
         # explicit valid key — or the [Y/n] Enter default — accepts. Mirrors
         # update-impl's `read ... || _ans=n`.
-        [[ $valid == *n* ]] && print -r -- n || print -r -- "$default"
+        if [[ $valid == *n* ]]; then
+            print -r -- n
+        else
+            print -r -- "$default"
+        fi
         return
     fi
     print >&2
@@ -490,30 +593,45 @@ _zdot_plugin_update_run_all() {
 # _zdot_plugin_update_precmd — fires before each prompt. While the scan is
 # in flight it prints a one-shot faded "checking…" notice; once the pending
 # file lands it consumes it, deregisters itself, and dispatches.
+#
+# first_call (from the _ANNOUNCED sentinel) gates the checking notice and
+# leftover delivery. session_start is narrower: "the user has not run a
+# command yet", the one moment a blocking [Y/n] is acceptable. Any later
+# arrival may come the instant the user returns from a foreground app, when
+# a single-key read would steal the leading ESC byte of their key sequences,
+# so it gets a non-blocking notice instead.
 _zdot_plugin_update_precmd() {
     emulate -L zsh
     setopt local_options
 
     local pending=$(_zdot_plugin_update_pending_path)
 
-    local first_call=0
-    if (( ${+_ZDOT_PLUGIN_UPDATE_ANNOUNCED} )); then
-        first_call=1
-        unset _ZDOT_PLUGIN_UPDATE_ANNOUNCED
+    # Defer one precmd under p10k instant-prompt so output doesn't corrupt
+    # p10k's pre-prompt buffer. The first-call sentinel survives the deferral
+    # so leftovers and our own results are still delivered on the next call.
+    # That call follows the user's first command line, though, so it only
+    # counts as session start if that line added no history event (a bare
+    # Enter); _DEFERRED records $HISTCMD to tell.
+    if (( ${+_ZDOT_PLUGIN_UPDATE_ANNOUNCED} && ! ${+_ZDOT_PLUGIN_UPDATE_P10K_DEFERRED} )) \
+        && _zdot_plugin_update_p10k_active; then
+        typeset -g _ZDOT_PLUGIN_UPDATE_P10K_DEFERRED=$HISTCMD
+        return 0
     fi
 
-    # Defer one precmd under p10k instant-prompt so output doesn't corrupt
-    # p10k's pre-prompt buffer. We stay registered; the next precmd lands
-    # after the real prompt is drawn and proceeds to consume. Applies to any
-    # first-call output, whether our own scan results or adopted leftovers.
-    if (( first_call )) && _zdot_plugin_update_p10k_active; then
-        return 0
+    local first_call=0 session_start=0
+    if (( ${+_ZDOT_PLUGIN_UPDATE_ANNOUNCED} )); then
+        first_call=1
+        if (( ! ${+_ZDOT_PLUGIN_UPDATE_P10K_DEFERRED} )) \
+            || [[ $_ZDOT_PLUGIN_UPDATE_P10K_DEFERRED == "$HISTCMD" ]]; then
+            session_start=1
+        fi
+        unset _ZDOT_PLUGIN_UPDATE_ANNOUNCED _ZDOT_PLUGIN_UPDATE_P10K_DEFERRED
     fi
 
     # Leftover pending files from shells that died before consuming their
     # scan: deliver as a non-blocking notice on the first call. Superseded
     # (dropped quietly) when this shell's own results already landed before
-    # the prompt; stale leftovers were gc'd at spawn time.
+    # the prompt; hour-old leftovers were already deleted at spawn time.
     if (( first_call )) && (( ${+_ZDOT_PLUGIN_UPDATE_LEFTOVERS} )); then
         local leftover lcontent lfirst
         local -a lrows
@@ -537,11 +655,15 @@ _zdot_plugin_update_precmd() {
     unset _ZDOT_PLUGIN_UPDATE_LEFTOVERS
 
     if [[ ! -e $pending ]]; then
-        # Scan still running — or no scan and we're only here to deliver a
-        # leftover notice. One-shot faded "checking…" notice on the first
-        # prompt while our own scan is in flight (_SCAN_SPAWNED is
-        # spawn-only), then wait silently.
-        if (( first_call )) && (( ${+_ZDOT_PLUGIN_UPDATE_SCAN_SPAWNED} )); then
+        if (( ! ${+_ZDOT_PLUGIN_UPDATE_SCAN_SPAWNED} )); then
+            # Registered only to deliver leftovers; nothing more will
+            # arrive, so stop paying for this hook on every prompt.
+            precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} )
+            return 0
+        fi
+        # Scan still running. One-shot faded "checking…" notice on the
+        # first prompt, then wait silently.
+        if (( first_call )); then
             zdot_info "%F{244}(checking for zdot plugin updates in the background…)%f"
         fi
         return 0
@@ -549,6 +671,7 @@ _zdot_plugin_update_precmd() {
 
     # Pending result has landed — deregister so this hook stops firing.
     precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} )
+    unset _ZDOT_PLUGIN_UPDATE_SCAN_SPAWNED
 
     local content
     content=$(<"$pending")
@@ -566,18 +689,12 @@ _zdot_plugin_update_precmd() {
             outdated=( ${(f)content} )
             outdated=( ${outdated:#} )
             (( ${#outdated} )) || return 0
-            if (( first_call )); then
-                # Session-start nag: pending was already waiting at the first
-                # prompt (leftover already shown above, or a scan that
-                # finished before it). The one moment a blocking [Y/n] is by
-                # design — the user has simply started a shell, not just
-                # returned from a fg app.
+            if (( session_start )); then
+                # Results were waiting before the user ran anything: the
+                # one moment a blocking [Y/n] is by design.
                 _zdot_plugin_update_prompt_and_upgrade "${outdated[@]}"
             else
-                # Mid-session arrival — possibly the instant the user
-                # returned from a fg app, exactly when a blocked single-key
-                # read steals the leading ESC byte of their key sequences and
-                # mangles their typing. Never block; stdin untouched.
+                # Mid-session arrival: never block; stdin untouched.
                 _zdot_plugin_update_notice "${outdated[@]}"
             fi
             ;;
@@ -600,34 +717,29 @@ _zdot_plugin_update_main() {
 
     # Pending is per-shell (pending.$$): scan results belong to the shell
     # that spawned them, so no other window's precmd can consume them there.
-    # Anything else in the state dir is a dead shell's leftovers: gc
-    # hour-old files, adopt fresher ones for a non-blocking first-prompt
-    # notice. Registration is deduped (filter + append) since the hook can
-    # now be registered on this path even when a scan also spawns.
+    # Files of other LIVE shells are theirs to consume; files of dead shells
+    # are leftovers, adopted for a non-blocking first-prompt notice (or
+    # deleted if hour-old). Registration is deduped (filter + append) since
+    # the hook can be registered on this path even when a scan also spawns.
+    #
+    # This shell has only just started, so a pending.$$ already on disk was
+    # written by a dead shell whose PID we reused (or by the shell this one
+    # `exec`ed over). Left alone, the first precmd would present it as our
+    # own fresh scan, and our real result would never be consumed.
     local pending=$(_zdot_plugin_update_pending_path)
-    _zdot_plugin_update_pending_gc
+    [[ -e $pending ]] && rm -f "$pending" 2>/dev/null
+    local -a reply
+    _zdot_plugin_update_pending_leftovers "$pending"
     typeset -ga _ZDOT_PLUGIN_UPDATE_LEFTOVERS
-    _ZDOT_PLUGIN_UPDATE_LEFTOVERS=( "$(_zdot_plugin_update_state_dir)"/pending.*(N) )
-    _ZDOT_PLUGIN_UPDATE_LEFTOVERS=( ${_ZDOT_PLUGIN_UPDATE_LEFTOVERS:#*.tmp} )
-    _ZDOT_PLUGIN_UPDATE_LEFTOVERS=( ${_ZDOT_PLUGIN_UPDATE_LEFTOVERS:#$pending} )
+    _ZDOT_PLUGIN_UPDATE_LEFTOVERS=( "${reply[@]}" )
 
-    local register_hook=0
-    (( ${#_ZDOT_PLUGIN_UPDATE_LEFTOVERS} )) && register_hook=1
-
-    _zdot_plugin_update_is_due || {
-        (( register_hook )) && {
+    if ! _zdot_plugin_update_is_due || ! _zdot_plugin_update_acquire_lock; then
+        if (( ${#_ZDOT_PLUGIN_UPDATE_LEFTOVERS} )); then
             typeset -g _ZDOT_PLUGIN_UPDATE_ANNOUNCED=1
             precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} _zdot_plugin_update_precmd )
-        }
+        fi
         return 0
-    }
-    _zdot_plugin_update_acquire_lock || {
-        (( register_hook )) && {
-            typeset -g _ZDOT_PLUGIN_UPDATE_ANNOUNCED=1
-            precmd_functions=( ${precmd_functions:#_zdot_plugin_update_precmd} _zdot_plugin_update_precmd )
-        }
-        return 0
-    }
+    fi
 
     (
         local _pending=$(_zdot_plugin_update_pending_path)
@@ -639,7 +751,14 @@ _zdot_plugin_update_main() {
         # interrupts and writes status=1 so the rate limit still applies
         # — we don't pound the network on every prompt while the user
         # repeatedly Ctrl-Cs the bg scan.
-        trap '_zdot_plugin_update_release_lock; [[ -e "$_pending" ]] || { print -r -- "err" > "$_pending"; _zdot_plugin_update_write_timestamp 1 "scan interrupted"; }; rm -f "$_tmp"' INT TERM HUP EXIT
+        #
+        # zsh signal traps resume execution after they run, so INT/TERM
+        # must `exit` explicitly; that in turn fires the EXIT trap. HUP is
+        # ignored: if the terminal closes mid-scan, the scan finishes, and
+        # its result becomes a leftover the next shell adopts.
+        trap '_zdot_plugin_update_release_lock; [[ -e "$_pending" ]] || { print -r -- "err" > "$_pending"; _zdot_plugin_update_write_timestamp 1 "scan interrupted"; }; rm -f "$_tmp"' EXIT
+        trap 'exit 1' INT TERM
+        trap '' HUP
 
         local results
         results=$(_zdot_plugin_update_collect)
