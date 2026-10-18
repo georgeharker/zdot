@@ -49,8 +49,8 @@ zdot_list_plugins() {
                     for subdir in "$dir"/*; do
                         [[ -d "$subdir/.git" ]] || continue
                         local name=${dir:t}/${subdir:t}
-                        local branch=$(cd "$subdir" 2>/dev/null && git branch --show-current 2>/dev/null)
-                        local ref=$(cd "$subdir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
+                        local branch=$(command git -C "$subdir" branch --show-current 2>/dev/null)
+                        local ref=$(command git -C "$subdir" rev-parse --short HEAD 2>/dev/null)
                         zdot_info "  $name ($branch $ref)"
                     done
                     continue
@@ -58,8 +58,8 @@ zdot_list_plugins() {
 
                 # Direct git repo
                 local name=${dir:t}
-                local branch=$(cd "$dir" 2>/dev/null && git branch --show-current 2>/dev/null)
-                local ref=$(cd "$dir" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null)
+                local branch=$(command git -C "$dir" branch --show-current 2>/dev/null)
+                local ref=$(command git -C "$dir" rev-parse --short HEAD 2>/dev/null)
                 zdot_info "  $name ($branch $ref)"
             done
             ;;

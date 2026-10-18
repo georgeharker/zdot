@@ -47,13 +47,13 @@ zdot_update_plugin() {
             continue
         fi
 
-        before=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+        before=$(command git -C "$repo_dir" rev-parse HEAD 2>/dev/null)
 
         if [[ -n "$version" ]]; then
             zdot_action "  Checking out $version for $label..."
-            if (cd "$repo_dir" && command git fetch --quiet && command git checkout --quiet "$version") 2>/dev/null; then
+            if { command git -C "$repo_dir" fetch --quiet && command git -C "$repo_dir" checkout --quiet "$version" } 2>/dev/null; then
                 _zdot_plugin_sync_submodules "$label" "$repo_dir"
-                after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+                after=$(command git -C "$repo_dir" rev-parse HEAD 2>/dev/null)
                 if [[ "$before" == "$after" ]]; then
                     zdot_info "    %F{244}already at $version%f"
                     (( unchanged++ ))
@@ -78,26 +78,26 @@ zdot_update_plugin() {
         # right place to catch it without taxing every shell startup.
         if _zdot_plugin_default_ref "$repo_dir"; then
             default_ref=$REPLY
-            cur_branch=$(cd "$repo_dir" && command git symbolic-ref --quiet --short HEAD 2>/dev/null)
+            cur_branch=$(command git -C "$repo_dir" symbolic-ref --quiet --short HEAD 2>/dev/null)
             # Mismatch covers both "on the wrong branch" and "detached HEAD".
             if [[ "$cur_branch" != "$default_ref" ]]; then
                 if _zdot_plugin_restore_default_branch "$label" "$repo_dir"; then
-                    before=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+                    before=$(command git -C "$repo_dir" rev-parse HEAD 2>/dev/null)
                 fi
             fi
         fi
 
         zdot_action "  Updating $label..."
-        if (cd "$repo_dir" && command git pull --quiet) 2>/dev/null; then
+        if command git -C "$repo_dir" pull --quiet 2>/dev/null; then
             _zdot_plugin_sync_submodules "$label" "$repo_dir"
-            after=$(cd "$repo_dir" && command git rev-parse HEAD 2>/dev/null)
+            after=$(command git -C "$repo_dir" rev-parse HEAD 2>/dev/null)
             if [[ "$before" == "$after" ]]; then
                 zdot_info "    %F{244}already up to date%f"
                 (( unchanged++ ))
             else
                 short_before=${before[1,7]}
                 short_after=${after[1,7]}
-                commit_count=$(cd "$repo_dir" && command git rev-list --count "$before..$after" 2>/dev/null)
+                commit_count=$(command git -C "$repo_dir" rev-list --count "$before..$after" 2>/dev/null)
                 zdot_success "    updated ($short_before → $short_after, ${commit_count:-?} commit$( (( commit_count == 1 )) || print s ))"
                 _zdot_update_plugin_show_changelog "$repo_dir" "$before" "$after"
                 (( updated++ ))
@@ -120,7 +120,7 @@ zdot_update_plugin() {
 _zdot_update_plugin_show_changelog() {
     local repo=$1 from=$2 to=$3
     local -a subjects
-    subjects=( "${(@f)$(cd "$repo" && command git log --no-merges --pretty=format:'%s' "$from..$to" 2>/dev/null)}" )
+    subjects=( "${(@f)$(command git -C "$repo" log --no-merges --pretty=format:'%s' "$from..$to" 2>/dev/null)}" )
     subjects=( ${subjects:#} )
     (( ${#subjects} )) || return 0
     local subj

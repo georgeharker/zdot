@@ -244,15 +244,15 @@ _zdot_plugin_update_collect() {
         # reconcile itself happens in zdot_update_plugin (the apply step); here
         # we only surface drift so the nag fires. Local-only (branch name for
         # unpinned, resolved commit for pinned) — frozen pins never fetch.
-        cur_branch=$(cd "$repo_dir" && command git symbolic-ref --quiet --short HEAD 2>/dev/null)
+        cur_branch=$(command git -C "$repo_dir" symbolic-ref --quiet --short HEAD 2>/dev/null)
         want=""; reconciled=0
         if [[ -n "$version" ]]; then
             # Pinned: reconciled iff HEAD is at the commit the pin resolves to
             # (covers branch, tag, and sha pins, detached or not).
             want=$version
-            want_commit=$(cd "$repo_dir" && command git rev-parse --verify -q "${version}^{commit}" 2>/dev/null) \
-                || want_commit=$(cd "$repo_dir" && command git rev-parse --verify -q "origin/${version}^{commit}" 2>/dev/null)
-            head_commit=$(cd "$repo_dir" && command git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)
+            want_commit=$(command git -C "$repo_dir" rev-parse --verify -q "${version}^{commit}" 2>/dev/null) \
+                || want_commit=$(command git -C "$repo_dir" rev-parse --verify -q "origin/${version}^{commit}" 2>/dev/null)
+            head_commit=$(command git -C "$repo_dir" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)
             [[ -n "$want_commit" && "$want_commit" == "$head_commit" ]] && reconciled=1
         elif _zdot_plugin_default_ref "$repo_dir"; then
             # Unpinned: must be ON the default branch so pulls track it.
@@ -265,7 +265,7 @@ _zdot_plugin_update_collect() {
         fi
 
         if (( ! reconciled )); then
-            current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
+            current=$(command git -C "$repo_dir" rev-parse --short HEAD 2>/dev/null)
             print -r -- "${bare}"$'\t'"${label}"$'\t'"${cur_branch:-${current:-detached}}"$'\t'"${want}"
             continue
         fi
@@ -276,9 +276,9 @@ _zdot_plugin_update_collect() {
 
         # ── Behind-upstream check (unpinned, on default branch) ─────────────
         # git fetch primes the eventual pull (via zdot_update_plugin).
-        (cd "$repo_dir" && command git fetch --quiet) 2>/dev/null
-        current=$(cd "$repo_dir" && command git rev-parse --short HEAD 2>/dev/null)
-        upstream=$(cd "$repo_dir" && command git rev-parse --short '@{u}' 2>/dev/null)
+        command git -C "$repo_dir" fetch --quiet 2>/dev/null
+        current=$(command git -C "$repo_dir" rev-parse --short HEAD 2>/dev/null)
+        upstream=$(command git -C "$repo_dir" rev-parse --short '@{u}' 2>/dev/null)
         [[ -n "$current" && -n "$upstream" ]] || continue
         [[ "$current" != "$upstream" ]] || continue
 
