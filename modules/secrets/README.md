@@ -32,18 +32,32 @@ results to the cache directory, which should not be committed.
 
 ### Startup sequence
 
-On every shell start `_op_init` does the following in order:
+Auth mode is resolved from `zstyle ':zdot:secrets:op' mode` (default
+`service-account`).
+
+**Service-account mode** — `_op_init` does the following in order:
 
 1. Runs the `secrets-configure` group (user configuration hooks — see below)
 2. If the cached `$USER.op-secrets.zsh` is missing or older than the template,
    calls `op_refresh` to rebuild it
 3. Sources `$USER.op-secrets.zsh` to load `OP_SERVICE_ACCOUNT_TOKEN`; sets
-   `_ZDOT_OP_ACTIVE=1` if the token is present
-4. If active and the cached `$USER.secrets.zsh` is stale, calls
-   `refresh_shell_secrets` to re-inject
-5. Sources `$USER.secrets.zsh` to export secrets into the environment
-6. Sets up `SSH_AUTH_SOCK` to point at the 1Password SSH agent (macOS only,
+   `_ZDOT_OP_ACTIVE=1` if the token is present (or `op whoami` works)
+4. If active and the cached `$USER.secrets.zsh` is older than its template,
+   calls `refresh_shell_secrets` to re-inject
+5. Sources `$USER.secrets.zsh` whenever it exists — including when 1Password
+   is *not* active, so a signed-out shell still gets the last good secrets
+6. If 1Password is not active, prints one warning naming the cause and what
+   was loaded instead, e.g. `not signed in to 1Password: personal — using
+   cached secrets (older than the template); run op_refresh, then
+   refresh_shell_secrets`. Machines with the `no_op` sentinel stay quiet.
+7. Sets up `SSH_AUTH_SOCK` to point at the 1Password SSH agent (macOS only,
    skipped when in an SSH connection)
+
+**Login mode** — same order, but steps 2–3 become a per-account check:
+`op whoami` for each `login-accounts` entry, with one silent `op signin`
+attempt for any that are signed out. It never prompts at startup; when you
+run `op_refresh` yourself, it signs in whatever is still signed out (via
+`op_auth`). `_ZDOT_OP_ACTIVE=1` only when every account is signed in.
 
 Interactive prompts (first-time setup, service account creation) only fire in
 interactive shells. Noninteractive shells silently skip setup if no cache exists.
@@ -58,13 +72,16 @@ hook (see below). The following zstyles are read by `op_get_vault_config` inside
 
 | zstyle key | Default | Purpose |
 |---|---|---|
-| `':zdot:secrets:op' service-acct-vault` | `ServiceAcct` | Vault where per-host service account credentials are stored |
+| `':zdot:secrets:op' mode` | `service-account` | Auth mode. `service-account` (default): token flows via the cached `$USER.op-secrets.zsh` — see *First-time interactive setup*. `login`: viability is a signed-in session (`op whoami`); the service-account machinery (op-secrets template, token cache, `OP_SERVICE_ACCOUNT_TOKEN`) is ignored entirely. For machines without service accounts (e.g. work) |
+| `':zdot:secrets:op' login-accounts` | *(unset)* | Login-mode multi-account **viability authority**: shorthands from `op account list` (e.g. `personal allenai`). Each is checked individually (`op whoami --account <a>`); usable when at least one is signed in, and `op_refresh` recovery targets signed-out ones. Does NOT configure injection — that comes from the account-*tagged* refs in the template (see `op_multi_inject`) |
+| `':zdot:secrets:op' service-acct-vault` | `ServiceAcct` | Vault where per-host service account credentials are stored (service-account mode only) |
 | `':zdot:secrets:op' api-vault` | `API` | Vault containing API keys / tokens |
 | `':zdot:secrets:op' ssh-vault` | `SSHKeys` | Vault containing SSH keys |
 | `':zdot:secrets:op' service-acct-grants` | `(API:read_items,write_items SSHKeys:read_items,write_items)` | Array of `vault:permissions` strings granted to newly created service accounts |
 | `':zdot:secrets' ssh-platforms` | `(mac)` | Platform names or `$OSTYPE` globs; SSH agent setup only runs when at least one matches. Accepts `mac`, `linux`, `debian`, or raw globs like `darwin*` |
 | `':zdot:secrets' ssh-func` | *(unset)* | Name of a function to call as an additional gate; setup only proceeds if it returns 0 |
 | `':zdot:secrets' profile` | *(unset)* | Profile used to derive a suffix eg secrets-${PROFILE}.zsh for sourcing secrets from |
+| `':zdot:secrets:op' default-account` | *(unset)* | Account shorthand that RAW `op://` refs in a tagged template resolve against (the default inject pass runs first). Unset and raw refs present → `op_multi_inject` rejects the template |
 
 The `service-acct-grants` default is derived from the resolved `api-vault` and
 `ssh-vault` values, so overriding those two is usually sufficient.
@@ -154,23 +171,27 @@ All functions are autoloaded on first call.
 
 | Function | Description |
 |---|---|
-| `op_refresh` | Rebuild the service account token cache. Interactive: may prompt to create/select account. |
-| `refresh_shell_secrets` | Re-inject `secrets.zsh` template into cache and source the result. Requires `_ZDOT_OP_ACTIVE=1`. |
-| `op_auth` | Interactively sign in to 1Password. Called by `op_refresh`; rarely needed directly. |
+| `op_refresh` | Keep this machine's 1Password credential current. SA mode: the service-account token (interactive runs may create/choose the account, then re-inject the token cache). Login mode: the signed-in account sessions (check each account, sign in the rest via `op_auth`, report). Sets `_ZDOT_OP_ACTIVE`. |
+| `refresh_shell_secrets` | Re-inject the `secrets.zsh` template into its cache and source the result, via `op_inject_template`. Requires `_ZDOT_OP_ACTIVE=1`. |
+| `op_auth` | Sign-in building block (interactive only), used by `op_refresh` when a person is needed. With `login-accounts` set it walks every account; `op_auth <name>` signs in one. Names resolve via `':zdot:secrets:op:<name>' account-url`. `--reset` forgets the accounts and drops cached credentials, then signs in again. |
 | `op_get_vault_config` | Return vault names in `$reply` as name/value pairs (`svc`/`api`/`ssh`) — read into `typeset -A _v`; consumer pattern in the function header. |
 | `op_get_vault_grants` | Return the service-account grant ARRAY in `$reply` (zstyle `service-acct-grants`, or the default derived from the api/ssh vault names passed as args). |
 | `op_get_config_dir` | Print the `op` config directory (sudo-aware). |
 | `op_get_config_args` | Print `--config <dir>` args for `op` invocations (one token per line). |
+| `op_inject_template` | Inject one template to one output file: account-tagged (`op-<acct>://…`) templates go through `op_multi_inject`, plain ones through `op inject`. Shared by the shell-secrets and mcp refreshers. |
+| `op_multi_inject` | `op inject` work-alike for account-tagged templates: one piped inject pass per account; all-or-nothing; never sources its output. See *Multiple accounts*. |
 
 ### Global state
 
 | Variable | Values | Meaning |
 |---|---|---|
-| `_ZDOT_OP_ACTIVE` | `0` / `1` | Set to `1` when a service account token is loaded and working. Other modules gate on this before using `op`. |
+| `_ZDOT_OP_ACTIVE` | `0` / `1` | Set to `1` when 1Password is authenticated and usable — in either auth mode (login session or service-account token). Other modules gate on this before using `op`. |
 
 ---
 
 ## First-time interactive setup
+
+### Service-account mode (default)
 
 On first login in an interactive shell, if no `op` config or service account
 exists, `op_refresh` will:
@@ -188,6 +209,74 @@ exists, `op_refresh` will:
 
 On every subsequent shell start the module simply sources the cached token —
 no interactive prompts fire.
+
+### Login mode
+
+Set `zstyle ':zdot:secrets:op' mode login` in a `secrets-configure` hook.
+Startup stays passive: `_op_init` checks `op whoami` and, if not signed in,
+warns (never prompts). Running `op_refresh` yourself is the recovery verb —
+not signed in and interactive -> `op_auth` prompts for sign-in and retries,
+then surfaces the account that signed in. Service accounts are never created,
+and `$XDG_CONFIG_HOME/secrets/op-secrets.zsh` (if it exists from before) is
+ignored. Shell secrets still refresh via `refresh_shell_secrets` — `op inject`
+works identically under a signed-in session.
+
+#### Multiple accounts
+
+When the CLI can see more than one account (e.g. personal + allenai), *bare*
+`op whoami`/`op inject` fail — they cannot disambiguate, and `op://` secret
+references carry no account segment. Tag the references in your template
+instead — the tag selects the account:
+
+```zsh
+# $XDG_CONFIG_HOME/secrets/secrets.zsh
+export GITHUB_TOKEN="op-personal://Private/GitHub Token/credential"
+export OPENAI_API_KEY="op-allenai://Work-API/OpenAI/api_key"
+export WORK_CDN="op://Raw/Item/f"                    # raw ref — needs default
+zstyle ':zdot:secrets:op' login-accounts personal allenai   # viability
+zstyle ':zdot:secrets:op' default-account personal          # raw-ref account
+```
+
+Account names are passed straight to `op --account`, so a name that is a CLI
+shorthand (`op account add --shorthand <name>`) needs nothing else. For one
+that isn't, map it to its sign-in address with a per-account context, one
+line per account:
+
+```zsh
+zstyle ':zdot:secrets:op:personal' account-url my.1password.com
+zstyle ':zdot:secrets:op:allenai'  account-url allenai.1password.com
+```
+
+Use the per-account context: repeating `zstyle ':zdot:secrets:op'
+account-url …` would replace the earlier value rather than add to it. Tags in
+templates and all messages keep the short name; only the `op` calls use the
+mapped address.
+
+`refresh_shell_secrets` resolves the template through `op_inject_template`,
+which hands tagged templates to `op_multi_inject`:
+
+- Accounts derive from the tags (`op-<acct>://`) themselves — pass 1 seds
+  `op-personal://` → `op://` and injects with `--account personal`; its
+  output feeds pass 2 for the next tag, and so on. Fully piped (no temp
+  files), order-independent, and resolved values can never be re-resolved.
+- `login-accounts` is the *viability* authority (startup checks, recovery);
+  the tags are the *inject* authority. A tagged account that is signed out
+  at inject time → error, nothing is written (last good cache stays).
+- Raw `op://` refs resolve against `default-account`'s pass (which runs
+  first). Raw refs with no default configured → rejected with an error.
+- The merged cache (`${USER}.secrets.zsh`) is sourced once when done.
+- `op_multi_inject` is general-purpose: it never sources its output, so you
+  can point it at machine configs too (e.g. an mcp JSON mixing both
+  accounts' keys).
+- Startup checks each account and, if one is signed out, tries a silent
+  `op signin` for it before warning. If any stay signed out, the warning
+  names them.
+- Recovery: `op_refresh` signs into each signed-out `login-accounts` entry
+  via `op_auth`, then reports per-account status.
+
+With desktop-app integration, none of this triggers a fingerprint at shell
+start: `op whoami` never unlocks; the app is only unlocked (once per
+auto-lock cycle) when an `op inject` first needs a secret.
 
 ---
 
