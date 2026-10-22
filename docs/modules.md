@@ -177,6 +177,10 @@ cache.
 | Key | Description |
 |---|---|
 | `':zdot:secrets:op' profile` | 1Password secrets profile — selects the `secrets-<profile>.zsh` template set. Wins over the generic `:zdot:profile name` backstop (profiles module); explicit (even empty) secrets value always counts as configured. |
+| `':zdot:secrets:op' mode` | Auth mode: `service-account` (default; a service-account token, good for the session), `login` (signed-in sessions, checked at startup) or `lazy-login` (the same, checked at the first `op` call that's needed — recommended over `login`) |
+| `':zdot:secrets:op' login-accounts` | Login modes: account shorthands to sign in (e.g. `personal allenai`); usable only when every one is signed in |
+| `':zdot:secrets:op:<name>' account-url` | Login modes, per account: the sign-in address (or email/UUID) to pass to `op --account` for a name that isn't a CLI shorthand. One line per account — repeating it on `':zdot:secrets:op'` would replace, not add |
+| `':zdot:secrets:op' default-account` | Account that plain `op://` refs resolve against when more than one account is in use |
 | `':zdot:secrets:op' service-acct-vault` | 1Password vault name for service account credentials |
 | `':zdot:secrets:op' api-vault` | 1Password vault name for API keys |
 | `':zdot:secrets:op' ssh-vault` | 1Password vault name for SSH keys |

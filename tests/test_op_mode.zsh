@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
-# Harness: secrets module auth-mode helpers (_op_get_mode / op_refresh)
-# and the login-mode dispatch in op_refresh. Cases:
+# Harness: secrets module auth-mode helpers (_op_get_mode / op_identity)
+# and the login-mode dispatch in op_identity. Cases:
 #   mode resolution (unset/empty defaults to 'service-account'; 'login'
 #   recognized; unknown values fall back with a warn) and login-mode
 #   viability via a FAKE `op` binary on PATH:
@@ -8,7 +8,7 @@
 #     FAKE_OP_MODE=fail     — whoami fails, noninteractive      → not usable
 #     FAKE_OP_MODE=recover  — whoami fails, `op signin` fixes   → usable
 #                             (exercises the interactive op_auth retry path)
-#     plus the no_op sentinel short-circuit, the op_refresh dispatch, the
+#     plus the no_op sentinel short-circuit, the op_identity dispatch, the
 #     PASSIVE startup check (_op_init never prompts — even when signed out),
 #     and the account-feedback line on the manual recovery path, plus
 #     multi-account login (login-accounts viability, account-tagged
@@ -56,6 +56,11 @@ account_verb=""; account_name=""
 [ -n "${account_left[1]:-}" ] && account_name="${account_left[1]}"
 case "$sub" in
     whoami)
+        # Like real op: an exported service-account token answers whoami
+        # as the service account, whatever --account says.
+        if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+            printf "%s\n" "User Type: SERVICE_ACCOUNT"; exit 0
+        fi
         case "${FAKE_OP_MODE}" in
             success) printf "%s\n" "Signed in as fake@1password.test"; exit 0 ;;
             partial)
@@ -71,11 +76,14 @@ case "$sub" in
             *) exit 1 ;;
         esac ;;
     signin)
+        # FAKE_SIGNIN_NEEDS_TTY: refuse the headless form (stdin /dev/null),
+        # like an account that can only sign in interactively
+        if [ -n "${FAKE_SIGNIN_NEEDS_TTY:-}" ] && [ /dev/fd/0 -ef /dev/null ]; then exit 1; fi
         : > "${FAKE_STATE_DIR}/${account_key}"
         [ -n "${FAKE_SIGNIN_EXPORT:-}" ] && printf "export OP_SESSION_fake=%s\n" "$account"
         exit 0 ;;
     inject)
-        if [[ " ${FAKE_INJECT_FAIL_ACCOUNTS:-} " == *" ${account} "* ]]; then
+        if [ -n "$account" ] && [[ " ${FAKE_INJECT_FAIL_ACCOUNTS:-} " == *" ${account} "* ]]; then
             exit 1
         fi
         if [[ -z "$in_file" || -z "$out_file" ]]; then
@@ -115,11 +123,11 @@ if [[ "${1:-}" == --case ]]; then
     XDG_CACHE_HOME="$(mktemp -d)"
 
     # Module INLINE functions (like _op_get_secrets_env) are defined by the
-    # source above; autoloaded ones (op_refresh, op_auth…) need fpath + an
+    # source above; autoloaded ones (op_identity, op_auth…) need fpath + an
     # explicit autoload — zdot_module_autoload_funcs needs more bootstrap
     # state than this harness provides.
     fpath+=("${ZDOT_ROOT}/modules/secrets/functions")
-    autoload -Uz op_refresh op_auth op_get_config_dir op_get_config_args \
+    autoload -Uz op_identity op_refresh op_auth op_get_config_dir op_get_config_args \
         op_get_vault_config op_get_vault_grants refresh_shell_secrets op_multi_inject \
         op_inject_template op_upsert_file op_download_file
 
@@ -152,7 +160,7 @@ if [[ "${1:-}" == --case ]]; then
             _ZDOT_OP_ACTIVE=9   # sentinel: helper must SET it, not leave it
             OP_SERVICE_ACCOUNT_TOKEN=SENTINEL   # must be untouched by login mode
             zstyle ':zdot:secrets:op' mode login
-            op_refresh && \
+            op_identity && \
                 [[ "$_ZDOT_OP_ACTIVE" == 1 ]] \
                 || { print "RESULT: FAIL (rc!=0 or _ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE)"; exit 1 }
             [[ "$OP_SERVICE_ACCOUNT_TOKEN" == SENTINEL ]] \
@@ -162,7 +170,7 @@ if [[ "${1:-}" == --case ]]; then
         whoami-fail-noninteractive)
             export FAKE_OP_MODE=fail
             zstyle ':zdot:secrets:op' mode login
-            op_refresh && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
+            op_identity && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
             [[ "$_ZDOT_OP_ACTIVE" == 0 ]] \
                 || { print "RESULT: FAIL (_ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE expected 0)"; exit 1 }
             print "RESULT: PASS" ;;
@@ -177,7 +185,7 @@ if [[ "${1:-}" == --case ]]; then
             : > "${XDG_CONFIG_HOME}/op/config"
             FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
             zstyle ':zdot:secrets:op' mode login
-            op_refresh && \
+            op_identity && \
                 [[ "$_ZDOT_OP_ACTIVE" == 1 ]] \
                 || { print "RESULT: FAIL (interactive sign-in retry failed, _ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE)"; exit 1 }
             grep -q '^signup$' "${FAKE_CALL_LOG}" \
@@ -191,7 +199,7 @@ if [[ "${1:-}" == --case ]]; then
             mkdir -p "${XDG_CONFIG_HOME}/op"
             : > "${XDG_CONFIG_HOME}/op/no_op"
             zstyle ':zdot:secrets:op' mode login
-            op_refresh && { print "RESULT: FAIL (no_op sentinel ignored)"; exit 1 }
+            op_identity && { print "RESULT: FAIL (no_op sentinel ignored)"; exit 1 }
             [[ "$_ZDOT_OP_ACTIVE" == 0 ]] \
                 || { print "RESULT: FAIL (_ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE expected 0)"; exit 1 }
             print "RESULT: PASS" ;;
@@ -201,21 +209,21 @@ if [[ "${1:-}" == --case ]]; then
             zstyle ':zdot:secrets:op' mode login
             mkdir -p "${XDG_CACHE_HOME}/secrets"
             echo "stale" > "${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh"  # SA leftover must survive
-            op_refresh && \
+            op_identity && \
                 [[ "$_ZDOT_OP_ACTIVE" == 1 ]] \
-                || { print "RESULT: FAIL (op_refresh login dispatch, _ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE)"; exit 1 }
+                || { print "RESULT: FAIL (op_identity login dispatch, _ZDOT_OP_ACTIVE=$_ZDOT_OP_ACTIVE)"; exit 1 }
             [[ -f "${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh" ]] \
                 || { print "RESULT: FAIL (login mode deleted the SA token cache — must not touch it)"; exit 1 }
             print "RESULT: PASS" ;;
 
         op-refresh-feedback)
             # Manual recovery/print of the signed-in account:
-            # op_refresh (login half) surfaces `op whoami` output via zdot_info.
+            # op_identity (login half) surfaces `op whoami` output via zdot_info.
             export FAKE_OP_MODE=success
             zstyle ':zdot:secrets:op' mode login
             local out
-            out=$(op_refresh 2>&1) \
-                || { print "RESULT: FAIL (op_refresh rc=$?)"; exit 1 }
+            out=$(op_identity 2>&1) \
+                || { print "RESULT: FAIL (op_identity rc=$?)"; exit 1 }
             [[ "$out" == *fake@1password.test* ]] \
                 || { print "RESULT: FAIL (no account feedback, got: $out)"; exit 1 }
             print "RESULT: PASS" ;;
@@ -286,6 +294,7 @@ if [[ "${1:-}" == --case ]]; then
             # shortname (regression: 'found no accounts for filter personal').
             export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
             _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' mode login
             zstyle ':zdot:secrets:op' login-accounts personal
             zstyle ':zdot:secrets:op:personal' account-url my.1password.com
             mkdir -p "${XDG_CONFIG_HOME}/op"
@@ -362,22 +371,28 @@ if [[ "${1:-}" == --case ]]; then
 
         op-multi-explicit-order)
             # Explicit --account pass list: order taken verbatim; seds for
-            # each account's tag compose around the passes.
+            # each account's tag compose around the passes. Three accounts,
+            # so the passes run one after another (the loop) and the call
+            # log order is meaningful — 1–2 passes run as one concurrent
+            # pipeline, where log order is a race.
             export FAKE_OP_MODE=success
             mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}"
             local tpl3="$XDG_CONFIG_HOME/secrets-order.zsh" out3="$XDG_CACHE_HOME/order.zsh"
             print 'export B="op-personal://Priv/D/g"' > "$tpl3"
             print 'export AI="op-allenai://Work/C/f"' >> "$tpl3"
+            print 'export G="op-gamma://G/H/i"' >> "$tpl3"
             FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
-            op_multi_inject -i "$tpl3" -o "$out3" --account allenai --account personal \
+            op_multi_inject -i "$tpl3" -o "$out3" --account allenai --account gamma --account personal \
                 || { print "RESULT: FAIL (explicit order rc)"; exit 1 }
-            [[ "$(cat "$out3")" == *'op://Work/C/f'* && "$(cat "$out3")" == *'op://Priv/D/g'* ]] \
-                || { print "RESULT: FAIL (conversion, out: $(cat "$out3"))"; exit 1 }
-            [[ "$(grep -n 'inject --account allenai' "${FAKE_CALL_LOG}" | head -1 | cut -d: -f1)" -lt \
-               "$(grep -n 'inject --account personal' "${FAKE_CALL_LOG}" | head -1 | cut -d: -f1)" ]] \
-                || { print "RESULT: FAIL (explicit pass order not honored)"; exit 1 }
+            local o
+            o=$(<"$out3")
+            [[ "$o" == *'op://Work/C/f'* && "$o" == *'op://Priv/D/g'* && "$o" == *'op://G/H/i'* ]] \
+                || { print "RESULT: FAIL (conversion, out: $o)"; exit 1 }
+            local order
+            order=$(grep -o 'inject --account [a-z]*' "$FAKE_CALL_LOG" | awk '{print $3}' | tr '\n' ' ')
+            [[ "$order" == "allenai gamma personal " ]] \
+                || { print "RESULT: FAIL (explicit pass order not honored: $order)"; exit 1 }
             print "RESULT: PASS" ;;
-
         op-multi-fallback-names-account)
             # Mid-chain inject failure: pipeline fails silently, fallback
             # replay names the failing account; nothing is written.
@@ -408,6 +423,7 @@ if [[ "${1:-}" == --case ]]; then
             # Both signed out (recover mode): after op_auth, both markers exist.
             export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
             _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' mode login
             zstyle ':zdot:secrets:op' login-accounts personal allenai
             mkdir -p "${XDG_CONFIG_HOME}/op"
             : > "${XDG_CONFIG_HOME}/op/config"
@@ -498,7 +514,7 @@ if [[ "${1:-}" == --case ]]; then
 
         init-sa-default-nothing)
             # SA back-compat, nothing configured (no config dir, no template,
-            # no cache): op_refresh runs (missing cache → stale-gate fires),
+            # no cache): op_identity runs (missing cache → stale-gate fires),
             # goes inactive quietly, no token → inactive. The old front-of-
             # _op_init config check would have set the same final value.
             typeset -g OP_SERVICE_ACCOUNT_TOKEN=SENTINEL   # must stay unset-by-source
@@ -622,6 +638,375 @@ if [[ "${1:-}" == --case ]]; then
             [[ -s "$out5" ]] || { print "RESULT: FAIL (no output written)"; exit 1 }
             print "RESULT: PASS" ;;
 
+        lazy-fresh-cache-no-op-calls)
+            # Lazy + caches up to date: startup makes NO op calls (so no
+            # Touch ID), marks op set up, and loads the cache.
+            export FAKE_OP_MODE=fail
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            sleep 1
+            print 'export S=cached' > "$cache"
+            _op_init 2>/dev/null
+            [[ ! -s "$FAKE_CALL_LOG" ]] \
+                || { print "RESULT: FAIL (op was called: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            [[ "$_ZDOT_OP_ACTIVE" == 1 && "$_ZDOT_OP_SESSION" == pending && "${S:-}" == cached ]] \
+                || { print "RESULT: FAIL (active=$_ZDOT_OP_ACTIVE session=$_ZDOT_OP_SESSION S=${S:-})"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-stale-template-checks-then-refreshes)
+            # Lazy + template newer than cache: the refresh's first op call
+            # runs the session check, then the inject proceeds.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S=old' > "$cache"
+            sleep 1
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            _op_init 2>/dev/null
+            [[ "$_ZDOT_OP_SESSION" == ok && "${S:-}" == 'op://V/I/f' ]] \
+                || { print "RESULT: FAIL (session=$_ZDOT_OP_SESSION S=${S:-}; log: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            local first
+            first=$(head -1 "$FAKE_CALL_LOG")
+            [[ "$first" == whoami* ]] \
+                || { print "RESULT: FAIL (check should come first, got: $first)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-failed-check-no-reprompt)
+            # Lazy + check fails: one warning, cache kept, and later op calls
+            # are refused without calling op (no prompt per command).
+            export FAKE_OP_MODE=fail
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S=old' > "$cache"
+            sleep 1
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            local errl="$(mktemp)"
+            _op_init 2> "$errl"
+            [[ "$_ZDOT_OP_SESSION" == failed && "${S:-}" == old ]] \
+                || { print "RESULT: FAIL (session=$_ZDOT_OP_SESSION S=${S:-})"; exit 1 }
+            local nwarn
+            nwarn=$(grep -c 'not signed in to 1Password' "$errl")
+            [[ "$nwarn" == 1 ]] \
+                || { print -r -- "RESULT: FAIL (expected 1 warning, got $nwarn: $(tr '\n' '|' < "$errl"))"; exit 1 }
+            local before after
+            before=$(wc -l < "$FAKE_CALL_LOG")
+            _op item get x 2>/dev/null && { print "RESULT: FAIL (_op should refuse)"; exit 1 }
+            after=$(wc -l < "$FAKE_CALL_LOG")
+            [[ "$before" == "$after" ]] \
+                || { print "RESULT: FAIL (op called after failed check)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-op-refresh-recovers)
+            # After a failed lazy check, op_identity re-checks and clears it.
+            export FAKE_OP_MODE=fail
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S=cached' > "$cache"
+            _op_init 2>/dev/null
+            _op item get x 2>/dev/null
+            [[ "$_ZDOT_OP_SESSION" == failed ]] \
+                || { print "RESULT: FAIL (expected failed, got $_ZDOT_OP_SESSION)"; exit 1 }
+            export FAKE_OP_MODE=success
+            op_identity >/dev/null 2>&1 \
+                || { print "RESULT: FAIL (op_identity rc=$?)"; exit 1 }
+            [[ "$_ZDOT_OP_SESSION" == ok && "$_ZDOT_OP_ACTIVE" == 1 ]] \
+                || { print "RESULT: FAIL (session=$_ZDOT_OP_SESSION active=$_ZDOT_OP_ACTIVE)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        eager-refresh-reasks-interactive)
+            # Eager login mode, signed out, a person runs refresh_shell_secrets
+            # interactively: warn, sign in via op_auth, then refresh.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1 FAKE_SIGNIN_NEEDS_TTY=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' mode login
+            zstyle ':zdot:secrets:op' login-accounts personal
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            _ZDOT_OP_ACTIVE=0
+            refresh_shell_secrets 2> "$errr" >/dev/null <<< "" \
+                || { print -r -- "RESULT: FAIL (rc=$?; err: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            grep -q 'not signed in to 1Password: personal' "$errr" \
+                || { print -r -- "RESULT: FAIL (no warning: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            [[ "${S:-}" == 'op://V/I/f' ]] \
+                || { print "RESULT: FAIL (not refreshed, S=${S:-})"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        eager-refresh-noninteractive-warns)
+            # Same, but non-interactive (a script): warn with the hint, no op_auth.
+            export FAKE_OP_MODE=fail
+            zstyle ':zdot:secrets:op' mode login
+            zstyle ':zdot:secrets:op' login-accounts personal
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            _ZDOT_OP_ACTIVE=0
+            refresh_shell_secrets 2> "$errr" >/dev/null && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
+            grep -q 'not signed in to 1Password: personal; run op_identity' "$errr" \
+                || { print -r -- "RESULT: FAIL (warning: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            ! grep -q 'Signing into' "$errr" \
+                || { print "RESULT: FAIL (op_auth ran non-interactively)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-failed-interactive-reasks)
+            # Lazy, earlier check failed; a person runs an op command
+            # interactively: check again / re-ask instead of refusing.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' login-accounts personal
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            _ZDOT_OP_ACTIVE=0 _ZDOT_OP_SESSION=failed
+            _op item get x 2>/dev/null
+            [[ "$_ZDOT_OP_SESSION" == ok ]] \
+                || { print "RESULT: FAIL (session=$_ZDOT_OP_SESSION; log: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            grep -q '^item get x' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (op never ran after re-ask)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        startup-never-reasks-interactive)
+            # Interactive shell, lazy, check fails during STARTUP: warn with
+            # the hint only — op_auth must not run inside _op_init.
+            export FAKE_OP_MODE=fail FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            print 'export S=old' > "$cache"
+            sleep 1
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            _op_init 2> "$errr" >/dev/null
+            ! grep -q 'Signing into\|— signing in' "$errr" \
+                || { print -r -- "RESULT: FAIL (prompted during startup: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            grep -q 'run op_identity' "$errr" \
+                || { print -r -- "RESULT: FAIL (no hint: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        sa-refresh-active-plain-inject)
+            # Service-account mode, token loaded: refresh is a plain inject,
+            # untouched by the login/lazy machinery.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            print 'export S="op://V/I/f"' > "$tpl"
+            _ZDOT_OP_ACTIVE=1
+            refresh_shell_secrets 2> "$errr" >/dev/null \
+                || { print -r -- "RESULT: FAIL (rc=$?; err: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            grep -q '^inject --force --in-file' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (expected plain inject; log: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            ! grep -q 'whoami\|signin' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (SA mode ran sign-in calls)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        sa-refresh-inactive-warns-only)
+            # Service-account mode, no token, interactive: warn, never prompt.
+            export FAKE_OP_MODE=success FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets" "${XDG_CONFIG_HOME}/op"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local errr="$(mktemp)"
+            print 'export S="op://V/I/f"' > "$tpl"
+            _ZDOT_OP_ACTIVE=0
+            refresh_shell_secrets 2> "$errr" >/dev/null && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
+            grep -q 'service-account token not loaded; run op_identity' "$errr" \
+                || { print -r -- "RESULT: FAIL (warning: $(tr '\n' '|' < "$errr"))"; exit 1 }
+            [[ ! -s "$FAKE_CALL_LOG" ]] \
+                || { print "RESULT: FAIL (op was called: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-multi-two-pass-one-pipeline)
+            # Two passes succeed through the single pipeline: one inject per
+            # account, no loop re-run.
+            export FAKE_OP_MODE=success
+            local tp="$XDG_CONFIG_HOME/two.zsh" op2="$XDG_CACHE_HOME/two.zsh"
+            print 'export A="op-personal://V/I/f"' > "$tp"
+            print 'export B="op-allenai://W/I/f"' >> "$tp"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            op_multi_inject -i "$tp" -o "$op2" \
+                || { print "RESULT: FAIL (rc=$?)"; exit 1 }
+            local n
+            n=$(grep -c '^inject' "$FAKE_CALL_LOG")
+            [[ "$n" == 2 ]] \
+                || { print "RESULT: FAIL (expected 2 injects, got $n: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            grep -q 'op://V/I/f' "$op2" && grep -q 'op://W/I/f' "$op2" \
+                || { print "RESULT: FAIL (output: $(tr '\n' '|' < "$op2"))"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-multi-loop-names-account)
+            # Three passes (loop path); the middle one fails: named directly,
+            # nothing written.
+            export FAKE_OP_MODE=success FAKE_INJECT_FAIL_ACCOUNTS="beta"
+            local t3="$XDG_CONFIG_HOME/three.zsh" o3="$XDG_CACHE_HOME/three.zsh"
+            print 'export A="op-alpha://V/I/f"' > "$t3"
+            print 'export B="op-beta://V/I/f"' >> "$t3"
+            print 'export C="op-gamma://V/I/f"' >> "$t3"
+            rm -f "$o3"
+            local e3
+            e3=$(op_multi_inject -i "$t3" -o "$o3" 2>&1) \
+                && { print "RESULT: FAIL (expected failure)"; exit 1 }
+            [[ "$e3" == *"pass 2 (account 'beta')"* ]] \
+                || { print -r -- "RESULT: FAIL (message: $e3)"; exit 1 }
+            [[ ! -f "$o3" ]] || { print "RESULT: FAIL (output written on failure)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-multi-helpers-removed)
+            # The per-call helpers are gone after a successful AND a failed call.
+            export FAKE_OP_MODE=success
+            local th="$XDG_CONFIG_HOME/h.zsh" oh="$XDG_CACHE_HOME/h.zsh" f
+            print 'export A="op-personal://V/I/f"' > "$th"
+            op_multi_inject -i "$th" -o "$oh" || { print "RESULT: FAIL (success path rc=$?)"; exit 1 }
+            for f in _op_multi_inject_input _op_multi_inject_pass _op_multi_inject_loop; do
+                (( ${+functions[$f]} )) && { print "RESULT: FAIL ($f left after success)"; exit 1 }
+            done
+            export FAKE_INJECT_FAIL_ACCOUNTS=personal
+            op_multi_inject -i "$th" -o "$oh" 2>/dev/null && { print "RESULT: FAIL (expected failure)"; exit 1 }
+            for f in _op_multi_inject_input _op_multi_inject_pass _op_multi_inject_loop; do
+                (( ${+functions[$f]} )) && { print "RESULT: FAIL ($f left after failure)"; exit 1 }
+            done
+            print "RESULT: PASS" ;;
+
+        op-auth-sa-uses-token)
+            # Service-account mode, token exported: op_auth just uses it —
+            # no person sign-in.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/op" "${XDG_CACHE_HOME}/secrets"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tcache="${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local aout
+            export OP_SERVICE_ACCOUNT_TOKEN=sa-token
+            aout=$(op_auth 2>&1) \
+                || { print -r -- "RESULT: FAIL (rc=$?; out=$aout)"; exit 1 }
+            [[ "$aout" == *"using the service-account token"* ]] \
+                || { print -r -- "RESULT: FAIL (message: $aout)"; exit 1 }
+            ! grep -q '^signin' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (signed a person in)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-auth-sa-token-from-cache)
+            # Token not in this shell but in the cache: loaded and used.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/op" "${XDG_CACHE_HOME}/secrets"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tcache="${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local aout
+            unset OP_SERVICE_ACCOUNT_TOKEN
+            print 'export OP_SERVICE_ACCOUNT_TOKEN=cached-token' > "$tcache"
+            op_auth >/dev/null 2>&1 \
+                || { print "RESULT: FAIL (rc=$?)"; exit 1 }
+            [[ "${OP_SERVICE_ACCOUNT_TOKEN:-}" == cached-token ]] \
+                || { print "RESULT: FAIL (token not loaded: '${OP_SERVICE_ACCOUNT_TOKEN:-}')"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-auth-sa-no-token-errors)
+            # No token anywhere: error pointing at op_identity, no sign-in,
+            # no service-account setup.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/op" "${XDG_CACHE_HOME}/secrets"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tcache="${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local aout
+            unset OP_SERVICE_ACCOUNT_TOKEN
+            aout=$(op_auth 2>&1) && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
+            [[ "$aout" == *"run op_identity"* ]] \
+                || { print -r -- "RESULT: FAIL (message: $aout)"; exit 1 }
+            [[ ! -s "$FAKE_CALL_LOG" ]] \
+                || { print "RESULT: FAIL (op called: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-auth-sa-reset-errors)
+            # --reset in SA mode: caches dropped, accounts forgotten, token
+            # gone, then the op_identity hint — the token is not re-used.
+            export FAKE_OP_MODE=recover FAKE_INTERACTIVE=1
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' profile ''
+            mkdir -p "${XDG_CONFIG_HOME}/op" "${XDG_CACHE_HOME}/secrets"
+            : > "${XDG_CONFIG_HOME}/op/config"
+            local tcache="${XDG_CACHE_HOME}/secrets/${USER}.op-secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            local aout
+            export OP_SERVICE_ACCOUNT_TOKEN=sa-token
+            print 'export OP_SERVICE_ACCOUNT_TOKEN=sa-token' > "$tcache"
+            aout=$(op_auth --reset 2>&1) && { print "RESULT: FAIL (expected rc=1)"; exit 1 }
+            [[ "$aout" == *"run op_identity"* && ! -f "$tcache" ]] \
+                || { print -r -- "RESULT: FAIL (out=$aout; cache left: $([[ -f $tcache ]] && echo yes))"; exit 1 }
+            grep -q 'account forget --all' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (no forget)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-login-mode)
+            zstyle ':zdot:secrets:op' mode lazy-login
+            _op_get_mode && [[ "$REPLY" == lazy-login ]] \
+                || { print "RESULT: FAIL (mode '$REPLY')"; exit 1 }
+            _op_is_login || { print "RESULT: FAIL (_op_is_login false)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        op-refresh-alias)
+            # The old name still works: prints the new name, then does the job.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' mode login
+            local rerr="$(mktemp)" rout
+            op_refresh 2> "$rerr" >/dev/null || { print -r -- "RESULT: FAIL (rc=$?; $(<$rerr))"; exit 1 }
+            rout=$(<"$rerr")
+            [[ "$rout" == *"op_refresh is now op_identity"* && "$_ZDOT_OP_ACTIVE" == 1 ]] \
+                || { print -r -- "RESULT: FAIL (out=$rout active=$_ZDOT_OP_ACTIVE)"; exit 1 }
+            print "RESULT: PASS" ;;
+
         *) print "RESULT: FAIL (unknown case $2)"; exit 2 ;;
     esac
     exit 0
@@ -638,7 +1023,16 @@ typeset -a cases=(default-mode login-mode unknown-mode-falls-back empty-mode-fal
     account-url-map op-multi-signedout-error op-multi-rawref-no-default op-auth-reset \
     op-calls-carry-sudo-config headless-signin-evals-session \
     init-inactive-sources-stale-cache init-no-op-quiet-but-sources \
-    inject-template-untagged-uses-default-account)
+    inject-template-untagged-uses-default-account \
+    lazy-fresh-cache-no-op-calls lazy-stale-template-checks-then-refreshes \
+    lazy-failed-check-no-reprompt lazy-op-refresh-recovers \
+    eager-refresh-reasks-interactive eager-refresh-noninteractive-warns \
+    lazy-failed-interactive-reasks startup-never-reasks-interactive \
+    sa-refresh-active-plain-inject sa-refresh-inactive-warns-only \
+    op-multi-two-pass-one-pipeline op-multi-loop-names-account \
+    op-multi-helpers-removed op-auth-sa-uses-token op-auth-sa-token-from-cache \
+    op-auth-sa-no-token-errors op-auth-sa-reset-errors lazy-login-mode \
+    op-refresh-alias)
 typeset -i fails=0
 for c in $cases; do
     out="$(zsh -f "${(%):-%x}" --case "$c" 2>&1 | grep '^RESULT:')"

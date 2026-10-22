@@ -351,6 +351,10 @@ Source: `modules/secrets/secrets.zsh`
 |---|---|---|---|
 | `:zdot:secrets` `ssh-platforms` | array | _(OS-specific)_ | List of `$OSTYPE` glob patterns for which to set up SSH agent via 1Password. |
 | `:zdot:secrets` `ssh-func` | string | _(empty)_ | Name of a function to call for custom SSH agent setup instead of the built-in logic. Called with the resolved SSH socket path. |
+| `:zdot:secrets:op` `mode` | string | `service-account` | Auth mode. `service-account`: a service-account token, cached and good for the session. `login`: signed-in personal sessions, checked per account at startup. `lazy-login`: the same, checked at the first `op` call that's actually needed, so tabs with up-to-date caches never prompt (recommended over `login`). Unknown values warn and fall back to `service-account`. |
+| `:zdot:secrets:op` `login-accounts` | array | _(empty)_ | Login modes: account shorthands to sign in. Each is checked with `op whoami --account`; 1Password counts as usable only when every one is signed in. Empty: the single default account. |
+| `:zdot:secrets:op:<name>` `account-url` | string | _(the name itself)_ | Login modes, per account: what to pass to `op --account` for `<name>` — its sign-in address, email or UUID — when `<name>` isn't a CLI shorthand. Use one context per account; repeating `account-url` on `:zdot:secrets:op` replaces rather than adds. |
+| `:zdot:secrets:op` `default-account` | string | _(empty)_ | Account that plain (untagged) `op://` refs resolve against. When set, every template goes through the multi-account inject, so those refs name this account explicitly. |
 | `:zdot:secrets:op` `service-acct-vault` | string | _(empty)_ | 1Password vault name for service account credentials. |
 | `:zdot:secrets:op` `api-vault` | string | _(empty)_ | 1Password vault name for API tokens. |
 | `:zdot:secrets:op` `ssh-vault` | string | _(empty)_ | 1Password vault name for SSH keys. |
