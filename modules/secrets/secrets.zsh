@@ -10,21 +10,35 @@
 #     suffix) into $reply as a flat name/value pair list — the SINGLE place
 #     these derivations live; consumed by _op_init, the autoloaded refresh
 #     functions, and the mcp module
-#   - _op_get_mode: resolves the auth mode (login / service-account) — see
-#     Auth Modes below
+#   - _op_get_mode: resolves the auth mode (service-account / login /
+#     lazy-login) — see Auth Modes below
+#   - _op_is_login: true in either login mode
 #   - _op_get_login_accounts: reads ':zdot:secrets:op login-accounts' into
 #     $reply (login-mode multi-account support; plain account shortnames)
 #   - _op_account_arg: resolves a shortname to the identifier to pass to op
 #     (--account/signin/whoami) via ':zdot:secrets:op:<name>' account-url,
 #     falling back to the shortname itself
-#   - _op: runs op with the resolved config args — every op call goes
-#     through it
+#   - _op: op WITH auth — signs in first if needed (lazy check, re-ask when
+#     interactive), then runs op; every op call outside the sign-in
+#     machinery goes through it
+#   - _op_noauth: op WITHOUT auth — only for whoami/signin/account forget
+#   - _op_require_session: refresh commands' "make sure op is usable now"
+#     (eager or lazy); re-asks via _op_reauth when interactive
+#   - _op_may_prompt / _op_reauth: prompt policy (interactive, not startup)
+#     and the warn → sign in (_op_auth_person) → re-check step
+#   - _op_ensure_session: lazy-login's deferred check — startup skips it and
+#     the first real op call runs it; state in _ZDOT_OP_SESSION
 #   - _op_whoami: whoami for a shortname (or the default account), output
 #     passed through
 #   - _op_logged_in: quiet yes/no form of _op_whoami
 #   - _op_signin: sign one account in (optionally --headless), eval the
 #     session it prints, confirm with whoami — shared by the startup check
-#     and op_auth
+#     and _op_auth_person
+#   - _op_auth_person: sign a PERSON in to one account, interactively (no_op,
+#     first-run prompt, announce, verify, account-url hint) — used by op_auth
+#     in the login modes and by op_identity's service-account half
+#   - _op_sa_token_ok: service-account mode — is a working token available
+#     (loaded from the cache if this shell lacks it)?
 #   - _op_login_check: login-mode viability per account (no prompts; one
 #     headless signin attempt each; signed-out names returned in $reply)
 #   - _op_login_feedback: one status line per signed-in account
@@ -35,16 +49,18 @@
 #   - op_get_config_dir: Returns op config directory path via stdout
 #   - op_get_config_args: Returns op config arguments via stdout (one per line)
 #   - op_get_vault_config: Reads vault names from zstyle with defaults
-#   - op_auth: sign-in building block (interactive only): signs in one
-#     account, or walks every login-accounts entry; --reset forgets accounts
-#     and drops cached credentials first. Called by op_refresh when a human
-#     is needed.
-#   - op_refresh: keep this machine's 1Password credential current —
-#     dispatches by auth mode to its two halves (same file):
-#     _op_refresh_service_account (SA token) / _op_refresh_login (sessions);
-#     sets _ZDOT_OP_ACTIVE
+#   - op_auth: sign in (interactive only). Login modes: signs people in —
+#     every login-accounts entry, or the one named. Service-account mode:
+#     uses the token if it works, otherwise errors pointing at op_identity
+#     (it never creates one). --reset forgets accounts and drops cached
+#     credentials first.
+#   - op_identity: establish this machine's 1Password identity — dispatches
+#     by auth mode to its two halves (same file): _op_identity_service_account
+#     (create/choose the SA, inject the token) / _op_identity_login (sign the
+#     sessions in); sets _ZDOT_OP_ACTIVE
+#   - op_refresh: old name for op_identity
 #   - op_multi_inject: resolve an account-TAGGED template (op-personal://…)
-#     with one piped inject pass per account; all-or-nothing; never sources
+#     with one inject pass per account; all-or-nothing; never sources
 #   - op_inject_template: shared inject ROUTER (tagged → op_multi_inject,
 #     plain → op inject) — THE place the plain inject line lives — consumed
 #     by refreshers here and in the mcp module, so auth-mode nuance lives
@@ -52,22 +68,30 @@
 #   - refresh_shell_secrets: Refreshes shell environment secrets
 #
 # Global State:
-#   - _ZDOT_OP_ACTIVE: 1 when 1Password is authenticated and usable — in
-#     EITHER auth mode (see _op_get_mode). Other modules gate on this before
-#     using op.
+#   - _ZDOT_OP_ACTIVE: 1 when 1Password is set up for use — SA token loaded,
+#     or (login) every account signed in, or (lazy-login) configured but not
+#     yet checked. Other modules gate on this before using op.
+#   - _ZDOT_OP_SESSION: lazy-login only (empty otherwise) — pending / ok /
+#     failed; see _op_ensure_session.
 #
 # Auth Modes:
-#   zstyle ':zdot:secrets:op' mode login|service-account
-#   - service-account (default; back-compat): viability comes from the cached
-#     $USER.op-secrets.zsh token; op_refresh manages account creation/refresh.
-#   - login (for machines without service accounts, e.g. work): viability is
-#     `op whoami` (a signed-in personal/biometric session). The op-secrets
-#     template, token cache, and OP_SERVICE_ACCOUNT_TOKEN are ignored
-#     entirely; sign-in is established interactively via op_auth.
+#   zstyle ':zdot:secrets:op' mode service-account|login|lazy-login
+#   - service-account (default): the machine's identity is a service-account
+#     token, cached in $USER.op-secrets.zsh and good for the whole session.
+#     op_identity creates or chooses the account and (re)injects the token.
+#   - login (machines without service accounts, e.g. work): the identity is
+#     a set of signed-in personal/biometric sessions, checked per account at
+#     startup. The op-secrets template, token cache and
+#     OP_SERVICE_ACCOUNT_TOKEN are ignored entirely; op_auth signs people in.
+#   - lazy-login (recommended over login): the same sessions, checked at the
+#     first op call that's actually needed. App integration authorizes per
+#     terminal tab and per account, so login's startup check costs a Touch
+#     ID prompt per account in every new tab; lazy-login only prompts when
+#     a tab needs op.
 #   Multi-account login: refs in the shell-secrets template are account-
 #   TAGGED — op-personal://…, op-allenai://… — and op_multi_inject resolves
 #   them one account at a time (sed op-<acct>:// → op:// | op inject
-#   --account <acct>, fully piped and chained). op:// refs carry no account
+#   --account <acct>; one pipeline for 1–2 accounts, a loop beyond). op:// refs carry no account
 #   segment and bare op commands FAIL when >1 account is available — the tag
 #   is what selects the account per pass. ALL tagged accounts must be signed
 #   in or the refresh errors (nothing written); raw op:// refs need
@@ -85,7 +109,7 @@
 #     Hooks in this group run before _op_init. Register user hooks with:
 #       zdot_register_hook my_op_configure interactive noninteractive \
 #           --group secrets-configure
-#     Then set zstyles to override vault names used by op_refresh:
+#     Then set zstyles to override vault names used by op_identity:
 #       zstyle ':zdot:secrets:op' service-acct-vault 'MyServiceAcctVault'
 #       zstyle ':zdot:secrets:op' api-vault          'MyAPIVault'
 #       zstyle ':zdot:secrets:op' ssh-vault          'MySSHVault'
@@ -102,6 +126,9 @@
 #                                           returns 0. Default: unset.
 
 typeset -g _ZDOT_OP_ACTIVE=0
+# Lazy-mode session state (see _op_ensure_session). Empty outside lazy mode,
+# which leaves every op call exactly as it was.
+typeset -g _ZDOT_OP_SESSION=""
 
 # Autoload module functions
 zdot_module_autoload_funcs
@@ -146,21 +173,28 @@ _op_get_secrets_env() {
 }
 
 # Resolve the 1Password auth mode into $REPLY:
-#   'login'           — personal/biometric session (machines without service
-#                       accounts); viability = `op whoami`
-#   'service-account' — cached SA token (default; back-compat)
+#   'service-account' — cached SA token, good for the whole session (default)
+#   'login'           — personal/biometric sessions, checked at startup
+#   'lazy-login'      — the same sessions, checked at the first op call
+#                       that's actually needed (no prompt in a tab whose
+#                       caches are up to date)
 # Unset/empty falls back to 'service-account'; unknown values warn and fall
 # back too — never an error that blocks secrets loading.
 _op_get_mode() {
     local mode
     if zstyle -s ':zdot:secrets:op' mode mode && [[ -n "$mode" ]]; then
         case "$mode" in
-            login)           REPLY='login'; return 0 ;;
-            service-account) REPLY='service-account'; return 0 ;;
-            *) zdot_warn "secrets: unknown ':zdot:secrets:op' mode '$mode' (want 'login' or 'service-account') — using service-account" ;;
+            service-account|login|lazy-login) REPLY=$mode; return 0 ;;
+            *) zdot_warn "secrets: unknown ':zdot:secrets:op' mode '$mode' (want 'service-account', 'login' or 'lazy-login') — using service-account" ;;
         esac
     fi
     REPLY='service-account'
+}
+
+# Is this one of the login modes (login or lazy-login)?
+_op_is_login() {
+    _op_get_mode
+    [[ "$REPLY" == login || "$REPLY" == lazy-login ]]
 }
 
 # Multi-account support: account shorthands for login mode into $reply.
@@ -187,13 +221,93 @@ _op_account_arg() {
     REPLY=$1
 }
 
-# Run op with the resolved config args: `--config <real user's op dir>`
-# under sudo (op_get_config_args), nothing otherwise. Every op call in the
-# module goes through here, so none can quietly use the wrong config.
+# ── Running op: two entry points ──────────────────────────────────────────
+#   _op          op WITH auth: makes sure you're signed in first (lazy-mode
+#                check, re-ask when allowed), then runs op. Use this.
+#   _op_noauth   op WITHOUT auth: runs op directly. Only for the sign-in
+#                machinery itself (whoami, signin, account forget), which
+#                is what _op's auth step is built from.
+# Both add the resolved config args (`--config <real user's op dir>` under
+# sudo, via op_get_config_args).
 _op() {
+    _op_ensure_session || return 1
+    _op_noauth "$@"
+}
+
+_op_noauth() {
     local -a op_config
     op_config=(${(f)"$(op_get_config_args)"})
     command op "${op_config[@]}" "$@"
+}
+
+# The auth step behind _op. Acts only in lazy login mode, where startup
+# marked 1Password set up (_ZDOT_OP_ACTIVE=1) without checking the sessions:
+#   ""       not lazy: nothing to do, op behaves as before
+#   pending  check now (headless; Touch ID may appear) → ok, or re-ask
+#   ok       nothing to do
+#   failed   interactive, outside startup: check again, then re-ask;
+#            otherwise refuse without calling op (no prompt per command),
+#            with a hint unless this is startup
+_op_ensure_session() {
+    case "$_ZDOT_OP_SESSION" in
+        ""|ok) return 0 ;;
+        failed)
+            if ! _op_may_prompt; then
+                [[ -z "${_ZDOT_OP_NOPROMPT:-}" ]] \
+                    && zdot_warn "secrets: not signed in to 1Password; run op_identity"
+                return 1
+            fi ;;
+    esac
+    _op_login_check && return 0
+    _op_reauth
+}
+
+# For the refresh commands (refresh_shell_secrets, refresh_mcpservers_secret):
+# make sure op is usable now, in either login mode — eager or lazy. When a
+# person ran the command (interactive, outside startup) a signed-out account
+# is re-asked for via _op_reauth. Service-account mode: the token either
+# loaded or it didn't; re-asking would mean op_identity's create-or-choose
+# service-account prompts, so it only warns (startup has its own warning).
+_op_require_session() {
+    if ! _op_is_login; then
+        (( _ZDOT_OP_ACTIVE )) && return 0
+        [[ -z "${_ZDOT_OP_NOPROMPT:-}" && ! -f "$(op_get_config_dir)/no_op" ]] \
+            && zdot_warn "secrets: 1Password service-account token not loaded; run op_identity"
+        return 1
+    fi
+    [[ -n "$_ZDOT_OP_SESSION" ]] && { _op_ensure_session; return }
+    (( _ZDOT_OP_ACTIVE )) && return 0          # eager, startup check passed
+    [[ -n "${_ZDOT_OP_NOPROMPT:-}" ]] && return 1   # startup warns on its own
+    _op_login_check && return 0
+    _op_reauth
+}
+
+# May we prompt? Interactive shell, and not inside a startup path — startup
+# callers (_op_init, mcp's init) set _ZDOT_OP_NOPROMPT as a local, which
+# everything they call can see.
+_op_may_prompt() {
+    [[ $_ZDOT_IS_INTERACTIVE -eq 1 && -z "${_ZDOT_OP_NOPROMPT:-}" ]]
+}
+
+# The check just failed ($reply = signed-out shortnames). When we may
+# prompt: warn, sign each one in via op_auth, check again. Otherwise warn
+# with the op_identity hint. Silent on no_op machines. rc 0 when signed in.
+_op_reauth() {
+    [[ -f "$(op_get_config_dir)/no_op" ]] && return 1
+    local -a out=("${reply[@]}")
+    if ! _op_may_prompt; then
+        zdot_warn "secrets: not signed in to 1Password: ${(j:, :)out}; run op_identity"
+        return 1
+    fi
+    zdot_warn "secrets: not signed in to 1Password: ${(j:, :)out} — signing in"
+    local a
+    for a in "${out[@]}"; do
+        [[ "$a" == default ]] && a=""
+        _op_auth_person "$a"
+    done
+    _op_login_check && return 0
+    zdot_warn "secrets: still not signed in to 1Password: ${(j:, :)reply}; run op_identity"
+    return 1
 }
 
 # `op whoami` for one account, output passed through. <name> is a
@@ -205,7 +319,7 @@ _op_whoami() {
         _op_account_arg "$1"
         acct=(--account "$REPLY")
     fi
-    _op whoami "${acct[@]}"
+    _op_noauth whoami "${acct[@]}"
 }
 
 # Is <name> (or the default account) signed in? Quiet form of _op_whoami.
@@ -233,12 +347,72 @@ _op_signin() {
         acct=(--account "$REPLY")
     fi
     if (( headless )); then
-        out=$(_op signin "${acct[@]}" < /dev/null 2>/dev/null) || return 1
+        out=$(_op_noauth signin "${acct[@]}" < /dev/null 2>/dev/null) || return 1
     else
-        out=$(_op signin "${acct[@]}") || return 1
+        out=$(_op_noauth signin "${acct[@]}") || return 1
     fi
     [[ -n "$out" ]] && eval "$out"
     _op_logged_in "$name"
+}
+
+# Sign a PERSON in to one account (empty: the default account) — the
+# interactive core of op_auth, also used by op_identity's service-account
+# half, which needs a person signed in to create or choose the account.
+# Honors no_op, offers the first-run "Set up 1Password?" prompt, announces
+# the account by shortname, signs in and verifies, and on failure prints
+# the account-url hint. Interactive shells only. rc 0 when signed in.
+_op_auth_person() {
+    [[ $_ZDOT_IS_INTERACTIVE -eq 1 ]] || return 1
+    local account=${1:-} op_config_dir option
+    op_config_dir=$(op_get_config_dir)
+    [[ -f "${op_config_dir}/no_op" ]] && return 1
+
+    if [[ ! -f "${op_config_dir}/config" ]]; then
+        printf "Set up 1Password? [Y/n/c] "
+        read -r -k 1 option
+        [[ "$option" = $'\n' ]] || echo
+        case "$option" in
+            [yY$'\n']) ;;
+            [nN])
+                mkdir -p "${op_config_dir}"
+                touch "${op_config_dir}/no_op"
+                return 1
+                ;;
+            *)
+                echo "You will be asked at next login"
+                return 1
+                ;;
+        esac
+    fi
+
+    _op_logged_in "$account" && return 0
+    printf "Signing into 1Password: %s\n" "${account:-default account}"
+    _op_signin "$account" && return 0
+    echo "1Password: sign-in did not take for '${account:-default}'"
+    if [[ -n "$account" ]]; then
+        _op_account_arg "$account"
+        if [[ "$REPLY" == "$account" ]]; then
+            echo "  '$account' is not a CLI shorthand — map it:"
+            echo "    zstyle ':zdot:secrets:op:$account' account-url <address|email|uuid>"
+        fi
+    fi
+    return 1
+}
+
+# Service-account mode: is a working token available? Loads it from the
+# token cache when this shell doesn't have it, and makes sure it's exported
+# (op_identity unexports it while it signs a person in). rc 0 when `op
+# whoami` accepts it.
+_op_sa_token_ok() {
+    if [[ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
+        typeset -A _se
+        _op_get_secrets_env && _se=("${reply[@]}")
+        local cache="${_se[cache]}/${USER}.op-secrets.zsh"
+        [[ -f "$cache" ]] && source "$cache"
+    fi
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] || return 1
+    export OP_SERVICE_ACCOUNT_TOKEN
+    _op_logged_in
 }
 
 # Login-mode viability check, run per configured account. No interactive
@@ -255,6 +429,7 @@ _op_login_check() {
     if [[ -f "${op_config_dir}/no_op" ]]; then
         reply=()
         _ZDOT_OP_ACTIVE=0
+        [[ -n "$_ZDOT_OP_SESSION" ]] && _ZDOT_OP_SESSION=failed
         return 1
     fi
     local -a accounts signed_out
@@ -275,9 +450,11 @@ _op_login_check() {
     reply=("${signed_out[@]}")
     if (( ${#signed_out} == 0 )); then
         _ZDOT_OP_ACTIVE=1
+        [[ -n "$_ZDOT_OP_SESSION" ]] && _ZDOT_OP_SESSION=ok
         return 0
     fi
     _ZDOT_OP_ACTIVE=0
+    [[ -n "$_ZDOT_OP_SESSION" ]] && _ZDOT_OP_SESSION=failed
     return 1
 }
 
@@ -345,6 +522,9 @@ _setup_ssh_auth_sock() {
 # Module initialization - set up 1Password secrets
 _op_init() {
     command -v op &> /dev/null || return 0
+    # Startup never prompts: everything called from here sees this local
+    # (_op_may_prompt) and only warns.
+    local _ZDOT_OP_NOPROMPT=1
 
     # Secrets environment — one resolver, named keys (see _op_get_secrets_env)
     typeset -A _se
@@ -358,16 +538,23 @@ _op_init() {
     local op_mode
     _op_get_mode && op_mode=$REPLY
     local -a signed_out=()
-    if [[ "$op_mode" == login ]]; then
-        # Login mode: no prompts at startup (the check only self-heals
-        # headlessly); op_refresh is the interactive recovery path. Remember
+    _ZDOT_OP_SESSION=""
+    if [[ "$op_mode" == lazy-login && ! -f "$(op_get_config_dir)/no_op" ]]; then
+        # Lazy login: set up, sessions not checked. Nothing here calls
+        # op; the first op call that is actually needed (a template newer
+        # than its cache, or a command you run) checks via _op_ensure_session.
+        _ZDOT_OP_ACTIVE=1
+        _ZDOT_OP_SESSION=pending
+    elif [[ "$op_mode" == login || "$op_mode" == lazy-login ]]; then
+        # Login (or lazy-login on a no_op machine): no prompts at startup (the check only self-heals
+        # headlessly); op_identity is the interactive recovery path. Remember
         # who is signed out for the warning below.
         _op_login_check || signed_out=("${reply[@]}")
     else
         # Service-account mode (back-compat): refresh the token cache if the
         # template is newer, then source it.
         if zdot_is_newer_or_missing "${secrets_src_dir}/op-secrets.zsh" "${secrets_cache}/${USER}.op-secrets.zsh"; then
-            op_refresh
+            op_identity
         fi
         if [[ -f "${secrets_cache}/${USER}.op-secrets.zsh" ]]; then
             source "${secrets_cache}/${USER}.op-secrets.zsh"
@@ -407,7 +594,7 @@ _op_init() {
         else
             loaded="no cached secrets to load"
         fi
-        zdot_warn "secrets: ${cause} — ${loaded}; run op_refresh, then refresh_shell_secrets"
+        zdot_warn "secrets: ${cause} — ${loaded}; run op_identity, then refresh_shell_secrets"
     fi
     [[ -f "$cache_file" ]] && source "$cache_file"
 

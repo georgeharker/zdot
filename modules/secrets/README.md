@@ -32,14 +32,14 @@ results to the cache directory, which should not be committed.
 
 ### Startup sequence
 
-Auth mode is resolved from `zstyle ':zdot:secrets:op' mode` (default
-`service-account`).
+Auth mode is resolved from `zstyle ':zdot:secrets:op' mode`:
+`service-account` (default), `login` or `lazy-login`.
 
 **Service-account mode** — `_op_init` does the following in order:
 
 1. Runs the `secrets-configure` group (user configuration hooks — see below)
 2. If the cached `$USER.op-secrets.zsh` is missing or older than the template,
-   calls `op_refresh` to rebuild it
+   calls `op_identity` to rebuild it
 3. Sources `$USER.op-secrets.zsh` to load `OP_SERVICE_ACCOUNT_TOKEN`; sets
    `_ZDOT_OP_ACTIVE=1` if the token is present (or `op whoami` works)
 4. If active and the cached `$USER.secrets.zsh` is older than its template,
@@ -48,16 +48,24 @@ Auth mode is resolved from `zstyle ':zdot:secrets:op' mode` (default
    is *not* active, so a signed-out shell still gets the last good secrets
 6. If 1Password is not active, prints one warning naming the cause and what
    was loaded instead, e.g. `not signed in to 1Password: personal — using
-   cached secrets (older than the template); run op_refresh, then
+   cached secrets (older than the template); run op_identity, then
    refresh_shell_secrets`. Machines with the `no_op` sentinel stay quiet.
 7. Sets up `SSH_AUTH_SOCK` to point at the 1Password SSH agent (macOS only,
    skipped when in an SSH connection)
 
-**Login mode** — same order, but steps 2–3 become a per-account check:
-`op whoami` for each `login-accounts` entry, with one silent `op signin`
-attempt for any that are signed out. It never prompts at startup; when you
-run `op_refresh` yourself, it signs in whatever is still signed out (via
-`op_auth`). `_ZDOT_OP_ACTIVE=1` only when every account is signed in.
+**`login`** — same order, but steps 2–3 become a per-account check:
+`op whoami` for each `login-accounts` entry, with one `op signin` attempt
+for any that are signed out. With desktop-app integration that attempt is
+what shows Touch ID: authorization is per terminal tab and per account, so
+every new tab prompts. `_ZDOT_OP_ACTIVE=1` only when every account is
+signed in; `op_identity` (or `op_auth`) signs in whatever is still signed
+out.
+
+**`lazy-login`** (recommended over `login` — see *Login modes* below):
+steps 2–3 are skipped. Startup makes no `op` calls; it sets
+`_ZDOT_OP_ACTIVE=1` ("set up") and `_ZDOT_OP_SESSION=pending`. Step 4 only
+needs `op` when a template is newer than its cache, and that first `op` call
+runs the per-account check. A new tab with up-to-date caches never prompts.
 
 Interactive prompts (first-time setup, service account creation) only fire in
 interactive shells. Noninteractive shells silently skip setup if no cache exists.
@@ -68,12 +76,12 @@ interactive shells. Noninteractive shells silently skip setup if no cache exists
 
 All configuration is done via `zstyle` from within a `secrets-configure` group
 hook (see below). The following zstyles are read by `op_get_vault_config` inside
-`op_refresh`:
+`op_identity`:
 
 | zstyle key | Default | Purpose |
 |---|---|---|
-| `':zdot:secrets:op' mode` | `service-account` | Auth mode. `service-account` (default): token flows via the cached `$USER.op-secrets.zsh` — see *First-time interactive setup*. `login`: viability is a signed-in session (`op whoami`); the service-account machinery (op-secrets template, token cache, `OP_SERVICE_ACCOUNT_TOKEN`) is ignored entirely. For machines without service accounts (e.g. work) |
-| `':zdot:secrets:op' login-accounts` | *(unset)* | Login-mode multi-account **viability authority**: shorthands from `op account list` (e.g. `personal allenai`). Each is checked individually (`op whoami --account <a>`); usable when at least one is signed in, and `op_refresh` recovery targets signed-out ones. Does NOT configure injection — that comes from the account-*tagged* refs in the template (see `op_multi_inject`) |
+| `':zdot:secrets:op' mode` | `service-account` | Auth mode. `service-account` (default): the identity is a service-account token, cached in `$USER.op-secrets.zsh` and good for the whole session — see *First-time interactive setup*. `login`: the identity is a set of signed-in sessions, checked at startup; the service-account machinery (op-secrets template, token cache, `OP_SERVICE_ACCOUNT_TOKEN`) is ignored entirely. `lazy-login`: the same, but checked at the first `op` call that's actually needed, so tabs with up-to-date caches never prompt — recommended over `login`. The login modes are for machines without service accounts (e.g. work) |
+| `':zdot:secrets:op' login-accounts` | *(unset)* | Login modes: the accounts to sign in, as shorthands (e.g. `personal allenai`). Each is checked individually (`op whoami --account <a>`); 1Password counts as usable only when every one is signed in, and `op_identity` / `op_auth` sign in the ones that aren't. Does NOT configure injection — that comes from the account-*tagged* refs in the template (see `op_multi_inject`) |
 | `':zdot:secrets:op' service-acct-vault` | `ServiceAcct` | Vault where per-host service account credentials are stored (service-account mode only) |
 | `':zdot:secrets:op' api-vault` | `API` | Vault containing API keys / tokens |
 | `':zdot:secrets:op' ssh-vault` | `SSHKeys` | Vault containing SSH keys |
@@ -171,21 +179,22 @@ All functions are autoloaded on first call.
 
 | Function | Description |
 |---|---|
-| `op_refresh` | Keep this machine's 1Password credential current. SA mode: the service-account token (interactive runs may create/choose the account, then re-inject the token cache). Login mode: the signed-in account sessions (check each account, sign in the rest via `op_auth`, report). Sets `_ZDOT_OP_ACTIVE`. |
-| `refresh_shell_secrets` | Re-inject the `secrets.zsh` template into its cache and source the result, via `op_inject_template`. Requires `_ZDOT_OP_ACTIVE=1`. |
-| `op_auth` | Sign-in building block (interactive only), used by `op_refresh` when a person is needed. With `login-accounts` set it walks every account; `op_auth <name>` signs in one. Names resolve via `':zdot:secrets:op:<name>' account-url`. `--reset` forgets the accounts and drops cached credentials, then signs in again. |
+| `op_identity` | Establish this machine's 1Password identity. Service-account mode: create or choose the service account (interactive), write its template, inject the token cache. Login modes: check each account, sign in the rest, report each. Sets `_ZDOT_OP_ACTIVE`. `op_refresh` is the old name and still works. |
+| `refresh_shell_secrets` | Re-inject the `secrets.zsh` template into its cache and source the result, via `op_inject_template`. Needs a signed-in 1Password: in an interactive shell a signed-out account is re-asked for (warning, then `op_auth`); scripts and startup only warn. Service-account mode only warns when the token isn't loaded. The mcp module's `refresh_mcpservers_secret` behaves the same way. |
+| `op_auth` | Sign in (interactive only). Login modes: signs people in — every `login-accounts` entry, or `op_auth <name>` for one; names resolve via `':zdot:secrets:op:<name>' account-url`. Service-account mode: uses the token if it works (loading it from the cache if needed); otherwise errors and points at `op_identity` — it never creates a service account. `--reset` forgets the accounts and drops cached credentials first. |
 | `op_get_vault_config` | Return vault names in `$reply` as name/value pairs (`svc`/`api`/`ssh`) — read into `typeset -A _v`; consumer pattern in the function header. |
 | `op_get_vault_grants` | Return the service-account grant ARRAY in `$reply` (zstyle `service-acct-grants`, or the default derived from the api/ssh vault names passed as args). |
 | `op_get_config_dir` | Print the `op` config directory (sudo-aware). |
 | `op_get_config_args` | Print `--config <dir>` args for `op` invocations (one token per line). |
 | `op_inject_template` | Inject one template to one output file: account-tagged (`op-<acct>://…`) templates go through `op_multi_inject`, plain ones through `op inject`. Shared by the shell-secrets and mcp refreshers. |
-| `op_multi_inject` | `op inject` work-alike for account-tagged templates: one piped inject pass per account; all-or-nothing; never sources its output. See *Multiple accounts*. |
+| `op_multi_inject` | `op inject` work-alike for account-tagged templates: one inject pass per account — a single pipeline for one or two accounts, a loop beyond that; all-or-nothing; never sources its output. See *Multiple accounts*. |
 
 ### Global state
 
 | Variable | Values | Meaning |
 |---|---|---|
-| `_ZDOT_OP_ACTIVE` | `0` / `1` | Set to `1` when 1Password is authenticated and usable — in either auth mode (login session or service-account token). Other modules gate on this before using `op`. |
+| `_ZDOT_OP_ACTIVE` | `0` / `1` | `1` when 1Password is set up for use: the service-account token is loaded, or (`login`) every account is signed in, or (`lazy-login`) configured but not yet checked. Other modules gate on this before using `op`. |
+| `_ZDOT_OP_SESSION` | `""` / `pending` / `ok` / `failed` | `lazy-login` only (empty otherwise). `pending`: sessions not checked yet; the first `op` call checks them. `ok`/`failed`: the result. After `failed`, an `op` command you run in an interactive shell checks again and re-asks; in scripts and during startup it's refused with a hint, so there's no prompt per command. `op_identity` also re-checks. |
 
 ---
 
@@ -194,9 +203,9 @@ All functions are autoloaded on first call.
 ### Service-account mode (default)
 
 On first login in an interactive shell, if no `op` config or service account
-exists, `op_refresh` will:
+exists, `op_identity` will:
 
-1. Call `op_auth` — prompts to sign in to 1Password if needed. Choosing `c`
+1. Sign you in — prompts to sign in to 1Password if needed. Choosing `c`
    (cancel) defers setup to the next login. Choosing `n` creates a `no_op`
    sentinel file and permanently skips setup on that machine.
 2. Prompt whether to create a **new** service account or select an **existing**
@@ -208,16 +217,29 @@ exists, `op_refresh` will:
    the interactive session (the service account takes over from here).
 
 On every subsequent shell start the module simply sources the cached token —
-no interactive prompts fire.
+no interactive prompts fire. The token lasts the whole session: `op_auth`
+just confirms it works, and if it's missing or broken `op_auth` says to run
+`op_identity` rather than setting it up itself.
 
-### Login mode
+### Login modes
 
-Set `zstyle ':zdot:secrets:op' mode login` in a `secrets-configure` hook.
-Startup stays passive: `_op_init` checks `op whoami` and, if not signed in,
-warns (never prompts). Running `op_refresh` yourself is the recovery verb —
-not signed in and interactive -> `op_auth` prompts for sign-in and retries,
-then surfaces the account that signed in. Service accounts are never created,
-and `$XDG_CONFIG_HOME/secrets/op-secrets.zsh` (if it exists from before) is
+Set the mode in a `secrets-configure` hook. We recommend `lazy-login`:
+
+```zsh
+zstyle ':zdot:secrets:op' mode lazy-login
+```
+
+Why lazy: with desktop-app integration, 1Password authorizes the CLI per
+terminal tab and per account (10 minutes idle, 12 hours max, revoked when
+the app locks). In `login` mode startup checks every account, so every new
+tab asks for Touch ID once per account. In `lazy-login` a tab only asks when
+it actually needs `op` — a template newer than its cache, or a command you
+run — and otherwise uses the cached secrets. Service-account mode doesn't
+need this: the token lasts the session and never prompts.
+
+`op_auth` signs the accounts in; `op_identity` does the same and then
+reports each account. Service accounts are never created, and
+`$XDG_CONFIG_HOME/secrets/op-secrets.zsh` (if it exists from before) is
 ignored. Shell secrets still refresh via `refresh_shell_secrets` — `op inject`
 works identically under a signed-in session.
 
@@ -257,8 +279,10 @@ which hands tagged templates to `op_multi_inject`:
 
 - Accounts derive from the tags (`op-<acct>://`) themselves — pass 1 seds
   `op-personal://` → `op://` and injects with `--account personal`; its
-  output feeds pass 2 for the next tag, and so on. Fully piped (no temp
-  files), order-independent, and resolved values can never be re-resolved.
+  output feeds pass 2 for the next tag, and so on. One or two passes run as a
+  single pipeline; three or more run as a loop. No temp files; passes are
+  order-independent, resolved values can never be re-resolved, and a
+  failing pass names its account.
 - `login-accounts` is the *viability* authority (startup checks, recovery);
   the tags are the *inject* authority. A tagged account that is signed out
   at inject time → error, nothing is written (last good cache stays).
@@ -268,15 +292,17 @@ which hands tagged templates to `op_multi_inject`:
 - `op_multi_inject` is general-purpose: it never sources its output, so you
   can point it at machine configs too (e.g. an mcp JSON mixing both
   accounts' keys).
-- Startup checks each account and, if one is signed out, tries a silent
-  `op signin` for it before warning. If any stay signed out, the warning
-  names them.
-- Recovery: `op_refresh` signs into each signed-out `login-accounts` entry
-  via `op_auth`, then reports per-account status.
+- In `login` mode, startup checks each account and, if one is signed out,
+  tries `op signin` for it before warning; if any stay signed out, the
+  warning names them. In `lazy-login` the same check runs at the first `op`
+  call that needs it.
+- Recovery: `op_auth` (or `op_identity`) signs into each signed-out
+  `login-accounts` entry; `op_identity` then reports per-account status.
 
-With desktop-app integration, none of this triggers a fingerprint at shell
-start: `op whoami` never unlocks; the app is only unlocked (once per
-auto-lock cycle) when an `op inject` first needs a secret.
+With desktop-app integration, each new terminal tab has to authorize each
+account (Touch ID). `op whoami` alone never prompts; `op signin`, `op inject`
+and other commands do when the tab isn't authorized yet. That's the reason
+to use `lazy-login`: tabs with up-to-date caches never reach `op` at all.
 
 ---
 
