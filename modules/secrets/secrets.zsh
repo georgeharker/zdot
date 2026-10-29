@@ -581,7 +581,8 @@ _op_init() {
             zdot_verbose "secrets: cache is up to date, skipping refresh"
         fi
     elif [[ ! -f "$(op_get_config_dir)/no_op" ]] \
-        && { (( ${#signed_out} )) || [[ -f "$template" || -f "$cache_file" ]] }; then
+        && { (( ${#signed_out} )) || [[ -f "$template" || -f "$cache_file" ]] } \
+        && [[ -o interactive ]]; then
         local cause loaded
         if (( ${#signed_out} )); then
             cause="not signed in to 1Password: ${(j:, :)signed_out}"
