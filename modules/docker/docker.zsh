@@ -2,13 +2,17 @@
 # docker: Docker completions manager environment
 
 _docker_init() {
+    # Honor DOCKER_CONFIG if set (see zdot-modules/env), else fall back to the
+    # legacy ~/.docker. Never hardcode ~/.docker when the user relocated it.
+    local docker_config="${DOCKER_CONFIG:-${HOME}/.docker}"
+
     # .zshrc only loads this module on macOS, but guard defensively
-    if [[ -d ~/.docker/ ]]; then
-        if [[ -d ~/.docker/bin ]]; then
-            export PATH="${PATH}:${HOME}/.docker/bin"
+    if [[ -d "$docker_config/" ]]; then
+        if [[ -d "$docker_config/bin" ]]; then
+            export PATH="${PATH}:$docker_config/bin"
         fi
-        if [[ -d ~/.docker/completions/ ]]; then
-            zdot_add_fpath "${HOME}/.docker/completions" --glob '_*'
+        if [[ -d "$docker_config/completions/" ]]; then
+            zdot_add_fpath "$docker_config/completions" --glob '_*'
         fi
         if command -v docker &>/dev/null; then
             if (( ! $+DOCKER_HOST )); then
