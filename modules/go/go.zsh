@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # go: Go toolchain and environment
-# Manages Bun installation and completions
+# Sets up the Go bin dir on PATH and loads golang completions
 
 # Requires
 # zstyle ':zdot:brew' verify-tools go
@@ -9,6 +9,9 @@
 _go_init() {
     # For completions
     zdot_load_plugin omz:golang
+
+    # Availability is gated declaratively: --requires-optional-tool skips this
+    # hook when go isn't on PATH (after the tool provider ran).
 
     # set up path
     export PATH="${PATH}:$(go env GOBIN)"
@@ -21,5 +24,5 @@ zdot_use_plugin omz:golang
 zdot_simple_hook go --provides go-ready \
     --requires-group go-configure \
     --requires bootstrap-ready \
-    --requires-tool go \
+    --requires-optional-tool go \
     --group completions-producers
