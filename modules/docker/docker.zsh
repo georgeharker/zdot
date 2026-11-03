@@ -1,24 +1,33 @@
 #!/usr/bin/env zsh
-# docker: Docker completions manager environment
+# docker: client env (completions, plugin bin, DOCKER_HOST) + OrbStack shell
+# integration. Engine-agnostic: works for orbstack/colima/parallels contexts.
 
 _docker_init() {
-    # Honor DOCKER_CONFIG if set (see zdot-modules/env), else fall back to the
-    # legacy ~/.docker. Never hardcode ~/.docker when the user relocated it.
+    # Client config lives wherever DOCKER_CONFIG points (see
+    # zdot-modules/env; XDG data dir). Never hardcode ~/.docker.
     local docker_config="${DOCKER_CONFIG:-${HOME}/.docker}"
 
     # .zshrc only loads this module on macOS, but guard defensively
     if [[ -d "$docker_config/" ]]; then
-        if [[ -d "$docker_config/bin" ]]; then
-            export PATH="${PATH}:$docker_config/bin"
+        [[ -d "$docker_config/bin" ]] && export PATH="${PATH}:$docker_config/bin"
+        [[ -d "$docker_config/completions/" ]] \
+            && zdot_add_fpath "$docker_config/completions" --glob '_*'
+        # Derive DOCKER_HOST from the active context once per shell — keeps
+        # non-shell consumers (SwiftBar, launchd apps) from having to.
+        if command -v docker &>/dev/null && (( ! $+DOCKER_HOST )); then
+            export DOCKER_HOST=`docker context ls --format json | jq -r 'select(.Current) | .DockerEndpoint'`
         fi
-        if [[ -d "$docker_config/completions/" ]]; then
-            zdot_add_fpath "$docker_config/completions" --glob '_*'
-        fi
-        if command -v docker &>/dev/null; then
-            if (( ! $+DOCKER_HOST )); then
-                export DOCKER_HOST=`docker context ls --format json | jq -r 'select(.Current) | .DockerEndpoint'`
-            fi
-        fi
+    fi
+
+    # OrbStack CLI tools + completions — owned here instead of the block the
+    # app writes into ~/.zprofile (delete if it re-adds). Resolve through the
+    # ~/.orbstack symlink (→ ~/.local/share/orbstack, see install_orbstack);
+    # OrbStack rewrites these files on upgrades, so never inline them.
+    local orb_dir="${HOME}/.orbstack"
+    if [[ -d "$orb_dir/shell" ]]; then
+        [[ -d "$orb_dir/bin" ]] && export PATH="${PATH}:$orb_dir/bin"
+        [[ -d "$orb_dir/shell/completions/zsh" ]] \
+            && fpath+=("$orb_dir/shell/completions/zsh")
     fi
 }
 
