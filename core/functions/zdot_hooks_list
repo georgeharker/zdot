@@ -1,7 +1,9 @@
 #!/usr/bin/env zsh
 # List all registered hooks organized by the phases they provide
-# Usage: zdot_hooks_list [--verbose|-v] [--all|-a|all] [--ordered|-o]
+# Usage: zdot_hooks_list [--verbose|-v] [--all|-a|all] [--ordered|-o] [--timing|-t]
 # Options:
+#   --timing, -t     Append each hook's measured body time and print a timing
+#                    summary (pass totals + slowest hooks)
 #   --verbose, -v    Show whether functions are defined and show dependencies
 #   --all, -a, all   Show all contexts (default: only show current shell context)
 #   --ordered, -o    Show hooks in execution-plan order (eager → deferred → unplanned)
@@ -10,6 +12,7 @@ function zdot_hooks_list() {
     local verbose=0
     local show_all=0
     local ordered=0
+    local timing=0
 
     # Parse arguments
     for arg in "$@"; do
@@ -22,6 +25,9 @@ function zdot_hooks_list() {
                 ;;
             --ordered|-o)
                 ordered=1
+                ;;
+            --timing|-t)
+                timing=1
                 ;;
         esac
     done
@@ -43,7 +49,8 @@ function zdot_hooks_list() {
                 _zdot_hook_display_marks "$hook_id" "$func"
                 typeset -A _mk
                 _mk=("${reply[@]}")
-                zdot_info "  [$_pos] $func${_mk[status]}"
+                (( timing )) || _mk[time]=""
+                zdot_info "  [$_pos] $func${_mk[status]}${_mk[time]}"
                 zdot_info "       name:     $name"
                 zdot_info "       provides: $provides"
                 zdot_info "       deferred: no"
@@ -74,7 +81,8 @@ function zdot_hooks_list() {
                 _zdot_hook_display_marks "$hook_id" "$func"
                 typeset -A _mk
                 _mk=("${reply[@]}")
-                zdot_info "  [$_pos] $func${_mk[status]}"
+                (( timing )) || _mk[time]=""
+                zdot_info "  [$_pos] $func${_mk[status]}${_mk[time]}"
                 zdot_info "       name:     $name"
                 zdot_info "       provides: $provides"
                 zdot_info "       deferred: yes"
@@ -115,7 +123,8 @@ function zdot_hooks_list() {
             _zdot_hook_display_marks "$hook_id" "$func"
             typeset -A _mk
             _mk=("${reply[@]}")
-            zdot_info "  [$_pos] $func${_mk[status]} [finally]"
+            (( timing )) || _mk[time]=""
+            zdot_info "  [$_pos] $func${_mk[status]}${_mk[time]} [finally]"
             zdot_info "       name:     $name"
             zdot_info "       provides: $provides"
             zdot_info "       group:    finally"
@@ -165,6 +174,10 @@ function zdot_hooks_list() {
 
         local _total=${#_ZDOT_HOOKS[@]}
         zdot_info "Total: $_total hook(s) registered"
+        if (( timing )); then
+            zdot_info ""
+            _zdot_timing_summary
+        fi
         return 0
     fi
 
@@ -299,6 +312,10 @@ function zdot_hooks_list() {
                         zdot_info "  ✗ $func (NOT defined)"
                     fi
                     zdot_info "    name: ${_ZDOT_HOOK_NAMES[$hook_id]:-$func}"
+                    if (( timing )); then
+                        _zdot_hook_time_mark "$hook_id"
+                        zdot_info "    time:${REPLY:- (not run)}"
+                    fi
                     zdot_info "    contexts: $contexts"
                     zdot_info "    requires: $requires"
                     local _grp="${_ZDOT_HOOK_GROUP[$hook_id]:-}"
@@ -329,12 +346,13 @@ function zdot_hooks_list() {
                     _zdot_hook_display_marks "$hook_id" "$func"
                     typeset -A _mk
                     _mk=("${reply[@]}")
+                    (( timing )) || _mk[time]=""
                     local _variant_mark=""
                     local _vr="${_ZDOT_HOOK_VARIANTS[$hook_id]:-}"
                     local _ve="${_ZDOT_HOOK_VARIANT_EXCLUDES[$hook_id]:-}"
                     [[ -n $_vr ]] && _variant_mark=" [variant: $_vr]"
                     [[ -n $_ve ]] && _variant_mark=" [variant-excl: $_ve]"
-                    zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}$_variant_mark"
+                    zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}${_mk[time]}$_variant_mark"
                 fi
             done
             zdot_info ""
@@ -383,7 +401,8 @@ function zdot_hooks_list() {
                 _zdot_hook_display_marks "$hook_id" "$func"
                 typeset -A _mk
                 _mk=("${reply[@]}")
-                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}"
+                (( timing )) || _mk[time]=""
+                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}${_mk[time]}"
             fi
         done
         zdot_info ""
@@ -422,7 +441,8 @@ function zdot_hooks_list() {
                 _zdot_hook_display_marks "$hook_id" "$func"
                 typeset -A _mk
                 _mk=("${reply[@]}")
-                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[noquiet]}${_mk[status]} [finally]"
+                (( timing )) || _mk[time]=""
+                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[noquiet]}${_mk[status]}${_mk[time]} [finally]"
             fi
         done
         zdot_info ""
@@ -470,7 +490,8 @@ function zdot_hooks_list() {
                 _zdot_hook_display_marks "$hook_id" "$func"
                 typeset -A _mk
                 _mk=("${reply[@]}")
-                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}"
+                (( timing )) || _mk[time]=""
+                zdot_info "  • $func ($contexts)$optional_mark${_mk[name]}${_mk[deferred]}${_mk[noquiet]}${_mk[status]}${_mk[time]}"
             fi
         done
         zdot_info ""
@@ -528,5 +549,10 @@ function zdot_hooks_list() {
         zdot_info "Total: $total_hooks registered hook(s)"
     else
         zdot_info "Total: $shown_hooks hook(s) in active contexts (of $total_hooks registered)"
+    fi
+
+    if (( timing )); then
+        zdot_info ""
+        _zdot_timing_summary
     fi
 }

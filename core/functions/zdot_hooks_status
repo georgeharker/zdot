@@ -1,6 +1,8 @@
 #!/usr/bin/env zsh
 # Show per-hook execution status from the last zdot startup.
-# Usage: zdot_hooks_status
+# Usage: zdot_hooks_status [--timing|-t]
+#   --timing, -t   append each hook's measured body time and print a timing
+#                  summary (pass totals + slowest hooks)
 #
 # Requires zdot_execute_all to have run (i.e. after shell startup).
 # Shows each hook in plan order annotated with:
@@ -11,6 +13,13 @@
 #   (deferred)     in deferred plan — may have run post-prompt
 
 function zdot_hooks_status() {
+    local timing=0 arg
+    for arg in "$@"; do
+        case "$arg" in
+            --timing|-t) timing=1 ;;
+        esac
+    done
+
     if (( ${#_ZDOT_EXECUTION_PLAN[@]} == 0 \
         && ${#_ZDOT_EXECUTION_PLAN_DEFERRED[@]} == 0 )); then
         zdot_warn "No execution plan found — has zdot_init been called?"
@@ -31,7 +40,8 @@ function zdot_hooks_status() {
             _zdot_hook_display_marks "$hook_id" "$func"
             typeset -A _mk
             _mk=("${reply[@]}")
-            zdot_info "    [$_pos] $func${_mk[status]}"
+            (( timing )) || _mk[time]=""
+            zdot_info "    [$_pos] $func${_mk[status]}${_mk[time]}"
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
             if [[ -z "$_rc" ]]; then
                 (( _notrun++ ))
@@ -54,7 +64,8 @@ function zdot_hooks_status() {
             _zdot_hook_display_marks "$hook_id" "$func"
             typeset -A _mk
             _mk=("${reply[@]}")
-            zdot_info "    [$_pos] $func${_mk[status]}"
+            (( timing )) || _mk[time]=""
+            zdot_info "    [$_pos] $func${_mk[status]}${_mk[time]}"
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
             if [[ -n "$_rc" && "$_rc" != '0' ]]; then
                 (( _failed++ ))
@@ -70,6 +81,11 @@ function zdot_hooks_status() {
     # Summary
     zdot_info "  Summary: ${_ok} ok, ${_failed} failed, ${_notrun} not run (eager)"
     zdot_info ""
+
+    if (( timing )); then
+        _zdot_timing_summary
+        zdot_info ""
+    fi
 
     return $(( _failed > 0 || _notrun > 0 ))
 }

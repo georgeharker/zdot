@@ -4,7 +4,7 @@
 #
 # Nouns and verbs:
 #   cache   status | invalidate | compile
-#   hook    list [--verbose|-v] [--all|-a] [--ordered|-o] | plan | status | defer-queue
+#   hook    list [--verbose|-v] [--all|-a] [--ordered|-o] [--timing|-t] | plan | status [-t] | defer-queue [-t]
 #   phase   list [--context <ctx>]
 #   plugin  list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [spec...|--all] [--remove-unused] [--dry-run] | reclone [spec...|--all] [--dry-run]
 #   module  list | clone <name>
@@ -33,13 +33,15 @@ function zdot() {
     function _zdot_help_hook() {
         zdot_info "zdot hook — hook and execution plan management"
         zdot_info ""
-        zdot_info "  zdot hook list [-v] [-a] [-o]  List registered hooks"
+        zdot_info "  zdot hook list [-v] [-a] [-o] [-t]  List registered hooks"
         zdot_info "    -v, --verbose            Show full hook metadata"
         zdot_info "    -a, --all                Include unexecuted hooks"
         zdot_info "    -o, --ordered            Show hooks in execution-plan order"
+        zdot_info "    -t, --timing             Show per-hook execution time + timing summary"
         zdot_info "  zdot hook plan               Print the full execution plan"
-        zdot_info "  zdot hook status             Show per-hook run status from last startup"
-        zdot_info "  zdot hook defer-queue        Show deferred task submission order"
+        zdot_info "  zdot hook status [-t]        Show per-hook run status from last startup"
+        zdot_info "  zdot hook defer-queue [-t]   Show deferred task submission order"
+        zdot_info "    -t, --timing             (status, defer-queue) add per-hook times + summary"
         zdot_info "  zdot hook graph              Show pstree-style dependency-tree graph"
         zdot_info "    --depends <name>         Show what a hook requires (recursive)"
         zdot_info "    --uses <name>            Show what depends on a hook (recursive)"
@@ -172,7 +174,7 @@ function zdot() {
         zdot_info "Usage: zdot <noun> <verb> [options]"
         zdot_info ""
         zdot_info "  cache      status | invalidate | compile"
-        zdot_info "  hook       list [-v] [-a] [-o] | plan | status | defer-queue | graph [--depends <name>|--uses <name>|--all]"
+        zdot_info "  hook       list [-v] [-a] [-o] [-t] | plan | status [-t] | defer-queue [-t] | graph [--depends <name>|--uses <name>|--all]"
         zdot_info "  phase      list [--context <ctx>]"
         zdot_info "  plugin     list [--loaded|--installed|--declared] | update [spec...] | check-updates [spec...] | clean [spec...|--all] | reclone [spec...|--all]"
         zdot_info "  module     list | clone <name>"
@@ -212,8 +214,8 @@ function zdot() {
             case "$verb" in
                 list)        zdot_hooks_list "${@:3}" ;;
                 plan)        zdot_show_plan ;;
-                status)      zdot_hooks_status ;;
-                defer-queue) zdot_show_defer_queue ;;
+                status)      zdot_hooks_status "${@:3}" ;;
+                defer-queue) zdot_show_defer_queue "${@:3}" ;;
                 graph)       zdot_hooks_graph "${@:3}" ;;
                 help|--help|-h) _zdot_help_hook ;;
                 *)

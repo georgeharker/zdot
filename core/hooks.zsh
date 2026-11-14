@@ -20,6 +20,32 @@ typeset -gA _ZDOT_HOOK_REQUIRES_CONTEXTS # "hook_id:phase" -> "ctx1 ctx2 ..." (a
 typeset -gA _ZDOT_PHASES_PROVIDED    # phase_name -> 1 when actually available at runtime
 typeset -gA _ZDOT_HOOKS_EXEC_RESULT       # hook_id -> exit code for every attempted hook (0=ok, N=failed, 'missing'=fn not found)
 typeset -gA _ZDOT_HOOKS_QUEUED       # hook_id -> 1 when queued for deferred execution (but not yet run)
+
+# ── Execution timing ──────────────────────────────────────────────────────
+# Measured where hooks RUN (_zdot_execute_hook — the eager pass and the deferred
+# wrapper alike), never at the zsh-defer layer. Per-shell runtime facts: never
+# cache-persisted. Values are milliseconds (fixed 3dp strings). Only hooks whose
+# body actually ran get an entry; gate-skipped hooks have none.
+#   _ZDOT_HOOK_TIME_MS   hook_id -> body wall time (inclusive of anything the body
+#                        runs synchronously, e.g. zdot_load_plugin; NOT of work it
+#                        hands to zdot_defer, which runs later as its own task)
+#   _ZDOT_HOOK_START_MS  hook_id -> body start, as an offset from _ZDOT_TIMING_T0
+# Pass totals (wall clock, so they include zdot's own dispatch overhead):
+#   _ZDOT_EAGER_WALL_MS  zdot_execute_all start → end
+#   _ZDOT_DEFER_WALL_MS  first deferred drain wave → drain complete/stalled (this
+#                        spans ZLE idle gaps between waves, so it is "time until
+#                        fully loaded", not CPU time)
+# EPOCHREALTIME needs zsh/datetime; if it can't load, _ZDOT_TIMING=0 and all of
+# the above stay empty (display code treats missing values as "no timing").
+zmodload -F zsh/datetime p:EPOCHREALTIME 2>/dev/null
+typeset -g _ZDOT_TIMING=0
+(( ${+EPOCHREALTIME} )) && _ZDOT_TIMING=1
+typeset -g _ZDOT_TIMING_T0=${EPOCHREALTIME:-0}
+typeset -gA _ZDOT_HOOK_TIME_MS
+typeset -gA _ZDOT_HOOK_START_MS
+typeset -g _ZDOT_EAGER_WALL_MS=''
+typeset -g _ZDOT_DEFER_WALL_MS=''
+typeset -g _ZDOT_DEFER_WALL_T0=''
 typeset -g _ZDOT_HOOK_COUNTER=0
 typeset -ga _ZDOT_EXECUTION_PLAN          # Ordered array of hook_ids
 typeset -ga _ZDOT_EXECUTION_PLAN_DEFERRED # Subset of plan: hook_ids that are deferred
@@ -2018,10 +2044,17 @@ _zdot_execute_hook() {
     if typeset -f "$func" > /dev/null; then
         _zdot_internal_debug "zdot: hooks: run: ${func} (hook_id=${hook_id} provides=(${provides[*]}))"
         _ZDOT_CURRENT_HOOK_FUNC=$func
+        local _zdot_eh_t0=${EPOCHREALTIME:-}
         $func
         local _rc=$?
+        if [[ -n $_zdot_eh_t0 ]]; then
+            local -F 3 _zdot_eh_ms=$(( (EPOCHREALTIME - _zdot_eh_t0) * 1000 ))
+            local -F 3 _zdot_eh_at=$(( (_zdot_eh_t0 - _ZDOT_TIMING_T0) * 1000 ))
+            _ZDOT_HOOK_TIME_MS[$hook_id]=$_zdot_eh_ms
+            _ZDOT_HOOK_START_MS[$hook_id]=$_zdot_eh_at
+        fi
         _ZDOT_CURRENT_HOOK_FUNC=
-        _zdot_internal_debug "zdot: hooks: done: ${func} rc=${_rc}"
+        _zdot_internal_debug "zdot: hooks: done: ${func} rc=${_rc}${_zdot_eh_ms:+ (${_zdot_eh_ms}ms)}"
 
         _ZDOT_HOOKS_EXEC_RESULT[$hook_id]=$_rc
 
@@ -2152,6 +2185,8 @@ _zdot_run_deferred_phase_check() {
     local hook_id
     local dispatched=0
     local -a pending_hooks=()
+    # Deferred wall clock starts at the first drain wave (see _ZDOT_DEFER_WALL_MS).
+    [[ -z $_ZDOT_DEFER_WALL_T0 && -n ${EPOCHREALTIME:-} ]] && _ZDOT_DEFER_WALL_T0=$EPOCHREALTIME
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
         # Only process deferred hooks
         if [[ ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} -eq 0 ]]; then
@@ -2244,6 +2279,7 @@ _zdot_run_deferred_phase_check() {
     # required phases may yet be provided once those hooks complete.
     if [[ $dispatched -eq 0 && ${#pending_hooks} -gt 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
         _ZDOT_DEFERRED_ACTIVE=0
+        _zdot_defer_wall_stop
         if [[ -o zle ]]; then
             local _zdot_flush_fd
             exec {_zdot_flush_fd}</dev/null
@@ -2311,6 +2347,7 @@ _zdot_run_deferred_phase_check() {
     # to run here — only teardown.
     if [[ $dispatched -eq 0 && ${#pending_hooks} -eq 0 && ${#_ZDOT_HOOKS_QUEUED} -eq 0 ]]; then
         _ZDOT_DEFERRED_ACTIVE=0
+        _zdot_defer_wall_stop
         if [[ -o zle ]]; then
             local _zdot_flush_fd
             exec {_zdot_flush_fd}</dev/null
@@ -2348,6 +2385,7 @@ zdot_execute_all() {
 
     local executed=0
     local failed=0
+    local _zdot_ea_t0=${EPOCHREALTIME:-}
 
     zdot_verbose "zdot: hooks: executing plan (${#_ZDOT_EXECUTION_PLAN} hooks)"
     for hook_id in $_ZDOT_EXECUTION_PLAN; do
@@ -2370,6 +2408,11 @@ zdot_execute_all() {
             (( failed++ ))
         fi
     done
+
+    if [[ -n $_zdot_ea_t0 ]]; then
+        local -F 3 _zdot_ea_ms=$(( (EPOCHREALTIME - _zdot_ea_t0) * 1000 ))
+        _ZDOT_EAGER_WALL_MS=$_zdot_ea_ms
+    fi
 
     if [[ $failed -gt 0 ]]; then
         _zdot_internal_error "zdot_execute_all: Completed with $failed failed hook(s)"
@@ -2528,6 +2571,8 @@ _zdot_defer_order_display() {
 #   name      " [name: …]"    deferred " [ deferred]"|" [ deferred: forced]"
 #   noquiet   " [<defer flag name>]"
 #   status    "[ok]"/"[not found]"/"[skipped|skipped: tool|skipped: cascade|…"
+#   time      " (12.3ms)" body wall time, or empty if the body never ran
+#             (opt-in for consumers: shown only under --timing)
 # Consumer (typeset -A at consumer scope — see test_op_secrets_env for why;
 # capture IMMEDIATELY after the call, anything else that sets reply clobbers):
 #   typeset -A _mk
@@ -2593,12 +2638,117 @@ _zdot_hook_display_marks() {
             _status_mark=" %F{red}[skipped]%f"
         fi
     fi
+    _zdot_hook_time_mark "$1"
     reply=(
         name      "$_name_mark"
         deferred  "$_deferred_mark"
         noquiet   "$_noquiet_mark"
         status    "$_status_mark"
+        time      "$REPLY"
     )
+}
+
+# ============================================================================
+# Timing display helpers (see "Execution timing" globals at the top)
+# ============================================================================
+
+# Close the deferred wall clock (idempotent: first stop wins).
+_zdot_defer_wall_stop() {
+    [[ -n $_ZDOT_DEFER_WALL_T0 && -z $_ZDOT_DEFER_WALL_MS && -n ${EPOCHREALTIME:-} ]] || return 0
+    local -F 3 _ms=$(( (EPOCHREALTIME - _ZDOT_DEFER_WALL_T0) * 1000 ))
+    _ZDOT_DEFER_WALL_MS=$_ms
+}
+
+# Format a millisecond value for display into REPLY: "0.42ms", "12.3ms", "1.24s".
+_zdot_fmt_ms() {
+    local -F _v=${1:-0}
+    if (( _v >= 1000 )); then
+        local -F 2 _s=$(( _v / 1000 )); REPLY="${_s}s"
+    elif (( _v >= 10 )); then
+        local -F 1 _m=$_v; REPLY="${_m}ms"
+    else
+        local -F 2 _m=$_v; REPLY="${_m}ms"
+    fi
+}
+
+# Return in REPLY the timing mark for a hook_id: " (12.3ms)" coloured by cost
+# (dim <10ms, yellow <50ms, red ≥50ms), or an empty word if the hook's body
+# never ran (not run / gate-skipped / no EPOCHREALTIME).
+_zdot_hook_time_mark() {
+    REPLY=""
+    local _ms="${_ZDOT_HOOK_TIME_MS[$1]:-}"
+    [[ -n $_ms ]] || return 0
+    local _col=240
+    (( _ms >= 10 )) && _col=yellow
+    (( _ms >= 50 )) && _col=red
+    _zdot_fmt_ms "$_ms"
+    REPLY=" %F{${_col}}(${REPLY})%f"
+}
+
+# Print the timing summary block: per-pass totals and the slowest hooks.
+# Usage: _zdot_timing_summary [top_n]   (default 5)
+_zdot_timing_summary() {
+    local -i top_n=${1:-5}
+    if (( ! _ZDOT_TIMING )); then
+        zdot_info "Timing: unavailable (zsh/datetime could not be loaded)"
+        return 0
+    fi
+    if (( ${#_ZDOT_HOOK_TIME_MS} == 0 )); then
+        zdot_info "Timing: no hook timings recorded yet (run an interactive shell first)"
+        return 0
+    fi
+
+    local -F 3 eager_sum=0 defer_sum=0
+    local -i eager_n=0 defer_n=0
+    local hid
+    for hid in ${(k)_ZDOT_HOOK_TIME_MS}; do
+        if (( ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hid]} )); then
+            (( defer_sum += _ZDOT_HOOK_TIME_MS[$hid], defer_n++ ))
+        else
+            (( eager_sum += _ZDOT_HOOK_TIME_MS[$hid], eager_n++ ))
+        fi
+    done
+
+    zdot_report "Timing:"
+    local line
+    _zdot_fmt_ms $eager_sum; line="  eager:    ${eager_n} hook(s), ${REPLY} in hook bodies"
+    if [[ -n $_ZDOT_EAGER_WALL_MS ]]; then
+        _zdot_fmt_ms $_ZDOT_EAGER_WALL_MS; line+=", ${REPLY} wall"
+    fi
+    zdot_info "$line"
+    if (( defer_n > 0 || ${#_ZDOT_EXECUTION_PLAN_DEFERRED} > 0 )); then
+        _zdot_fmt_ms $defer_sum; line="  deferred: ${defer_n} hook(s), ${REPLY} in hook bodies"
+        if [[ -n $_ZDOT_DEFER_WALL_MS ]]; then
+            _zdot_fmt_ms $_ZDOT_DEFER_WALL_MS; line+=", ${REPLY} wall (first wave → drained, incl. idle)"
+        elif [[ -n $_ZDOT_DEFER_WALL_T0 ]]; then
+            line+=", drain still in progress"
+        fi
+        zdot_info "$line"
+    fi
+
+    # Slowest hooks: sort "ms hook_id" pairs numerically, descending.
+    local -a pairs=()
+    for hid in ${(k)_ZDOT_HOOK_TIME_MS}; do
+        pairs+=("${_ZDOT_HOOK_TIME_MS[$hid]} $hid")
+    done
+    pairs=(${(On)pairs})
+    (( top_n > ${#pairs} )) && top_n=${#pairs}
+    if (( top_n > 0 )); then
+        zdot_info "  slowest:"
+        local p func label where
+        local -i i
+        for (( i = 1; i <= top_n; i++ )); do
+            p=${pairs[$i]}; hid=${p#* }
+            func="${_ZDOT_HOOKS[$hid]}"
+            label="$func"
+            [[ -n ${_ZDOT_HOOK_NAMES[$hid]:-} && ${_ZDOT_HOOK_NAMES[$hid]} != "$func" ]] \
+                && label+=" [${_ZDOT_HOOK_NAMES[$hid]}]"
+            where=eager
+            (( ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hid]} )) && where=deferred
+            _zdot_hook_time_mark "$hid"
+            zdot_info "    ${(l:2:)i}.${REPLY} ${label} %F{240}(${where})%f"
+        done
+    fi
 }
 
 # Return in REPLY the deferred-work mark for a provider id list: non-empty

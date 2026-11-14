@@ -1,10 +1,22 @@
 #!/usr/bin/env zsh
 # Show the deferred task queue in submission order.
 # Populated at runtime when an interactive shell starts; run this after startup.
-# Usage: zdot_show_defer_queue
-#        zdot hook defer-queue
+# Usage: zdot_show_defer_queue [--timing|-t]
+#        zdot hook defer-queue [--timing|-t]
+#   --timing, -t   for entries that run a deferred hook, show the hook's measured
+#                  body time and when it started (offset from zdot load), plus
+#                  the deferred-pass totals. Timing comes from hook execution
+#                  (_zdot_execute_hook), so non-hook tasks (raw zdot_defer
+#                  commands) carry no time.
 
 function zdot_show_defer_queue() {
+    local timing=0 arg
+    for arg in "$@"; do
+        case "$arg" in
+            --timing|-t) timing=1 ;;
+        esac
+    done
+
     if (( _ZDOT_DEFER_COUNTER == 0 )); then
         zdot_info "(no deferred tasks recorded — run an interactive shell first)"
         return 0
@@ -39,7 +51,7 @@ function zdot_show_defer_queue() {
             if [[ "$hook" != "?" ]]; then
                 # Look up the hook's named label if one was set
                 local _hook_name=""
-                local _hid
+                local _hid=""
                 for _hid in ${(k)_ZDOT_HOOKS}; do
                     if [[ "${_ZDOT_HOOKS[$_hid]}" == "$hook" ]]; then
                         _hook_name="${_ZDOT_HOOK_NAMES[$_hid]:-}"
@@ -58,7 +70,9 @@ function zdot_show_defer_queue() {
         fi
 
         # ── Label: explicit --label > spec name > truncated command ──────
-        local label
+        # Assign at declaration: a bare `local label` on a later loop pass
+        # re-declares an existing local, which zsh echoes as label='…'.
+        local label=""
         if [[ -n "$explicit_label" ]]; then
             label="$explicit_label"
         elif [[ -n "$spec" ]]; then
@@ -76,6 +90,17 @@ function zdot_show_defer_queue() {
         if (( delay > 0 )); then
             marks+=("%F{yellow}+${delay}s%f")
         fi
+        if (( timing )) && [[ "$cmd" == "_zdot_deferred_hook_wrapper "* ]]; then
+            local _qhid="${cmd#_zdot_deferred_hook_wrapper }"
+            _zdot_hook_time_mark "$_qhid"
+            if [[ -n "$REPLY" ]]; then
+                local _qtm="${REPLY# }"
+                _zdot_fmt_ms "${_ZDOT_HOOK_START_MS[$_qhid]}"
+                marks+=("${_qtm} %F{240}@${REPLY}%f")
+            else
+                marks+=("%F{240}(no body run)%f")
+            fi
+        fi
 
         local marks_str=""
         if (( ${#marks} > 0 )); then
@@ -88,4 +113,9 @@ function zdot_show_defer_queue() {
 
     zdot_info ""
     zdot_info "  %F{cyan}${task_num}%f task(s), %F{240}${sentinel_num}%f sentinel(s)"
+
+    if (( timing )); then
+        zdot_info ""
+        _zdot_timing_summary
+    fi
 }

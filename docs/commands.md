@@ -15,7 +15,7 @@ Tab-completion is provided automatically via `_zdot` (registered at startup with
 | Noun | Verbs |
 |------|-------|
 | `cache` | `status`, `invalidate`, `compile` |
-| `hook` | `list [-v] [-a]`, `plan`, `status`, `defer-queue`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [--groups-inline\|--groups-after] [-v]` |
+| `hook` | `list [-v] [-a] [-o] [-t]`, `plan`, `status [-t]`, `defer-queue [-t]`, `graph [--depends\|--uses\|--all] [--ascii] [--max-depth N] [--show-internal] [--groups-inline\|--groups-after] [-v]` |
 | `phase` | `list` |
 | `plugin` | `list [--loaded\|--installed\|--declared]`, `update [spec...]`, `check-updates [spec...]`, `clean [spec...\|--all] [--remove-unused] [--dry-run]`, `reclone [spec...\|--all] [--dry-run]` |
 | `module` | `list`, `clone <name>` |
@@ -51,15 +51,17 @@ zdot cache compile     # Recompile all autoloaded function files
 Hook and execution-plan inspection.
 
 ```
-zdot hook list [-v] [-a]   # List registered hooks
+zdot hook list [-v] [-a] [-o] [-t]   # List registered hooks
   -v, --verbose             Show full hook metadata (requires, provides, contexts, optional)
   -a, --all                 Include hooks from all contexts (not just current)
+  -o, --ordered             Show hooks in execution-plan order
+  -t, --timing              Append each hook's measured run time; print a timing summary
 
 zdot hook plan             # Print the full execution plan in dependency order
 
-zdot hook status           # Show per-hook execution status (run / pending / skipped)
+zdot hook status [-t]      # Show per-hook execution status (run / pending / skipped)
 
-zdot hook defer-queue      # Show the deferred dispatch queue (commands, hooks, delays)
+zdot hook defer-queue [-t] # Show the deferred dispatch queue (commands, hooks, delays)
 
 zdot hook graph --depends <name>   # Tree: what <name> requires (recursive)
 zdot hook graph --uses <name>      # Tree: what depends on <name> (recursive)
@@ -73,6 +75,51 @@ zdot hook graph --all              # Full dependency graph for all hooks
   --groups-after     Keep groups as atoms; list members in a "Group contents" section
   -v, --verbose      Show "label  <func>" instead of just the label
 ```
+
+### Hook timing (`-t` / `--timing`)
+
+zdot times every hook body where it runs (`_zdot_execute_hook`), for both the
+eager pass and the deferred drain. Recording is always on and cheap: two
+`$EPOCHREALTIME` reads per hook, using `zsh/datetime`. Times are only
+*shown* when you pass `-t`:
+
+- `hook list -t` / `hook status -t` append the time to each hook, e.g.
+  `_omp_prompt_init [ok] (108.5ms)`. The time is grey under 10ms, yellow under
+  50ms and red from 50ms. In `hook list -v -t` it appears as a `time:` line.
+- `hook defer-queue -t` puts the hook's time and start offset (from when zdot
+  loaded) against each queue entry that runs a deferred hook, e.g.
+  `_omp_prompt_init [omp-prompt] (108.5ms) @726.9ms`. Raw `zdot_defer`
+  commands that are not hooks (e.g. `nvm use node`) have no time.
+- All three end with a **Timing** summary:
+
+```text
+Timing:
+  eager:    110 hook(s), 180.3ms in hook bodies, 192.5ms wall
+  deferred: 21 hook(s), 2.45s in hook bodies, 4.98s wall (first wave → drained, incl. idle)
+  slowest:
+     1. (1.06s) _completions_compinit (deferred)
+     ...
+```
+
+What the numbers mean:
+
+- A hook's time is the **inclusive** wall time of its body. It covers anything
+  the body runs synchronously (e.g. `zdot_load_plugin`), but *not* work it hands
+  to `zdot_defer`, which runs later as its own task.
+- **eager wall** is `zdot_execute_all` start → end. The difference from the
+  body sum is zdot's dispatch overhead.
+- **deferred wall** runs from the first deferred drain wave until the drain
+  finishes, so it includes ZLE idle time between waves and any `zdot_defer_until`
+  delays. Read it as "time until fully loaded", not CPU cost.
+- Hooks skipped by a runtime gate (`skipped-tool`, `skipped-cascade`) or never
+  run get no time.
+- With `zstyle ':zdot:plugins' defer false`, deferred work runs inline, so a
+  hook's time includes the deferred work it starts.
+
+Timings are per shell and never cached. Use `zdot bench` for statistically
+sound total startup times, and `zdot profile` for a per-function breakdown
+*inside* a slow hook.
+
 
 Output style is pstree-like:
 

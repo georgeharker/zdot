@@ -126,6 +126,33 @@ if [[ "${1:-}" == --case ]]; then
             has "$out" "[ok]" || { print "RESULT: FAIL (status not composed)"; exit 1 }
             print "RESULT: PASS" ;;
 
+        time-mark)
+            # Timing is recorded where the hook RUNS (_zdot_execute_hook): a
+            # body that ran gets "(N ms)"; a never-run or gate-skipped hook
+            # gets an empty time word (not "(0ms)").
+            _t_slow() { sleep 0.02 }
+            register_in_plan _t_slow --provides slow-ready
+            hid=$(for h in $_ZDOT_EXECUTION_PLAN; do [[ ${_ZDOT_HOOKS[$h]} == _t_slow ]] && print $h; done)
+            marks_of "$hid" "_t_slow"
+            [[ -z "${_mk[time]}" ]] || { print "RESULT: FAIL (time mark before run: <${_mk[time]}>)"; exit 1 }
+            _zdot_execute_hook "$hid" test
+            [[ -n "${_ZDOT_HOOK_TIME_MS[$hid]}" ]] || { print "RESULT: FAIL (no time recorded)"; exit 1 }
+            (( _ZDOT_HOOK_TIME_MS[$hid] >= 15 )) || { print "RESULT: FAIL (implausible time ${_ZDOT_HOOK_TIME_MS[$hid]}ms for a 20ms body)"; exit 1 }
+            [[ -n "${_ZDOT_HOOK_START_MS[$hid]}" ]] || { print "RESULT: FAIL (no start offset)"; exit 1 }
+            marks_of "$hid" "_t_slow"
+            has "${_mk[time]}" "ms)" || { print "RESULT: FAIL (time mark missing; got <${_mk[time]}>)"; exit 1 }
+            # Gate-skipped hook: no body, no time.
+            zdot_register_hook _t_foo interactive noninteractive --requires-optional-tool __zdot_no_such_tool__ --provides foo-ready
+            fid=$REPLY
+            _zdot_execute_hook "$fid" test
+            [[ "${_ZDOT_HOOKS_EXEC_RESULT[$fid]}" == skipped-tool ]] || { print "RESULT: FAIL (expected skipped-tool, got ${_ZDOT_HOOKS_EXEC_RESULT[$fid]})"; exit 1 }
+            [[ -z "${_ZDOT_HOOK_TIME_MS[$fid]:-}" ]] || { print "RESULT: FAIL (skipped hook got a time)"; exit 1 }
+            # Formatter thresholds.
+            _zdot_fmt_ms 0.123;  [[ $REPLY == 0.12ms ]]  || { print "RESULT: FAIL (fmt 0.123 -> $REPLY)"; exit 1 }
+            _zdot_fmt_ms 12.34;  [[ $REPLY == 12.3ms ]]  || { print "RESULT: FAIL (fmt 12.34 -> $REPLY)"; exit 1 }
+            _zdot_fmt_ms 1234.5; [[ $REPLY == 1.23s ]]   || { print "RESULT: FAIL (fmt 1234.5 -> $REPLY)"; exit 1 }
+            print "RESULT: PASS" ;;
+
         *) print "RESULT: FAIL (unknown case $2)"; exit 2 ;;
     esac
     exit 0
@@ -140,6 +167,7 @@ typeset -a cases=(
     noquiet-mark
     ran-deferred
     consumer-idiom-composes
+    time-mark
 )
 typeset -i fails=0
 for c in $cases; do

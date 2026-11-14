@@ -93,7 +93,7 @@ function _zdot() {
 
     # ── flags per noun+verb ──────────────────────────────────────────────────
 
-    local -a flags_hook_list flags_hook_graph flags_plugin_list flags_plugin_clean \
+    local -a flags_hook_list flags_hook_timing flags_hook_graph flags_plugin_list flags_plugin_clean \
              flags_plugin_reclone flags_update flags_phase_list
 
     flags_hook_list=(
@@ -103,6 +103,11 @@ function _zdot() {
         '--all[show all contexts]'
         '-o[show hooks in execution-plan order]'
         '--ordered[show hooks in execution-plan order]'
+        '(-t --timing)'{-t,--timing}'[show per-hook execution time and a timing summary]'
+    )
+
+    flags_hook_timing=(
+        '(-t --timing)'{-t,--timing}'[show per-hook execution time and a timing summary]'
     )
 
     flags_hook_graph=(
@@ -190,6 +195,7 @@ function _zdot() {
             case "${noun}:${verb}" in
                 hook:list)              _arguments -s "${flags_hook_list[@]}" ;;
                 hook:graph)             _arguments -s "${flags_hook_graph[@]}" ;;
+                hook:status|hook:defer-queue) _arguments -s "${flags_hook_timing[@]}" ;;
                 phase:list)             _arguments -s "${flags_phase_list[@]}" ;;
                 plugin:list)            _arguments -s "${flags_plugin_list[@]}" ;;
                 update:check-updates)   _arguments -s "${flags_update[@]}" ;;
