@@ -6,11 +6,19 @@
 #
 # Requires zdot_execute_all to have run (i.e. after shell startup).
 # Shows each hook in plan order annotated with:
-#   [ok]           ran successfully
-#   [failed: rc=N] ran but returned non-zero
-#   [not found]    function was missing at execution time
-#   [not run]      in plan but never attempted (blocked by unmet dependency)
-#   (deferred)     in deferred plan — may have run post-prompt
+#   [ok]                ran successfully
+#   [skipped: tool]     runtime gate: a --requires-optional-tool is not on PATH
+#   [skipped: cascade]  runtime gate: a required phase's provider was skipped/failed
+#   [failed: rc=N]      ran but returned non-zero
+#   [not found]         function was missing at execution time
+#   [not run]           in plan but never attempted
+#
+# Summary is per pass. Gate skips are deliberate, not failures. An un-run
+# deferred hook is "pending" until the deferred drain finishes (or forever in a
+# non-ZLE shell, where it never starts); once the drain HAS finished, un-run
+# deferred hooks are "not run (drain stalled)" and count as a failure.
+#
+# Returns 1 if any hook failed, an eager hook didn't run, or the drain stalled.
 
 function zdot_hooks_status() {
     local timing=0 arg
@@ -26,7 +34,11 @@ function zdot_hooks_status() {
         return 1
     fi
 
-    local _ok=0 _failed=0 _notrun=0
+    local _ok=0 _skipped=0 _failed=0 _notrun=0          # eager
+    local _d_ok=0 _d_skipped=0 _d_failed=0 _d_notrun=0  # deferred
+    # _ZDOT_DEFER_WALL_MS is set once the deferred drain completes or stalls.
+    local _drain_done=0
+    [[ -n ${_ZDOT_DEFER_WALL_MS:-} ]] && _drain_done=1
 
     zdot_report "Hook execution status:"
     zdot_info ""
@@ -36,6 +48,8 @@ function zdot_hooks_status() {
         zdot_info "  Eager:"
         local _pos=1
         for hook_id in "${_ZDOT_EXECUTION_PLAN[@]}"; do
+            # The plan holds deferred ids too; they're listed under Deferred.
+            (( ${_ZDOT_EXECUTION_PLAN_DEFERRED[(Ie)$hook_id]} )) && continue
             local func="${_ZDOT_HOOKS[$hook_id]}"
             _zdot_hook_display_marks "$hook_id" "$func"
             typeset -A _mk
@@ -45,6 +59,8 @@ function zdot_hooks_status() {
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
             if [[ -z "$_rc" ]]; then
                 (( _notrun++ ))
+            elif [[ "$_rc" == skipped-* ]]; then
+                (( _skipped++ ))
             elif [[ "$_rc" != '0' ]]; then
                 (( _failed++ ))
             else
@@ -67,19 +83,27 @@ function zdot_hooks_status() {
             (( timing )) || _mk[time]=""
             zdot_info "    [$_pos] $func${_mk[status]}${_mk[time]}"
             local _rc="${_ZDOT_HOOKS_EXEC_RESULT[$hook_id]:-}"
-            if [[ -n "$_rc" && "$_rc" != '0' ]]; then
-                (( _failed++ ))
-            elif [[ -n "$_rc" ]]; then
-                (( _ok++ ))
+            if [[ -z "$_rc" ]]; then
+                (( _d_notrun++ ))   # pending or stalled — decided by _drain_done
+            elif [[ "$_rc" == skipped-* ]]; then
+                (( _d_skipped++ ))
+            elif [[ "$_rc" != '0' ]]; then
+                (( _d_failed++ ))
+            else
+                (( _d_ok++ ))
             fi
-            # Deferred hooks that haven't run yet are expected — don't count as not-run
             (( _pos++ ))
         done
         zdot_info ""
     fi
 
     # Summary
-    zdot_info "  Summary: ${_ok} ok, ${_failed} failed, ${_notrun} not run (eager)"
+    zdot_info "  Eager:    ${_ok} ok, ${_skipped} skipped, ${_failed} failed, ${_notrun} not run"
+    if (( ${#_ZDOT_EXECUTION_PLAN_DEFERRED[@]} > 0 )); then
+        local _d_word="pending"
+        (( _drain_done )) && _d_word="not run (drain stalled)"
+        zdot_info "  Deferred: ${_d_ok} ok, ${_d_skipped} skipped, ${_d_failed} failed, ${_d_notrun} ${_d_word}"
+    fi
     zdot_info ""
 
     if (( timing )); then
@@ -87,5 +111,7 @@ function zdot_hooks_status() {
         zdot_info ""
     fi
 
-    return $(( _failed > 0 || _notrun > 0 ))
+    local _stalled=0
+    (( _drain_done )) && _stalled=$_d_notrun
+    return $(( _failed + _d_failed + _notrun + _stalled > 0 ))
 }
