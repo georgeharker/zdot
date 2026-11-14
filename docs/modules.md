@@ -603,6 +603,28 @@ present. Registers completions for `uv` and `uvx`. Optional dependency on
 
 ---
 
+### `rex`
+
+macOS only. Puts the Rex terminal's `rex` CLI on `PATH` and
+registers its zsh completions (`rex completion zsh`). The CLI ships inside the
+Rex Server bundle under `~/Library/Application Support/com.superlogical.rex/`,
+not in `/Applications`. Rex only adds it to `PATH` in shells it spawns itself,
+so without this module `rex` is missing in other terminals, tmux and scripts.
+
+It does nothing unless a Rex app bundle is installed. If `rex` already
+resolves (for example in a Rex-spawned shell), `PATH` is left unchanged.
+
+| | |
+|---|---|
+| **Provides** | `rex-configured` |
+| **Requires** | `bootstrap-ready`; group `rex-configure` |
+| **Context** | interactive + noninteractive |
+| **zstyle** | `':zdot:rex' app <path...>`: bundles that count as installed (default `/Applications/Rex.app` `"/Applications/Rex Beta.app"`) |
+| | `':zdot:rex' bin-dir <path>`: directory holding `rex` (default `$REX_BIN_DIR`, else `RexServer/Versions/Current/Rex Server.app/Contents/MacOS`) |
+| **Tools** | `rex` |
+
+---
+
 ### `venv`
 
 Configures the default Python interpreter (Homebrew on macOS, uv-managed
