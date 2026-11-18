@@ -73,9 +73,12 @@ _zdot_compdef_queue_init() {
     _ZDOT_COMPDEF_QUEUE_INITIALIZED=1
 }
 
+# Each entry is one compdef call, its arguments quoted (${(q)@}) so that
+# replay can split them back exactly: bashcompinit's `complete`, for one,
+# passes a single argument with spaces ('_bash_complete -o default -F __nvm').
 _compdef_queue() {
     _zdot_compdef_queue_init
-    _ZDOT_COMPDEF_QUEUE+=("$*")
+    _ZDOT_COMPDEF_QUEUE+=("${(j: :)${(q)@}}")
 }
 
 # compdef stub: installed immediately so bare `compdef` calls from plugins
@@ -102,7 +105,7 @@ zdot_compdef_queue_process() {
 
     local cmd
     for cmd in "$_ZDOT_COMPDEF_QUEUE[@]"; do
-        compdef "${(z)cmd}"
+        compdef "${(@Q)${(z)cmd}}"
     done
 
     _ZDOT_COMPDEF_QUEUE=()

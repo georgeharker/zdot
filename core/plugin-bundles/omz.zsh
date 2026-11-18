@@ -349,11 +349,7 @@ zdot_bundle_omz_load() {
     fpath+=( "$plugin_path" )
     source "$plugin_file"
 
-    # Optionally compile to .zwc for faster loading (opt-out: enabled by default)
-    if zstyle -T ':zdot:plugins' compile; then
-        zdot_cache_compile_file "$plugin_file" 2>/dev/null || true
-    fi
-
+    # Compiled in zdot's compile phase (zdot_compile_plugins), not here.
     return 0
 }
 

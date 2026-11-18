@@ -199,7 +199,7 @@ function zdot() {
             case "$verb" in
                 status)   zdot_cache_stats ;;
                 invalidate) zdot_cache_invalidate ;;
-                compile)  zdot_cache_compile_all ;;
+                compile)  zdot_cache_compile_all; zdot_compile_plugins ;;
                 help|--help|-h) _zdot_help_cache ;;
                 *)
                     zdot_error "zdot cache: unknown verb '${verb}'"

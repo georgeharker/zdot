@@ -50,6 +50,7 @@ _zdot_init_plan_and_execute() {
     # files on disk (init scripts, lazy loaders, etc.) that don't exist until
     # sourcing completes. Compiling first would miss those files.
     zdot_cache_compile_all
+    zdot_compile_plugins
     _zdot_internal_debug "zdot_init: compile done"
 }
 

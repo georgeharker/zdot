@@ -798,15 +798,11 @@ zdot_load_plugin() {
         fpath+=( "$plugin_path" )
     fi
     
-    # Source the plugin
+    # Source the plugin. Compiling happens in zdot's compile phase
+    # (zdot_compile_plugins), not here.
     source "$plugin_file"
     _ZDOT_PLUGINS_LOADED[$spec]=1
-    
-    # Optionally compile plugin to .zwc for faster loading (opt-out: enabled by default)
-    if zstyle -T ':zdot:plugins' compile; then
-        zdot_plugin_compile "$spec"
-    fi
-    
+
     return 0
 }
 
@@ -851,8 +847,13 @@ zdot_plugin_compile_extra() {
     done
 }
 
-# Compile all declared plugins
+# Compile all declared plugins: each plugin's .zsh files plus its
+# zdot_plugin_compile_extra files. Called from zdot's compile phase (zdot_init,
+# after execution, and `zdot cache compile`), so it covers every declared
+# plugin however and whenever it loads (bundle or generic, deferred or not).
+# Opt out with: zstyle ':zdot:plugins' compile no
 zdot_compile_plugins() {
+    zstyle -T ':zdot:plugins' compile || return 0
     local spec
     for spec in $_ZDOT_PLUGINS_ORDER; do
         zdot_plugin_compile "$spec"
