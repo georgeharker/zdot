@@ -94,15 +94,14 @@ The dir is added even when it doesn't exist yet, so a package installed with
 `bun add -g` mid-session can be run right away.
 
 The dir is **appended** by default, so brew/system binaries win on a name
-clash. nvm's `use` prepends its own bin dir later, so nvm-managed npm globals
-also win over bun globals with the same name. Set `path-position prepend` if
+clash. The nodejs module puts nvm's `current/bin` first, so nvm-managed npm
+globals also win over bun globals with the same name. Set `path-position prepend` if
 you want bun globals to win.
 
 > **Shebangs:** most npm packages ship `#!/usr/bin/env node` bins. Installing
-> one with `bun add -g` doesn't change that, so it still needs a `node` on
-> `PATH` at run time. Moving a tool from npm to bun only drops the nvm
-> dependency if the tool runs under bun (`bun --bun`) or is a bun-native bin.
-> Keep that in mind before removing a tool from `':zdot:nodejs' lazy-cmd`.
+> one with `bun add -g` doesn't change that, so it still runs on whichever
+> `node` comes first on `PATH`, unless the bunnify node shim sends it to bun
+> (see below).
 
 ## Completions
 
@@ -121,6 +120,8 @@ in the background on every shell start.
 | `':zdot:bun' global-bin` | bunfig `globalBinDir`, else `$BUN_INSTALL/bin` | Exported as `BUN_INSTALL_BIN`; added to `PATH` |
 | `':zdot:bun' path-position` | `append` | `append` or `prepend` |
 | `':zdot:bun' dns-ipv4` | `yes` | Export `BUN_DNS_USE_IPV4=1` |
+| `':zdot:bun' node-shim` | `no` | Run bun-installed tools on the bun runtime (see below) |
+| `':zdot:bun' node-shim-exclude` | none | Bin names the node shim keeps on node |
 
 Set these in a `bun-configure` group hook, which runs before `_bun_configure`
 reads them:
@@ -133,6 +134,61 @@ zdot_register_hook _my_bun_configure interactive noninteractive \
     --group bun-configure
 ```
 
+## Running bun-installed tools on bun: the node shim
+
+`bun add -g` keeps each tool's `#!/usr/bin/env node` shebang, so tools you
+install with bun still **run on node**. With `node-shim` on, the module puts
+`shims/` first on `PATH`. Its `node` script receives those shebangs:
+
+- A script that belongs to bun's global install runs on **bun**, unless its
+  name is in `node-shim-exclude`. The shim works this out from the script
+  itself: bin links resolve into `<BUN_INSTALL>/install/global/node_modules/…`,
+  and that root holds a `bun.lock`. Requiring `install/global` keeps a
+  bun-managed project's own `node_modules/.bin` scripts on node.
+- Every other `node` call (`node -v`, `node script.js`, node-shebang scripts
+  elsewhere) is passed **unchanged** to the real node. The shim removes its own
+  directory from `PATH` and lets zsh find `node`. The trimmed `PATH` is
+  inherited, so a second copy of the shim (another zdot checkout) also removes
+  itself instead of looping. Processes the real node starts no longer see the
+  shim.
+
+```zsh
+zdot_before_module bun --cmd zstyle ':zdot:bun' node-shim yes
+zdot_before_module bun --cmd zstyle ':zdot:bun' node-shim-exclude tsc prettierd
+```
+
+Details:
+
+- **Staying in front of nvm.** The nodejs module puts nvm's `current/bin`
+  first on `PATH` in its configure phase, and the bun module loads after it
+  (`--after node-configured`). A later `nvm use`, including the one nvm runs
+  when the lazy `nvm` first loads, puts nvm's bin dir first again. A
+  `preexec` hook moves `shims/` back in front before each command.
+- **Other processes.** Being first on `PATH` is the switch: any process
+  whose `PATH` has `shims/` first gets the shim, and anything else gets plain
+  node. The exclude list reaches the shim as an exported variable,
+  `ZDOT_BUN_NODE_SHIM_EXCLUDE`, not the zstyle. So services that copy their
+  environment from the installing shell need it passed through, for example
+  un-bien's `service.env`. A service whose `PATH` was copied while the shim
+  was on keeps using it until it's reinstalled.
+- **bun flags.** `--config=/dev/null` stops bun loading a `bunfig.toml` from
+  the current directory. Its `preload` would otherwise inject a project's code
+  into the tool. There's no `--bun`, so a tool's own child processes that call
+  `node` still get the real one.
+- **Turning it off.** Set `node-shim no` (or remove it). The next shell drops
+  `shims/` from `PATH` and unsets the exclude variable.
+
+## Helper commands: bun-as-npm
+
+`bin/` holds commands that support bun but don't shadow anything. It's
+appended to `PATH` whenever the module loads, whether or not the shim is on.
+
+`bun-as-npm` is an `npmCommand` for pi (`["bun-as-npm", "--", "bun"]`). It
+passes everything to bun except `npm view`, which becomes `bun pm view`. There
+is deliberately no `npm` shim: a bun-backed `npm` first on `PATH` would catch
+every `npm` call, including projects with a `package-lock.json` and `npm
+publish`.
+
 ## Update nagging
 
 When the `update-nag` module points at a fork with the `bun` provider, bun
@@ -143,7 +199,9 @@ globals show up in the nag as `bun (global)`, controlled by
 ## Tests
 
 `zsh -f tests/test_bun.zsh`: dir resolution, legacy fallback, zstyle/env
-precedence, PATH placement. Each case runs in a throwaway `HOME`.
+precedence, PATH placement, the node shim (PATH order, nvm reordering, runtime
+routing through `shims/node`) and the helper dir. Each case runs in a
+throwaway `HOME`; cases needing the real bun or node are skipped without them.
 
 ## Hooks
 

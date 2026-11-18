@@ -31,6 +31,21 @@
 #                                          install.globalBinDir)
 #   zstyle ':zdot:bun' path-position <prepend|append>   (default: append)
 #   zstyle ':zdot:bun' dns-ipv4 <yes|no>   BUN_DNS_USE_IPV4 (default: yes)
+#   zstyle ':zdot:bun' bunnify <mode>      Which bun-installed tools run on
+#                                          the bun runtime (via a `node` shim):
+#       explicit (default)  none; no shim. Run `bun <tool>` yourself
+#       opt-in              only the tools in bunnify-include
+#       opt-out             all of them except bunnify-exclude
+#   zstyle ':zdot:bun' bunnify-include <bin...>   opt-in list
+#   zstyle ':zdot:bun' bunnify-exclude <bin...>   opt-out list
+
+# The node shim ships with this module (shims/node). Resolved at source time:
+# zdot_module_dir only knows the module's dir while it's being loaded.
+# Its helper commands (bin/, e.g. bun-as-npm) sit beside it.
+zdot_module_dir
+typeset -g _ZDOT_BUN_SHIM_DIR="${REPLY}/shims"
+typeset -g _ZDOT_BUN_SHIM_DIR_REAL="${_ZDOT_BUN_SHIM_DIR:A}"   # PATH may hold either form
+typeset -g _ZDOT_BUN_HELPER_DIR="${REPLY}/bin"
 
 # ============================================================================
 # Configuration
@@ -63,7 +78,7 @@ _bun_path_add() {
     for p in $path; do
         [[ "$p" == "$dir" || "$p" -ef "$dir" ]] && return 0
     done
-    zstyle -s ':zdot:bun' path-position position || position=append
+    zdot_zstyle_get ':zdot:bun' path-position position append
     if [[ "$position" == prepend ]]; then
         path=("$dir" $path)
     else
@@ -72,24 +87,26 @@ _bun_path_add() {
 }
 
 _bun_configure() {
-    local dir
+    local dir use_xdg dns_ipv4
+    zdot_zstyle_get -b ':zdot:bun' xdg use_xdg yes
+
     if zstyle -s ':zdot:bun' install-dir dir; then
         export BUN_INSTALL="$dir"
-    elif [[ -z "$BUN_INSTALL" ]] && zstyle -T ':zdot:bun' xdg; then
+    elif [[ -z "$BUN_INSTALL" && "$use_xdg" == yes ]]; then
         _bun_default_install_dir
         export BUN_INSTALL="$REPLY"
     fi
 
     if zstyle -s ':zdot:bun' cache-dir dir; then
         export BUN_INSTALL_CACHE_DIR="$dir"
-    elif [[ -z "$BUN_INSTALL_CACHE_DIR" ]] && zstyle -T ':zdot:bun' xdg; then
+    elif [[ -z "$BUN_INSTALL_CACHE_DIR" && "$use_xdg" == yes ]]; then
         export BUN_INSTALL_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/bun"
     fi
 
     # Export, not just PATH: bun must link globals where PATH looks.
     zstyle -s ':zdot:bun' global-bin dir && export BUN_INSTALL_BIN="$dir"
 
-    zstyle -T ':zdot:bun' dns-ipv4 && export BUN_DNS_USE_IPV4=1
+    zdot_zstyle_get -b ':zdot:bun' dns-ipv4 dns_ipv4 yes && export BUN_DNS_USE_IPV4=1
 
     # A curl-installed bun lives in $BUN_INSTALL/bin. Put it on PATH here, in
     # configure, so the load hook's --requires-optional-tool gate can see it.
@@ -119,9 +136,74 @@ _bun_load() {
     # nvm's `use` prepends its own bin later anyway.
     _bun_global_bin && _bun_path_add "$REPLY"
 
+    # Helper commands shipped with the module (bin/bun-as-npm: pi's
+    # npmCommand). Appended: they shadow nothing.
+    (( ${path[(Ie)$_ZDOT_BUN_HELPER_DIR]} )) || path+=("$_ZDOT_BUN_HELPER_DIR")
+
     # Generated into the zdot completions dir by refresh_completions;
     # regenerated when the bun binary is newer than the cached _bun.
     zdot_register_completion_file "bun" "bun completions zsh"
+
+    _bun_node_shim_setup
+}
+
+# ============================================================================
+# bunnify: bun-installed tools on the bun runtime (the node shim)
+# ============================================================================
+#
+# `bun add -g` keeps each tool's `#!/usr/bin/env node` shebang, so the tools
+# run on node. In opt-in / opt-out mode, shims/node goes first on PATH and
+# receives those shebangs: a script that belongs to bun's global install (the
+# shim works that out from the script itself) runs on bun if the mode and
+# list say so; every other `node` call passes through to the real node.
+# Being on PATH is the switch. The mode and its list are exported for the
+# shim, so anything started from a zdot shell (and services that copy them,
+# e.g. un-bien's service.env) follows them:
+#   ZDOT_BUN_BUNNIFY        opt-in | opt-out  (unset: shim runs nothing on bun)
+#   ZDOT_BUN_BUNNIFY_TOOLS  that mode's list: bunnify-include / bunnify-exclude
+
+_bun_node_shim_setup() {
+    local mode
+    local -a tools
+    zdot_zstyle_get ':zdot:bun' bunnify mode explicit
+    case "$mode" in
+        opt-in)   zstyle -a ':zdot:bun' bunnify-include tools ;;
+        opt-out)  zstyle -a ':zdot:bun' bunnify-exclude tools ;;
+        explicit) ;;
+        *)        zdot_warn "bun: unknown bunnify mode '$mode' (explicit, opt-in, opt-out); using explicit"
+                  mode=explicit ;;
+    esac
+
+    if [[ "$mode" == explicit || ! -x "$_ZDOT_BUN_SHIM_DIR/node" ]]; then
+        unset ZDOT_BUN_BUNNIFY ZDOT_BUN_BUNNIFY_TOOLS
+        path=(${path:#$_ZDOT_BUN_SHIM_DIR})
+        path=(${path:#$_ZDOT_BUN_SHIM_DIR_REAL})
+        if (( ${+functions[add-zsh-hook]} )); then
+            add-zsh-hook -d preexec _bun_node_shim_first
+        fi
+        return 0
+    fi
+
+    export ZDOT_BUN_BUNNIFY="$mode"
+    export ZDOT_BUN_BUNNIFY_TOOLS="${tools[*]}"
+    _bun_node_shim_first
+
+    # nvm prepends its bin dir on `nvm use` (or when the lazy `nvm` loads),
+    # which would put a real node ahead of the shim. preexec, not precmd: it
+    # runs before each command, so the very next command sees the shim first.
+    if zdot_interactive; then
+        autoload -Uz add-zsh-hook
+        add-zsh-hook preexec _bun_node_shim_first
+    fi
+}
+
+# _bun_node_shim_first — move the shim dir to the front of PATH, dropping any
+# other copy in either form (as given / symlink-resolved). A cheap no-op when
+# it's already first.
+_bun_node_shim_first() {
+    [[ "${path[1]}" == "$_ZDOT_BUN_SHIM_DIR" ]] && return 0
+    path=(${path:#$_ZDOT_BUN_SHIM_DIR})
+    path=("$_ZDOT_BUN_SHIM_DIR" ${path:#$_ZDOT_BUN_SHIM_DIR_REAL})
 }
 
 # ============================================================================
@@ -134,9 +216,14 @@ _bun_load() {
 #   so completions finalization must wait for it (see modules/completions).
 # --auto-configure-group: exposes `bun-configure` (same group name the old
 #   simple_hook used), so existing user hooks keep working.
+# --after node-configured: the nodejs module's configure phase puts nvm's
+#   current/bin first on PATH; load after it so the node shim lands in front.
+#   Soft: a no-op when nodejs isn't loaded. A later `nvm use` (or a lazy
+#   nvm load) is handled by the preexec hook.
 zdot_define_module bun \
     --configure _bun_configure \
     --load _bun_load \
     --requires-optional-tool bun \
+    --after node-configured \
     --group completions-producers \
     --auto-configure-group

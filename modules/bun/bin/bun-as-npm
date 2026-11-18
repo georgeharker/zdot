@@ -1,0 +1,24 @@
+#!/bin/sh
+# bun-as-npm — pi `npmCommand` shim for bun.
+#
+# Shipped with zdot's bun module (modules/bun/bin, on PATH whenever the module
+# loads). pi settings.json:   "npmCommand": ["bun-as-npm", "--", "bun"]
+#
+# The `-- bun` matters: pi (and un-bien, extmgr) pick the package manager from
+# the command after `--`, so they send bun-native args (`install --cwd`,
+# `add -g`, `pm bin -g`). With bare ["bun-as-npm"] they'd send npm-style args
+# (`--prefix`, `--legacy-peer-deps`, `root -g`) that bun doesn't understand.
+#
+# Only `npm view` needs translating: pi's update check and extmgr's package
+# metadata call `view`, which bun has as `bun pm view` (same args, same JSON
+# output; `bun info` is the same thing). ["bun", "pm"] as npmCommand doesn't
+# work — the prefix applies to every call, so installs become `bun pm install`.
+# Drop this shim for plain ["bun"] once pi/extmgr send `pm view` for bun.
+
+[ "$1" = "--" ] && shift
+[ "$1" = "bun" ] && shift
+
+case "$1" in
+    view) shift; exec bun pm view "$@" ;;
+    *)    exec bun "$@" ;;
+esac

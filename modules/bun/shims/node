@@ -1,0 +1,50 @@
+#!/usr/bin/env -S zsh -f
+# node shim (zdot bun module): run bun-installed tools on the bun runtime.
+#
+# `bun add -g` links tools into bun's global bin dir with their
+# `#!/usr/bin/env node` shebang intact, so they'd run on node. With this shim
+# first on PATH (zstyle ':zdot:bun' bunnify opt-in|opt-out), that shebang
+# lands here instead: a script belonging to bun's global install runs on bun
+# if the mode and list say so; every other `node` call goes to the real node,
+# unchanged. Exported by the bun module from the bunnify zstyles:
+#
+#   ZDOT_BUN_BUNNIFY        opt-in: only listed tools on bun
+#                           opt-out: every tool except listed ones on bun
+#                           unset/other: nothing on bun (safe for processes
+#                           that inherited PATH but not this variable)
+#   ZDOT_BUN_BUNNIFY_TOOLS  space-separated bin names: that mode's list
+#
+# bun flags: --config=/dev/null ignores a bunfig.toml in the cwd, whose preload
+# would otherwise inject a project's code into the tool. No --bun, so a tool's
+# own child processes that call `node` still get the real one.
+
+# Is $1 part of bun's global install? Resolve it fully (bin links point into
+# the install's node_modules) and cut at the first /node_modules/: the root
+# must be bun's global install dir, `<BUN_INSTALL>/install/global`, which
+# holds a bun.lock. Requiring install/global keeps a bun-managed *project*'s
+# own node_modules/.bin scripts (whose root also has a bun.lock) on node.
+# -f first, so `node -v` and `node -e` never match.
+if [[ -f ${1:-} ]] && (( $+commands[bun] )); then
+    target=${1:A}
+    root=${target%%/node_modules/*}
+    if [[ $root != $target && $root == */install/global && -f $root/bun.lock ]]; then
+        tools=(${=ZDOT_BUN_BUNNIFY_TOOLS})
+        listed=${tools[(Ie)${1:t}]}
+        case $ZDOT_BUN_BUNNIFY in
+            opt-in)  (( listed )) && exec bun --config=/dev/null "$@" ;;
+            opt-out) (( listed )) || exec bun --config=/dev/null "$@" ;;
+        esac
+    fi
+fi
+
+# The real node: splice our own dir out of PATH (the entry we were found
+# through, and its resolved form), then let zsh find `node`. PATH is exported,
+# so the spliced value is what the next process inherits: if that's another
+# copy of this shim (a second zdot checkout on PATH), it splices itself out
+# too and the chain ends at a real node, never looping. Trade-off: processes
+# that real node starts no longer see the shim.
+path=(${path:#${0:h}})
+path=(${path:#${0:A:h}})
+(( $+commands[node] )) && exec $commands[node] "$@"
+print -u2 "node shim: no real node found on PATH"
+exit 127
