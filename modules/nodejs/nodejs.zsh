@@ -14,12 +14,14 @@ _node_configure() {
 
     zstyle ':omz:plugins:nvm' autoload no
 
-    # Read lazy-cmd list from zstyle; fall back to a useful default set.
-    # Override in a node-configure group hook:
+    # Read the lazy-cmd list from zstyle. Default: none beyond the OMZ plugin's
+    # own (nvm node npm npx pnpm pnpx yarn corepack). Only commands that live
+    # inside nvm's prefix need a stub: globals installed with bun (zdot's bun
+    # module) or native installers are on PATH without nvm, and node-shebang
+    # ones find whatever `node` is on PATH. Override in a node-configure hook:
     #   zstyle ':zdot:nodejs' lazy-cmd node1 node2 ...
     local -a lazy_cmds
-    zstyle -a ':zdot:nodejs' lazy-cmd lazy_cmds \
-        || lazy_cmds=(opencode copilot prettierd claude pi)
+    zstyle -a ':zdot:nodejs' lazy-cmd lazy_cmds || lazy_cmds=()
     zstyle ':omz:plugins:nvm' lazy-cmd "${lazy_cmds[@]}"
 
     export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"

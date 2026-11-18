@@ -51,11 +51,13 @@ with a built-in default:
 
 | zstyle | Default | Purpose |
 |---|---|---|
-| `':zdot:nodejs' lazy-cmd` | `(opencode copilot prettierd claude)` | Commands whose first invocation triggers nvm load |
+| `':zdot:nodejs' lazy-cmd` | `()` | Extra commands whose first invocation triggers nvm load |
 
-Override this in a `node-configure` group hook (see below). Setting it to an
-empty array disables lazy-loading triggers entirely — nvm will only load when
-`nvm` itself is called.
+The OMZ plugin always stubs `nvm node npm npx pnpm pnpx yarn corepack`; this
+list adds to those. Only commands installed inside nvm's prefix need a stub:
+bun globals (see the `bun` module) and native installers are on `PATH` without
+nvm, and `#!/usr/bin/env node` scripts use whichever `node` is on `PATH`.
+Override it in a `node-configure` group hook (see below).
 
 ---
 
@@ -66,21 +68,8 @@ into this group to set `':zdot:nodejs'` zstyles before the module reads them:
 
 ```zsh
 _my_node_configure() {
-    # Replace the default lazy-cmd list entirely
-    zstyle ':zdot:nodejs' lazy-cmd node yarn pnpm nx
-}
-
-zdot_register_hook _my_node_configure interactive noninteractive \
-    --group node-configure
-```
-
-Or extend the default list rather than replacing it:
-
-```zsh
-_my_node_configure() {
-    # Append to the built-in defaults
-    local -a defaults=(opencode copilot prettierd claude)
-    zstyle ':zdot:nodejs' lazy-cmd "${defaults[@]}" my-extra-tool
+    # Stub tools installed with npm inside nvm's prefix
+    zstyle ':zdot:nodejs' lazy-cmd nx my-npm-tool
 }
 
 zdot_register_hook _my_node_configure interactive noninteractive \
