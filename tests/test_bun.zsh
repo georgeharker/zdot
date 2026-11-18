@@ -19,8 +19,9 @@ if [[ "${1:-}" == --case ]]; then
     trap "rm -rf '$sbx'" EXIT
     export HOME="$sbx/home"
     export XDG_DATA_HOME="$HOME/.local/share" XDG_CACHE_HOME="$HOME/.cache"
-    unset BUN_INSTALL BUN_INSTALL_BIN BUN_INSTALL_CACHE_DIR BUN_DNS_USE_IPV4
+    unset BUN_INSTALL BUN_INSTALL_BIN BUN_INSTALL_CACHE_DIR BUN_DNS_USE_IPV4 XDG_CONFIG_HOME
     mkdir -p "$HOME"
+    _real_bun="${commands[bun]:-}"
     path=(/usr/bin /bin)
 
     zdot_define_module() { : }
@@ -30,13 +31,23 @@ if [[ "${1:-}" == --case ]]; then
 
     fail() { print -r -- "RESULT: FAIL ($*)"; exit 1 }
     eq() { [[ "$1" == "$2" ]] || fail "$3: expected '$2', got '$1'" }
-    on_path() { (( ${path[(Ie)$1]} )) || fail "$1 not on PATH: $path" }
-    off_path() { (( ! ${path[(Ie)$1]} )) || fail "$1 unexpectedly on PATH" }
+    # bun prints realpaths (/private/var/... on macOS): compare resolved.
+    _resolved_path() { local p; reply=(); for p in $path; do reply+=("${p:A}"); done }
+    on_path() { _resolved_path; (( ${reply[(Ie)${1:A}]} )) || fail "$1 not on PATH: $path" }
+    off_path() { _resolved_path; (( ! ${reply[(Ie)${1:A}]} )) || fail "$1 unexpectedly on PATH" }
+    # The load hook asks the real bun. Put it first on PATH (via a private
+    # dir, so its neighbours don't come along); skip if bun isn't installed.
+    real_bun() {
+        [[ -n "$_real_bun" ]] || { print "RESULT: SKIP (no bun)"; exit 0 }
+        mkdir -p "$sbx/realbin"; ln -sf "$_real_bun" "$sbx/realbin/bun"
+        path=("$sbx/realbin" $path); rehash
+    }
     fake_bun() { mkdir -p "$1"; print '#!/bin/sh' > "$1/bun"; chmod +x "$1/bun" }
     fake_globals() { mkdir -p "$1/install/global"; print '{}' > "$1/install/global/package.json" }
 
     case "$2" in
         xdg-defaults)
+            real_bun
             # Fresh machine: everything lands in XDG dirs.
             _bun_configure; _bun_load
             eq "$BUN_INSTALL" "$XDG_DATA_HOME/bun" BUN_INSTALL
@@ -44,7 +55,7 @@ if [[ "${1:-}" == --case ]]; then
             eq "${BUN_INSTALL_BIN-unset}" unset BUN_INSTALL_BIN
             eq "$BUN_DNS_USE_IPV4" 1 BUN_DNS_USE_IPV4
             on_path "$XDG_DATA_HOME/bun/bin"
-            eq "$path[-1]" "$XDG_DATA_HOME/bun/bin" "append position"
+            eq "${path[-1]:A}" "${XDG_DATA_HOME:A}/bun/bin" "append position"
             eq "${_REGISTERED_COMPLETIONS[*]}" bun completions
             print "RESULT: PASS" ;;
 
@@ -74,6 +85,7 @@ if [[ "${1:-}" == --case ]]; then
             print "RESULT: PASS" ;;
 
         xdg-no-leaves-bun-defaults)
+            real_bun
             zstyle ':zdot:bun' xdg no
             _bun_configure; _bun_load
             eq "${BUN_INSTALL-unset}" unset BUN_INSTALL
@@ -127,6 +139,7 @@ if [[ "${1:-}" == --case ]]; then
             print "RESULT: PASS" ;;
 
         global-bin-exported-and-on-path)
+            real_bun
             zstyle ':zdot:bun' global-bin "$HOME/.local/bin"
             _bun_configure; _bun_load
             eq "$BUN_INSTALL_BIN" "$HOME/.local/bin" BUN_INSTALL_BIN
@@ -134,6 +147,7 @@ if [[ "${1:-}" == --case ]]; then
             print "RESULT: PASS" ;;
 
         global-bin-and-curl-binary-both-on-path)
+            real_bun
             zstyle ':zdot:bun' global-bin "$HOME/.local/bin"
             fake_bun "$XDG_DATA_HOME/bun/bin"
             _bun_configure; _bun_load
@@ -142,16 +156,18 @@ if [[ "${1:-}" == --case ]]; then
             print "RESULT: PASS" ;;
 
         prepend-position)
+            real_bun
             zstyle ':zdot:bun' path-position prepend
             _bun_configure; _bun_load
-            eq "$path[1]" "$XDG_DATA_HOME/bun/bin" "prepend position"
+            eq "${path[1]:A}" "${XDG_DATA_HOME:A}/bun/bin" "prepend position"
             print "RESULT: PASS" ;;
 
         no-duplicate-path)
+            real_bun
             fake_bun "$XDG_DATA_HOME/bun/bin"
             _bun_configure; _bun_load; _bun_configure; _bun_load
-            local bin_dir="$XDG_DATA_HOME/bun/bin"
-            local -a hits=(${(M)path:#$bin_dir})
+            _resolved_path
+            local -a hits=(${(M)reply:#${XDG_DATA_HOME:A}/bun/bin})
             eq "$#hits" 1 "PATH entries"
             print "RESULT: PASS" ;;
 
@@ -159,6 +175,56 @@ if [[ "${1:-}" == --case ]]; then
             zstyle ':zdot:bun' dns-ipv4 no
             _bun_configure
             eq "${BUN_DNS_USE_IPV4-unset}" unset BUN_DNS_USE_IPV4
+            print "RESULT: PASS" ;;
+
+        bunfig-xdg-global-bin)
+            real_bun
+            # $XDG_CONFIG_HOME/.bunfig.toml globalBinDir (with ~/) is on PATH
+            # and NOT exported (bun reads the file itself).
+            export XDG_CONFIG_HOME="$HOME/.config"; mkdir -p "$XDG_CONFIG_HOME"
+            print -l '# global' '[install]' 'minimumReleaseAge = 432000' \
+                'globalBinDir = "~/.local/bin"  # links here' > "$XDG_CONFIG_HOME/.bunfig.toml"
+            _bun_configure; _bun_load
+            on_path "$HOME/.local/bin"
+            off_path "$XDG_DATA_HOME/bun/bin"
+            eq "${BUN_INSTALL_BIN-unset}" unset BUN_INSTALL_BIN
+            print "RESULT: PASS" ;;
+
+        bunfig-xdg-hides-home)
+            real_bun
+            # XDG_CONFIG_HOME absolute: bun reads only the XDG file.
+            export XDG_CONFIG_HOME="$HOME/.config"; mkdir -p "$XDG_CONFIG_HOME"
+            print -l '[install]' "globalBinDir = '$HOME/fromhome'" > "$HOME/.bunfig.toml"
+            _bun_configure; _bun_global_bin
+            eq "${REPLY:A}" "${XDG_DATA_HOME:A}/bun/bin" "home bunfig ignored"
+            print "RESULT: PASS" ;;
+
+        bunfig-home-when-no-xdg-config)
+            real_bun
+            unset XDG_CONFIG_HOME
+            print -l '[install]' "globalBinDir = '$HOME/fromhome'" > "$HOME/.bunfig.toml"
+            _bun_configure; _bun_global_bin
+            eq "${REPLY:A}" "${HOME:A}/fromhome" "home bunfig"
+            print "RESULT: PASS" ;;
+
+        bun-failure-adds-nothing)
+            # bun on PATH but erroring: no bogus PATH entry, completions
+            # still registered.
+            mkdir -p "$sbx/badbin"; print -l '#!/bin/sh' 'exit 1' > "$sbx/badbin/bun"
+            chmod +x "$sbx/badbin/bun"; path=("$sbx/badbin" $path); rehash
+            local before="$path"
+            _bun_configure; _bun_load
+            eq "$path" "$before" "PATH unchanged"
+            eq "${_REGISTERED_COMPLETIONS[*]}" bun completions
+            print "RESULT: PASS" ;;
+
+        env-bin-beats-bunfig)
+            real_bun
+            export XDG_CONFIG_HOME="$HOME/.config"; mkdir -p "$XDG_CONFIG_HOME"
+            print -l '[install]' 'globalBinDir = "~/.local/bin"' > "$XDG_CONFIG_HOME/.bunfig.toml"
+            export BUN_INSTALL_BIN="$HOME/envbin"
+            _bun_configure; _bun_global_bin
+            eq "${REPLY:A}" "${HOME:A}/envbin" "BUN_INSTALL_BIN wins"
             print "RESULT: PASS" ;;
 
         *) print "RESULT: FAIL (unknown case $2)"; exit 2 ;;
@@ -173,11 +239,15 @@ local -a cases=(
     curl-binary-on-path-in-configure no-binary-not-on-path-in-configure
     global-bin-exported-and-on-path global-bin-and-curl-binary-both-on-path
     prepend-position no-duplicate-path dns-ipv4-off
+    bunfig-xdg-global-bin bunfig-xdg-hides-home bunfig-home-when-no-xdg-config
+    bun-failure-adds-nothing env-bin-beats-bunfig
 )
 local c out pass=0 failn=0
 for c in $cases; do
     out="$(zsh -f "${ZDOT_ROOT}/tests/test_bun.zsh" --case "$c" 2>&1)"
-    if [[ "$out" == *"RESULT: PASS"* ]]; then
+    if [[ "$out" == *"RESULT: SKIP"* ]]; then
+        print -r -- "SKIP  $c"
+    elif [[ "$out" == *"RESULT: PASS"* ]]; then
         (( pass++ )); print -r -- "PASS  $c"
     else
         (( failn++ )); print -r -- "FAIL  $c"; print -r -- "      ${out//$'\n'/$'\n'      }"

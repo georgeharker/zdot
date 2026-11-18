@@ -55,12 +55,36 @@ by default (brew-installed bun puts nothing there). The module adds it,
 resolving it the way `bun pm bin -g` does, but without spawning bun:
 
 1. `$BUN_INSTALL_BIN` (the `global-bin` zstyle sets it)
-2. `$BUN_INSTALL/bin`, which is `$XDG_DATA_HOME/bun/bin` by default
-3. `$XDG_CACHE_HOME/.bun/bin` (only with `xdg no`)
-4. `~/.bun/bin`
+2. `install.globalBinDir` in the global bunfig (see below)
+3. `$BUN_INSTALL/bin`, which is `$XDG_DATA_HOME/bun/bin` by default
+4. `$XDG_CACHE_HOME/.bun/bin` (only with `xdg no`)
+5. `~/.bun/bin`
 
 `global-bin` is **exported** as `BUN_INSTALL_BIN`, not just put on `PATH`, so
 bun links globals into the same dir that `PATH` searches.
+
+### Setting the bin dir in bunfig (recommended)
+
+The zstyle only reaches bun processes started from a zdot shell. bun reads
+`install.globalBinDir` from its global bunfig in every context, including GUI
+apps, launchd jobs, and pi spawning bun. The module reads the same file, so
+`PATH` and bun agree:
+
+```toml
+# ~/.config/.bunfig.toml
+[install]
+globalBinDir = "~/.local/bin"
+```
+
+The global bunfig is `$XDG_CONFIG_HOME/.bunfig.toml` when `XDG_CONFIG_HOME`
+is absolute, and **only** that file. Otherwise it's `~/.bunfig.toml`. Both
+names keep the leading dot. On macOS, processes launched outside a shell don't
+get `XDG_CONFIG_HOME`, so symlink `~/.bunfig.toml` to the XDG file to cover
+them as well. The module reads a small TOML subset: `globalBinDir = "..."`
+under `[install]`, or a top-level `install.globalBinDir`. A leading `~/` and
+paths relative to the file are resolved the way bun resolves them. The value
+is read, not exported. If it's already on `PATH` (as `~/.local/bin` is, via
+the `env` module), nothing is added.
 
 A curl-installed `bun` in `$BUN_INSTALL/bin` goes on `PATH` in the
 **configure** hook, not load. The load hook's `--requires-optional-tool bun`
@@ -94,7 +118,7 @@ in the background on every shell start.
 | `':zdot:bun' xdg` | `yes` | XDG defaults for `BUN_INSTALL` / `BUN_INSTALL_CACHE_DIR` |
 | `':zdot:bun' install-dir` | `$XDG_DATA_HOME/bun` | Exported as `BUN_INSTALL` |
 | `':zdot:bun' cache-dir` | `$XDG_CACHE_HOME/bun` | Exported as `BUN_INSTALL_CACHE_DIR` |
-| `':zdot:bun' global-bin` | `$BUN_INSTALL/bin` | Exported as `BUN_INSTALL_BIN`; added to `PATH` |
+| `':zdot:bun' global-bin` | bunfig `globalBinDir`, else `$BUN_INSTALL/bin` | Exported as `BUN_INSTALL_BIN`; added to `PATH` |
 | `':zdot:bun' path-position` | `append` | `append` or `prepend` |
 | `':zdot:bun' dns-ipv4` | `yes` | Export `BUN_DNS_USE_IPV4=1` |
 

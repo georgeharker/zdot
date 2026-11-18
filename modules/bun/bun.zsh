@@ -25,7 +25,10 @@
 #   zstyle ':zdot:bun' xdg <yes|no>        XDG defaults (default: yes)
 #   zstyle ':zdot:bun' install-dir <dir>   Exported as BUN_INSTALL
 #   zstyle ':zdot:bun' cache-dir <dir>     Exported as BUN_INSTALL_CACHE_DIR
-#   zstyle ':zdot:bun' global-bin  <dir>   Exported as BUN_INSTALL_BIN; on PATH
+#   zstyle ':zdot:bun' global-bin  <dir>   Exported as BUN_INSTALL_BIN; on PATH.
+#                                          Unset: whatever `bun pm bin -g`
+#                                          says (honours the global bunfig's
+#                                          install.globalBinDir)
 #   zstyle ':zdot:bun' path-position <prepend|append>   (default: append)
 #   zstyle ':zdot:bun' dns-ipv4 <yes|no>   BUN_DNS_USE_IPV4 (default: yes)
 
@@ -54,8 +57,12 @@ _bun_default_install_dir() {
 
 # _bun_path_add <dir> — add to PATH honouring path-position, once.
 _bun_path_add() {
-    local dir="$1" position
-    (( ${path[(Ie)$dir]} )) && return 0
+    local dir="$1" position p
+    # Same dir by identity, not just spelling: bun prints realpaths
+    # (/private/tmp vs /tmp on macOS).
+    for p in $path; do
+        [[ "$p" == "$dir" || "$p" -ef "$dir" ]] && return 0
+    done
     zstyle -s ':zdot:bun' path-position position || position=append
     if [[ "$position" == prepend ]]; then
         path=("$dir" $path)
@@ -91,20 +98,14 @@ _bun_configure() {
     return 0
 }
 
-# _bun_global_bin — REPLY = dir that `bun add -g` links executables into.
-# Mirrors bun's own resolution (what `bun pm bin -g` prints) without spawning
-# bun at startup: BUN_INSTALL_BIN, then $BUN_INSTALL/bin, then
-# $XDG_CACHE_HOME/.bun/bin, then ~/.bun/bin.
+# _bun_global_bin — REPLY = dir that `bun add -g` links executables into, as
+# bun itself resolves it (BUN_INSTALL_BIN, the global bunfig's
+# install.globalBinDir, $BUN_INSTALL/bin, ...). ~4 ms per shell; only called
+# from the load hook, which is gated on bun being on PATH. Run from / so a
+# project's package.json / .env in the cwd can't get involved.
 _bun_global_bin() {
-    if [[ -n "$BUN_INSTALL_BIN" ]]; then
-        REPLY="$BUN_INSTALL_BIN"
-    elif [[ -n "$BUN_INSTALL" ]]; then
-        REPLY="$BUN_INSTALL/bin"
-    elif [[ -n "$XDG_CACHE_HOME" ]]; then
-        REPLY="$XDG_CACHE_HOME/.bun/bin"
-    else
-        REPLY="$HOME/.bun/bin"
-    fi
+    REPLY="$(cd / && bun pm bin -g 2>/dev/null)"
+    [[ -n "$REPLY" ]]
 }
 
 # ============================================================================
@@ -112,13 +113,11 @@ _bun_global_bin() {
 # ============================================================================
 
 _bun_load() {
-    # Global bin on PATH. Created on demand by bun, so add it even if it
-    # doesn't exist yet — otherwise the first `bun add -g` in a session
-    # yields a command that isn't found until the next shell.
+    # Global bin on PATH, as bun reports it (`bun pm bin -g` also creates it,
+    # so the first `bun add -g` in a session is runnable straight away).
     # append (default): system/brew/nvm binaries win on name clashes;
     # nvm's `use` prepends its own bin later anyway.
-    _bun_global_bin
-    _bun_path_add "$REPLY"
+    _bun_global_bin && _bun_path_add "$REPLY"
 
     # Generated into the zdot completions dir by refresh_completions;
     # regenerated when the bun binary is newer than the cached _bun.
