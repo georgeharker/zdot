@@ -94,7 +94,7 @@ See also: [using-plugins.md](using-plugins.md), [plugin-implementation.md](plugi
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `directory` | string | `$XDG_CACHE_HOME/zdot/plugins` | Override the plugin clone cache directory. |
-| `compile` | bool | `true` | Compile plugins to `.zwc` bytecode after loading. |
+| `compile` | bool | `true` | Compile declared plugins (and their `zdot_plugin_compile_extra` files) to `.zwc` bytecode in zdot's compile phase, after startup's execution. |
 | `defer` | bool | `false` | Clone and load `romkatv/zsh-defer` for deferred plugin loading. |
 | `omz` | bool | `true` | Enable Oh-My-Zsh bundle support (clones `ohmyzsh/ohmyzsh`). |
 | `pz` | bool | `false` | Enable Prezto bundle support (clones `sorin-ionescu/prezto`). |
@@ -309,11 +309,12 @@ Source: `modules/nodejs/nodejs.zsh`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `lazy-cmd` | array | `(opencode copilot prettierd claude)` | Commands that trigger lazy-loading of the Node.js version manager. |
+| `provider` | string | `nvm` | Where `node` comes from. `nvm`: exports `NVM_SYMLINK_CURRENT=true` and puts `$NVM_DIR/current/bin` first on `PATH` (no nvm at startup; the link is created once if missing). `nvm-lazy`: the classic OMZ nvm plugin lazy stubs plus per-shell `nvm use node` (deferred when interactive, eager otherwise). `system`: `PATH` left alone. In `nvm` and `system`, `nvm` loads on first use. |
+| `lazy-cmd` | array | `()` | `nvm-lazy` only: extra commands whose first use loads nvm. |
 
 **Example:**
 ```zsh
-zstyle ':zdot:nodejs' lazy-cmd node npm npx corepack
+zstyle ':zdot:nodejs' provider system   # e.g. macOS with Homebrew's node
 ```
 
 ---

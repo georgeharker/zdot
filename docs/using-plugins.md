@@ -144,9 +144,8 @@ Most shipped modules are tuned with `zstyle` -- set values in `.zshrc` before
 
 ```zsh
 zstyle ':zdot:history' size 100000
-zstyle ':zdot:nodejs'  lazy-cmd node npm npx corepack
+zstyle ':zdot:nodejs'  provider system
 zstyle ':zdot:brew'    verify-tools op fd ripgrep
-zstyle ':omz:plugins:nvm' lazy yes
 ```
 
 Two references cover the options:

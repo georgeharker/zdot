@@ -348,7 +348,9 @@ handler, so it injects `--group omz-plugins`, `--requires omz-bundle-initialized
 (the phase `omz` publishes), and `--requires plugins-cloned`. It is not OMZ-specific;
 see [Bundle-framework integration](#bundle-framework-integration-omz-prezto).
 
-**Full lifecycle with explicit functions:**
+**Full lifecycle with explicit functions** (an illustration, based on an
+earlier version of the nodejs module; the shipped one no longer needs init
+hooks):
 
 ```zsh
 _node_configure() {
@@ -627,7 +629,8 @@ Order: `user --group hooks` → `_brew_init`.
 
 `--auto-configure-group` does the wiring for you: the `--configure` fn (or
 the `--load` fn, if no configure is set) becomes the group consumer. User
-hooks attach with `--group <basename>-configure`.
+hooks attach with `--group <basename>-configure`. (Illustration, based on
+an earlier version of the nodejs module.)
 
 ```zsh
 _node_configure() {

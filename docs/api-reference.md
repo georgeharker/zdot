@@ -792,7 +792,10 @@ result) for bundle specs, the spec itself for plain `user/repo` specs.
 
 ### `zdot_plugin_compile`
 
-Compile a plugin's `.zsh` files to `.zwc` bytecode.
+Compile a plugin's `.zsh` files, and any `zdot_plugin_compile_extra` files
+registered for it, to `.zwc` bytecode. Works for bundle sub-specs
+(`omz:plugins/npm`) as well as plain `user/repo` specs. Only out-of-date files
+are recompiled.
 
 ```zsh
 zdot_plugin_compile <spec>
@@ -802,7 +805,10 @@ zdot_plugin_compile <spec>
 
 ### `zdot_plugin_compile_extra`
 
-Register extra files to compile alongside a plugin.
+Register extra files to compile alongside a plugin, for example files outside
+the plugin's directory that it sources. They're compiled with the plugin in
+zdot's compile phase. Register them before then: a module's configure or load
+phase is fine.
 
 ```zsh
 zdot_plugin_compile_extra <spec> <file> [<file> ...]
@@ -818,7 +824,12 @@ zdot_plugin_compile_extra "lukechilds/zsh-nvm" "${NVM_DIR}/nvm.sh"
 
 ### `zdot_compile_plugins`
 
-Compile all declared plugins.
+Compile every declared plugin (`zdot_plugin_compile` for each), including
+plugins that load later through deferred loading. This is zdot's compile
+phase for plugins: `zdot_init` calls it after execution, and so does
+`zdot cache compile`. Plugins aren't compiled while they load. A plugin's first
+load sources the plain files, and later startups use the `.zwc`. Disabled by
+`zstyle ':zdot:plugins' compile no`.
 
 ```zsh
 zdot_compile_plugins

@@ -39,7 +39,7 @@ Cache management for compiled function files.
 ```
 zdot cache status      # Show cache stats and hit/miss counts
 zdot cache invalidate  # Invalidate all cached files
-zdot cache compile     # Recompile all autoloaded function files
+zdot cache compile     # Recompile core, modules and plugins (incl. compile extras)
 ```
 
 **Implementation**: delegates to `zdot_cache_stats`, `zdot_cache_invalidate`, `zdot_cache_compile_all` (core/cache.zsh).

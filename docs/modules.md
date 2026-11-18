@@ -555,7 +555,8 @@ disabled in non-interactive shells and inside Neovim.
 
 | Key | Default | Description |
 |---|---|---|
-| `':zdot:nodejs' lazy-cmd` | `opencode copilot prettierd claude` | Commands that trigger lazy nvm load |
+| `':zdot:nodejs' provider` | `nvm` | Where `node` comes from: `nvm` (nvm's `current` link first on `PATH`, `nvm` loaded on first use), `nvm-lazy` (the classic OMZ lazy stubs and per-shell `nvm use`), or `system` (`PATH` left alone) |
+| `':zdot:nodejs' lazy-cmd` | `()` | `nvm-lazy` only: extra commands whose first use loads nvm |
 
 ---
 

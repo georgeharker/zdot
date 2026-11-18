@@ -327,7 +327,6 @@ Hook phase chain (driven by zdot_init step 5):
                                    (deferred; provides: autosuggest-ready)
     └─> zdharma-continuum/fast-syntax-highlighting
                                    (deferred; provides: fsh-ready)
-    └─> _nvm_noninteractive_init   (noninteractive only; provides: nvm-ready)
   fsh-ready
     └─> 5A6F65/fast-abbr           (deferred; provides: fast-abbr-ready)
   autosuggest-ready
@@ -337,8 +336,6 @@ Hook phase chain (driven by zdot_init step 5):
     └─> _autocomplete_autosuggest_start  (deferred; provides: autosuggest-started)
     └─> _plugins_load_fzf_tab      (interactive only; provides: fzf-tab-loaded)
     └─> _plugins_post_init         (deferred; provides: plugins-post-configured)
-  plugins-post-configured
-    └─> _nvm_interactive_init      (interactive, deferred; provides: nvm-ready)
 ```
 
 > `compinit` is launched separately, from the **completions** module:
