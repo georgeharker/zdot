@@ -65,11 +65,11 @@ bun links globals into the same dir that `PATH` searches.
 
 ### Setting the bin dir in bunfig (recommended)
 
-The zstyle only reaches bun processes started from a zdot shell. bun reads
-`install.globalBinDir` from its global bunfig in every context, including GUI
-apps, launchd jobs, and pi spawning bun. The module asks bun
-(`bun pm bin -g`, about 4 ms) rather than reading the file itself, so `PATH`
-and bun always agree:
+The zstyle only reaches bun processes that inherit the exported
+`BUN_INSTALL_BIN`. bun reads `install.globalBinDir` from its global bunfig
+itself, so it also applies to tools that spawn bun with a scrubbed
+environment. The module asks bun (`bun pm bin -g`, about 4 ms) rather than
+reading the file itself, so `PATH` and bun always agree:
 
 ```toml
 # ~/.config/bun/bunfig.toml
@@ -80,10 +80,11 @@ globalBinDir = "~/.local/bin"
 bun only reads the global bunfig as `$XDG_CONFIG_HOME/.bunfig.toml` (when
 `XDG_CONFIG_HOME` is absolute, and then **only** that file) or
 `~/.bunfig.toml`, and no env var can point it elsewhere. To keep the real file
-in a `bun/` subdir, symlink both dot-names to it. The `~/.bunfig.toml` link
-covers processes launched outside a shell, which on macOS don't get
-`XDG_CONFIG_HOME`. If the resulting bin dir is already on `PATH` (as
-`~/.local/bin` is, via the `env` module), nothing is added.
+in a `bun/` subdir, symlink `$XDG_CONFIG_HOME/.bunfig.toml` to it. On macOS,
+processes launched outside a shell (GUI apps, launchd) don't get
+`XDG_CONFIG_HOME`, so they look for `~/.bunfig.toml` instead. Without that
+file they get bun's defaults. If the resulting bin dir is already on `PATH`
+(as `~/.local/bin` is, via the `env` module), nothing is added.
 
 A curl-installed `bun` in `$BUN_INSTALL/bin` goes on `PATH` in the
 **configure** hook, not load. The load hook's `--requires-optional-tool bun`
