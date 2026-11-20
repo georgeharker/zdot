@@ -118,6 +118,11 @@ if [[ "${1:-}" == --case ]]; then
 
     typeset -gi _ZDOT_IS_INTERACTIVE=${FAKE_INTERACTIVE:-0}
 
+    # is-platform comes from the xdg module, which isn't loaded here. Stub it
+    # to "no platform matches": _op_init's _setup_ssh_auth_sock then skips
+    # the 1Password SSH agent (it would otherwise symlink in the real ~).
+    is-platform() { return 1 }
+
     # Isolated config dir so the no_op sentinel test can't collide with a real one
     XDG_CONFIG_HOME="$(mktemp -d)"
     XDG_CACHE_HOME="$(mktemp -d)"
@@ -129,7 +134,7 @@ if [[ "${1:-}" == --case ]]; then
     fpath+=("${ZDOT_ROOT}/modules/secrets/functions")
     autoload -Uz op_identity op_refresh op_auth op_get_config_dir op_get_config_args \
         op_get_vault_config op_get_vault_grants refresh_shell_secrets op_multi_inject \
-        op_inject_template op_upsert_file op_download_file
+        op_inject_template op_check_template op_upsert_file op_download_file
 
     case "$2" in
         default-mode)
@@ -578,8 +583,10 @@ if [[ "${1:-}" == --case ]]; then
 
         init-inactive-sources-stale-cache)
             # Signed out at startup: the existing cache is still sourced, and
-            # ONE warning names the cause and that the cache is stale.
+            # ONE warning names the cause and that the cache is stale
+            # (interactive only — see init-inactive-noninteractive-quiet).
             export FAKE_OP_MODE=fail
+            _ZDOT_IS_INTERACTIVE=1
             zstyle ':zdot:secrets:op' mode login
             zstyle ':zdot:secrets:op' profile ''
             zstyle ':zdot:secrets:op' login-accounts personal
@@ -601,6 +608,27 @@ if [[ "${1:-}" == --case ]]; then
                 grep -qF "$frag" "$errf" \
                     || { print -r -- "RESULT: FAIL (missing '$frag': $(tr '\n' '|' < "$errf"))"; exit 1 }
             done
+            print "RESULT: PASS" ;;
+
+        init-inactive-noninteractive-quiet)
+            # Same signed-out startup in a NONinteractive shell: the stale
+            # cache is still sourced, but nothing is printed.
+            export FAKE_OP_MODE=fail
+            zstyle ':zdot:secrets:op' mode login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            print 'export CACHED_SECRET=yes' > "${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            sleep 1
+            print 'export CACHED_SECRET="op-personal://V/I/f"' > "${XDG_CONFIG_HOME}/secrets/secrets.zsh"
+            local errq="$(mktemp)"
+            _ZDOT_IS_INTERACTIVE=0
+            _op_init 2> "$errq"
+            [[ "${CACHED_SECRET:-}" == yes ]] \
+                || { print "RESULT: FAIL (stale cache not sourced)"; exit 1 }
+            [[ ! -s "$errq" ]] \
+                || { print -r -- "RESULT: FAIL (printed: $(tr '\n' '|' < "$errq"))"; exit 1 }
             print "RESULT: PASS" ;;
 
         init-no-op-quiet-but-sources)
@@ -896,6 +924,155 @@ if [[ "${1:-}" == --case ]]; then
             [[ ! -f "$o3" ]] || { print "RESULT: FAIL (output written on failure)"; exit 1 }
             print "RESULT: PASS" ;;
 
+        lazy-unresolved-ref-not-written)
+            # A look-alike scheme survives op inject unresolved; the OUTPUT
+            # check catches it, reported against the template by line. The
+            # bad output goes to <cache>.failed (the marker); the last good
+            # cache stays in place and is sourced; no .tmp left behind.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S=old' > "$cache"
+            sleep 1
+            print 'export S="opws://V/I/f"' > "$tpl"
+            local err
+            err=$(_op_init 2>&1; print "S=${S:-}")
+            grep -q '^inject' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (inject never ran: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            [[ "$err" == *"${tpl}:1: unknown scheme 'opws://'"* ]] \
+                || { print -r -- "RESULT: FAIL (out: ${err//$'\n'/|})"; exit 1 }
+            [[ "${err##*$'\n'}" == "S=old" && "$(<"$cache")" == 'export S=old' ]] \
+                || { print -r -- "RESULT: FAIL (last good cache not kept/sourced: ${err##*$'\n'})"; exit 1 }
+            [[ "$(<"${cache}.failed")" == 'export S="opws://V/I/f"' ]] \
+                || { print "RESULT: FAIL (bad output not moved to .failed)"; exit 1 }
+            [[ ! -e "${cache}.tmp" ]] || { print "RESULT: FAIL (.tmp left behind)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        inject-invalid-json-not-written)
+            # A .json template's OUTPUT must be valid JSON (typed by the
+            # template's name): invalid → bad output to <out>.failed, last
+            # good <out> kept. Fixed → replaces <out>, marker removed.
+            (( $+commands[jq] )) || { print "RESULT: PASS (skipped: no jq)"; exit 0 }
+            export FAKE_OP_MODE=success
+            local tj="$XDG_CONFIG_HOME/m.json" oj="$XDG_CACHE_HOME/m.out"
+            print '{ "good": true }' > "$oj"
+            print '{ "a": "op://V/I/f", }' > "$tj"
+            local ej
+            ej=$(op_inject_template "$tj" "$oj" 2>&1) && { print "RESULT: FAIL (accepted)"; exit 1 }
+            [[ "$ej" == *"${tj}: invalid JSON"* ]] || { print -r -- "RESULT: FAIL (out: $ej)"; exit 1 }
+            [[ "$(<"$oj")" == '{ "good": true }' && "$(<"${oj}.failed")" == '{ "a": "op://V/I/f", }' ]] \
+                || { print "RESULT: FAIL (last good replaced, or bad output not in .failed)"; exit 1 }
+            print '{ "a": "op://V/I/f" }' > "$tj"
+            op_inject_template "$tj" "$oj" 2>/dev/null || { print "RESULT: FAIL (valid rejected)"; exit 1 }
+            [[ "$(<"$oj")" == '{ "a": "op://V/I/f" }' && ! -f "${oj}.failed" && ! -e "${oj}.tmp" ]] \
+                || { print "RESULT: FAIL (not written, marker kept, or .tmp left)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        inject-failure-keeps-output)
+            # The inject itself fails: last good <out> untouched, marker
+            # touched (empty), no .tmp left.
+            export FAKE_OP_MODE=success FAKE_INJECT_FAIL_ACCOUNTS=personal
+            zstyle ':zdot:secrets:op' login-accounts personal
+            local tf="$XDG_CONFIG_HOME/f.zsh" of="$XDG_CACHE_HOME/f.zsh"
+            print 'export S=good' > "$of"
+            print 'export S="op-personal://V/I/f"' > "$tf"
+            op_inject_template "$tf" "$of" 2>/dev/null && { print "RESULT: FAIL (accepted)"; exit 1 }
+            [[ "$(<"$of")" == 'export S=good' && -f "${of}.failed" && ! -s "${of}.failed" && ! -e "${of}.tmp" ]] \
+                || { print "RESULT: FAIL (output touched, marker wrong, or .tmp left)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        check-template-bad-json)
+            # JSON templates are parsed before inject; op inject itself would
+            # happily write broken JSON.
+            (( $+commands[jq] )) || { print "RESULT: PASS (skipped: no jq)"; exit 0 }
+            local tj="$XDG_CONFIG_HOME/t.json"
+            print '{ "a": "op://V/I/f", }' > "$tj"
+            local ej
+            ej=$(op_check_template "$tj" 2>&1) && { print "RESULT: FAIL (accepted)"; exit 1 }
+            [[ "$ej" == *"invalid JSON"* ]] || { print -r -- "RESULT: FAIL (out: $ej)"; exit 1 }
+            print '{ "a": "op://V/I/f" }' > "$tj"
+            op_check_template "$tj" 2>/dev/null || { print "RESULT: FAIL (valid JSON rejected)"; exit 1 }
+            # Other files: no format check
+            local tz="$XDG_CONFIG_HOME/t.zsh"
+            print 'export A="op://V/I/f" {' > "$tz"
+            op_check_template "$tz" 2>/dev/null || { print "RESULT: FAIL (.zsh format-checked)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        lazy-inject-fail-stamps-then-skips)
+            # An inject failure (template content) stamps <cache>.failed; the
+            # next startup with the template unchanged skips without calling
+            # op (no Touch ID per tab); editing the template retries.
+            export FAKE_OP_MODE=success FAKE_INJECT_FAIL_ACCOUNTS=personal
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            print 'export S=old' > "$cache"
+            sleep 1
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            _op_init 2>/dev/null
+            [[ -f "${cache}.failed" ]] || { print "RESULT: FAIL (no stamp)"; exit 1 }
+            : > "$FAKE_CALL_LOG"
+            local e2
+            e2=$(_op_init 2>&1)
+            [[ ! -s "$FAKE_CALL_LOG" ]] \
+                || { print "RESULT: FAIL (retried op: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            [[ "$e2" == *"last refresh from secrets.zsh failed"* ]] \
+                || { print -r -- "RESULT: FAIL (no skip warning: ${e2//$'\n'/|})"; exit 1 }
+            sleep 1; touch "$tpl"; unset FAKE_INJECT_FAIL_ACCOUNTS
+            _op_init 2>/dev/null
+            [[ ! -f "${cache}.failed" && "${S:-}" == 'op://V/I/f' ]] \
+                || { print "RESULT: FAIL (edit did not retry: S=${S:-})"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        needs-refresh-gate)
+            # _op_template_needs_refresh: staleness AND the failure marker.
+            local tg="$XDG_CONFIG_HOME/g.zsh" og="$XDG_CACHE_HOME/g.zsh"
+            print x > "$tg"
+            _op_template_needs_refresh "$tg" "$og" 2>/dev/null \
+                || { print "RESULT: FAIL (missing output should refresh)"; exit 1 }
+            sleep 1; print y > "$og"
+            _op_template_needs_refresh "$tg" "$og" 2>/dev/null \
+                && { print "RESULT: FAIL (fresh output should not refresh)"; exit 1 }
+            sleep 1; touch "$tg"; sleep 1; touch "${og}.failed"
+            _op_template_needs_refresh "$tg" "$og" 2>/dev/null \
+                && { print "RESULT: FAIL (failed + unchanged should skip)"; exit 1 }
+            sleep 1; touch "$tg"
+            _op_template_needs_refresh "$tg" "$og" 2>/dev/null \
+                || { print "RESULT: FAIL (edited after failure should refresh)"; exit 1 }
+            # Output MISSING but a newer marker: still failed-and-unchanged
+            rm -f "$og" "${og}.failed"; sleep 1; touch "${og}.failed"
+            _op_template_needs_refresh "$tg" "$og" 2>/dev/null \
+                && { print "RESULT: FAIL (missing output + marker should skip)"; exit 1 }
+            print "RESULT: PASS" ;;
+
+        manual-refresh-ignores-failed-marker)
+            # The marker gates AUTOMATIC refreshes only: run by hand,
+            # refresh_shell_secrets tries, and success clears the marker.
+            export FAKE_OP_MODE=success
+            zstyle ':zdot:secrets:op' mode lazy-login
+            zstyle ':zdot:secrets:op' profile ''
+            zstyle ':zdot:secrets:op' login-accounts personal
+            export HOME="$(mktemp -d)"
+            mkdir -p "${XDG_CONFIG_HOME}/secrets" "${XDG_CACHE_HOME}/secrets"
+            local tpl="${XDG_CONFIG_HOME}/secrets/secrets.zsh" cache="${XDG_CACHE_HOME}/secrets/${USER}.secrets.zsh"
+            print 'export S="op-personal://V/I/f"' > "$tpl"
+            sleep 1; touch "${cache}.failed"
+            _ZDOT_OP_ACTIVE=1 _ZDOT_OP_SESSION=pending
+            refresh_shell_secrets 2>/dev/null \
+                || { print "RESULT: FAIL (manual refresh refused)"; exit 1 }
+            [[ ! -f "${cache}.failed" && "${S:-}" == 'op://V/I/f' ]] \
+                || { print "RESULT: FAIL (marker kept or S=${S:-})"; exit 1 }
+            print "RESULT: PASS" ;;
+
         op-multi-helpers-removed)
             # The per-call helpers are gone after a successful AND a failed call.
             export FAKE_OP_MODE=success
@@ -1022,7 +1199,8 @@ typeset -a cases=(default-mode login-mode unknown-mode-falls-back empty-mode-fal
     op-multi-pipe-mode op-multi-explicit-order op-multi-fallback-names-account \
     account-url-map op-multi-signedout-error op-multi-rawref-no-default op-auth-reset \
     op-calls-carry-sudo-config headless-signin-evals-session \
-    init-inactive-sources-stale-cache init-no-op-quiet-but-sources \
+    init-inactive-sources-stale-cache init-inactive-noninteractive-quiet \
+    init-no-op-quiet-but-sources \
     inject-template-untagged-uses-default-account \
     lazy-fresh-cache-no-op-calls lazy-stale-template-checks-then-refreshes \
     lazy-failed-check-no-reprompt lazy-op-refresh-recovers \
@@ -1030,6 +1208,11 @@ typeset -a cases=(default-mode login-mode unknown-mode-falls-back empty-mode-fal
     lazy-failed-interactive-reasks startup-never-reasks-interactive \
     sa-refresh-active-plain-inject sa-refresh-inactive-warns-only \
     op-multi-two-pass-one-pipeline op-multi-loop-names-account \
+    lazy-unresolved-ref-not-written inject-invalid-json-not-written \
+    inject-failure-keeps-output \
+    check-template-bad-json \
+    lazy-inject-fail-stamps-then-skips \
+    needs-refresh-gate manual-refresh-ignores-failed-marker \
     op-multi-helpers-removed op-auth-sa-uses-token op-auth-sa-token-from-cache \
     op-auth-sa-no-token-errors op-auth-sa-reset-errors lazy-login-mode \
     op-refresh-alias)

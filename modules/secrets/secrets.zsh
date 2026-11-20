@@ -10,6 +10,9 @@
 #     suffix) into $reply as a flat name/value pair list — the SINGLE place
 #     these derivations live; consumed by _op_init, the autoloaded refresh
 #     functions, and the mcp module
+#   - _op_template_needs_refresh: the AUTOMATIC-refresh gate (startup, mcp's
+#     _if_needed): template newer than its output, and not an unchanged
+#     template whose last inject failed (<out>.failed marker)
 #   - _op_get_mode: resolves the auth mode (service-account / login /
 #     lazy-login) — see Auth Modes below
 #   - _op_is_login: true in either login mode
@@ -65,6 +68,12 @@
 #     plain → op inject) — THE place the plain inject line lives — consumed
 #     by refreshers here and in the mcp module, so auth-mode nuance lives
 #     in exactly one spot
+#   - op_check_template: check a template, or an inject's output, WITHOUT
+#     calling op — ref syntax (op:// / op-<acct>:// with acct in
+#     login-accounts), path shape, JSON validity for .json;
+#     op_inject_template runs it on each regen's output (<out>.tmp) before
+#     it replaces <out> (unresolved refs, the JSON actually written); a
+#     failing output goes to <out>.failed, the last good <out> stays
 #   - refresh_shell_secrets: Refreshes shell environment secrets
 #
 # Global State:
@@ -170,6 +179,27 @@ _op_get_secrets_env() {
         cache   "${XDG_CACHE_HOME:-$HOME/.cache}/secrets"
         suffix  "${op_secrets_profile_suffix}"
     )
+}
+
+# Should an AUTOMATIC refresh of <template> → <out> run? rc 0 when:
+#   - the template is newer than <out> (or <out> is missing), and
+#   - the last inject of it did not fail, or the template has changed since:
+#     no <out>.failed marker (op_inject_template writes it on failure and
+#     removes it on success), or the marker is not newer than the template.
+# A failed-and-unchanged template is skipped with one warning, so it isn't
+# retried — at the cost of a sign-in — in every new tab. Only the automatic
+# callers consult this (_op_init, mcp's refresh_mcpservers_secret_if_needed);
+# running a refresh_* command by hand always tries.
+# Usage: _op_template_needs_refresh <template> <out>
+_op_template_needs_refresh() {
+    local template=$1 out=$2
+    [[ -f "$template" ]] || return 1
+    zdot_is_newer_or_missing "$template" "$out" || return 1
+    if [[ -f "${out}.failed" && "${out}.failed" -nt "$template" ]]; then
+        zdot_warn "secrets: last refresh from ${template:t} failed and it hasn't changed since — keeping the old ${out:t}; fix the template, or retry by hand"
+        return 1
+    fi
+    return 0
 }
 
 # Resolve the 1Password auth mode into $REPLY:
@@ -576,13 +606,15 @@ _op_init() {
         && template_changed=1
     if (( _ZDOT_OP_ACTIVE )); then
         if (( template_changed )); then
-            refresh_shell_secrets
+            # Changed — but not if it's the same template that failed last time
+            _op_template_needs_refresh "$template" "$cache_file" \
+                && refresh_shell_secrets
         else
             zdot_verbose "secrets: cache is up to date, skipping refresh"
         fi
     elif [[ ! -f "$(op_get_config_dir)/no_op" ]] \
         && { (( ${#signed_out} )) || [[ -f "$template" || -f "$cache_file" ]] } \
-        && [[ -o interactive ]]; then
+        && (( _ZDOT_IS_INTERACTIVE )); then
         local cause loaded
         if (( ${#signed_out} )); then
             cause="not signed in to 1Password: ${(j:, :)signed_out}"
