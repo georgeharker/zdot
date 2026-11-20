@@ -446,8 +446,13 @@ _op_sa_token_ok() {
 }
 
 # Login-mode viability check, run per configured account. No interactive
-# prompts: an account whose whoami fails gets one headless signin attempt
-# (_op_signin --headless). Honors the no_op sentinel; touches none of the
+# prompts. When we may NOT prompt (startup, scripts), an account whose
+# whoami fails gets one headless signin attempt (_op_signin --headless) —
+# the silent self-heal. When we MAY prompt, every caller signs the
+# signed-out accounts in interactively next (_op_reauth / op_auth), so the
+# headless attempt is skipped: for a password-prompting account it only
+# prints a stray prompt (op writes it to the terminal, past the redirects)
+# ahead of the real one. Honors the no_op sentinel; touches none of the
 # service-account machinery.
 # Contract (matches the all-or-nothing inject):
 #   rc 0      — EVERY configured account is signed in; _ZDOT_OP_ACTIVE=1
@@ -473,7 +478,9 @@ _op_login_check() {
     else
         for a in "${accounts[@]}"; do
             _op_logged_in "$a" && continue
-            _op_signin --headless "$a" && continue
+            if ! _op_may_prompt; then
+                _op_signin --headless "$a" && continue
+            fi
             signed_out+=("$a")
         done
     fi

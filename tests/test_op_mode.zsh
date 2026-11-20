@@ -294,6 +294,24 @@ if [[ "${1:-}" == --case ]]; then
             done
             print "RESULT: PASS" ;;
 
+        login-check-no-heal-when-prompting)
+            # Interactive, outside startup (we MAY prompt): no headless
+            # signin — the caller signs in interactively next, and a headless
+            # attempt only prints a stray password prompt. Startup (NOPROMPT)
+            # in the same shell still heals.
+            export FAKE_OP_MODE=recover
+            _ZDOT_IS_INTERACTIVE=1
+            zstyle ':zdot:secrets:op' login-accounts personal allenai
+            FAKE_CALL_LOG="$(mktemp)"; export FAKE_CALL_LOG
+            _op_login_check && { print "RESULT: FAIL (passed while signed out)"; exit 1 }
+            [[ "${reply[*]}" == 'personal allenai' ]] \
+                || { print "RESULT: FAIL (reply '${reply[*]}')"; exit 1 }
+            ! grep -q '^signin' "$FAKE_CALL_LOG" \
+                || { print "RESULT: FAIL (headless signin tried: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            ( _ZDOT_OP_NOPROMPT=1; _op_login_check ) \
+                || { print "RESULT: FAIL (startup did not heal: $(tr '\n' '|' < "$FAKE_CALL_LOG"))"; exit 1 }
+            print "RESULT: PASS" ;;
+
         op-auth-resolves-account-url)
             # op_auth must hand op the account-url identifier, not the
             # shortname (regression: 'found no accounts for filter personal').
@@ -1195,7 +1213,8 @@ typeset -a cases=(default-mode login-mode unknown-mode-falls-back empty-mode-fal
     init-login-passive-fail init-login-passive-ok \
     init-sa-default-nothing init-sa-cached-token \
     login-accounts-partial-in login-accounts-none-in init-login-multi op-auth-walks-all \
-    login-check-heals-every-account op-auth-resolves-account-url \
+    login-check-heals-every-account login-check-no-heal-when-prompting \
+    op-auth-resolves-account-url \
     op-multi-pipe-mode op-multi-explicit-order op-multi-fallback-names-account \
     account-url-map op-multi-signedout-error op-multi-rawref-no-default op-auth-reset \
     op-calls-carry-sudo-config headless-signin-evals-session \
